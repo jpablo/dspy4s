@@ -730,9 +730,10 @@ the only ways to read another session.
 
 Seatbelt on macOS and bubblewrap on Linux come first. `kyo-pod` is a possible later backend for rollouts.
 
-**Control paths and git (choice 19, 2026-11-13).** The code does not have this rule yet. Until it does, all of `.git`
-in the scope stays read-only, so a session cannot commit, make a branch or switch a branch. In the live session
-61ee1bb2 (2026-11-12), the model could not run `git switch master` for the person.
+**Control paths and git (choice 19, 2026-11-13).** Before this choice, all of `.git` in the scope stayed read-only,
+so a session could not commit, make a branch or switch a branch. In the live session 61ee1bb2 (2026-11-12), the model
+could not run `git switch master` for the person. The code has this rule since 2026-11-14 (`ControlPath`,
+`Profiles.controls`, `Layout.hooksFolder`, and the rules of `Seatbelt` and `Bubblewrap`).
 
 The sandbox protects two things. No code of a session runs outside the sandbox (containment). No command reads a
 secret or reaches a host that is not on the list (confidentiality). The sandbox does not protect the honesty of the
@@ -746,15 +747,17 @@ class of paths, as the secrets are, so they do not depend on the mode. Thus they
 is not a control path. Build files and tests are not control paths, because the person runs them with a step, and a
 session runs them only in the sandbox.
 
-`Layout` holds the control paths as data, as it holds `secretNames`, so `Profiles.forMode` names no tool. The fixed
+The control paths are data (`Profiles.controls`, with the files of the tools in `Profiles.ToolFiles`), as the secret
+names are, so `Profiles.forMode` names no tool. The layout holds the hooks folder of the configuration. The fixed
 list, with each path relative to the top of the scope:
 
 | Control path | The program that runs it |
 |---|---|
 | `.git/hooks`, and the folder that `core.hooksPath` names when that folder is in the scope | git, for example at a commit of the person |
 | `.git/config` and `.git/config.worktree` | git. `core.fsmonitor`, `core.sshCommand`, `core.hooksPath`, `include.path`, a filter driver and an alias can start a program. |
-| `.git/modules/**/hooks` and `.git/modules/**/config` | git, in each submodule |
-| The `.git` file at the top of a linked worktree, and `commondir`, `gitdir` and `config.worktree` in each folder of `.git/worktrees` | git. These files tell git where the folder of a repository and its settings are. |
+| `.git/commondir` | git. With this file, git reads the configuration and the hooks of another folder. |
+| `.git/modules/**/hooks`, `.git/modules/**/config`, `.git/modules/**/config.worktree` and `.git/modules/**/commondir` | git, in each submodule |
+| `.git` itself, which is a file at the top of a linked worktree, and `commondir`, `gitdir` and `config.worktree` in each folder of `.git/worktrees` | git. These files tell git where the folder of a repository and its settings are. A rule on `.git` itself stops its removal and its move, and not a write in it. |
 | A file or a folder with the name `.git` below the top of the scope | git. A `git status` of the person runs git in each submodule, and a shell prompt runs git in a nested repository. Each such git reads the configuration of that repository. |
 | `.vscode/settings.json` and `.vscode/tasks.json` | VS Code. A setting can name a program that an extension starts, and a task can run when the folder opens. |
 | `.idea` | IntelliJ. A startup task runs when the project opens, and the next sbt reload uses the launcher of the settings. |
@@ -764,15 +767,19 @@ These files are not control paths, because the person takes a step first: `.vsco
 it), `.mcp.json` (Claude Code asks first) and `.claude/commands` (text for a model, not code). `refs/replace` is not a
 control path either: it changes what git shows, but it runs no code.
 
-- The host reads `core.hooksPath` once for each activation, with the git command of `Scopes` (no hooks and no
-  fsmonitor). A change of the setting applies after a reopen. A folder outside the scope needs no entry, because it
-  is outside the writable roots.
+- The host reads `core.hooksPath` once for each activation (`Layout.hooksFolder`), with git with no fsmonitor and no
+  optional lock, only `PATH`, `HOME` and `LANG`, and a time limit. A relative path is relative to the top of the work
+  tree, as git reads it. A change of the setting applies after a reopen. A folder outside the scope needs no entry,
+  because it is outside the writable roots. A hooks folder that is the scope itself makes the whole scope read-only,
+  which is the safe answer for a rare setting.
 - The class applies only in the scope. In the private temporary directory, a command can make and use a repository,
   for example in a test, because no program of the person runs there.
-- Each entry has a short note for the model. `Profiles.words` lists the closed entries with their notes, so its code
-  names no tool. The note of `.git/config` says that git cannot change its configuration. It also says that three
-  commands print an error about `.git/config`: a new branch that tracks a remote branch, a rename of a branch and a
-  removal of a branch. The change of the branch still happens.
+- Each entry has a label for the model, and a note when the model needs more than the path. `Profiles.words` lists
+  the labels of the closed entries, and then their notes, so its code names no tool. The note of `.git/config` says
+  that git cannot change its configuration. It also says that three commands print an error about `.git/config`: a
+  new branch that tracks a remote branch, a rename of a branch and a removal of a branch. The change of the branch
+  still happens. The note of a nested `.git` says that `git init`, `git clone` and `git submodule add` fail in the
+  scope. On a backend that cannot close a name, the note of `.git` says that all of `.git` stays read-only.
 - A probe with Seatbelt on 2026-11-13, with a deny rule on `.git/config` only, gave these results. `git switch foo`,
   when only `origin/foo` exists, switches with the exit code 0. It prints `could not write config file` two times,
   and then a false line that says that the branch tracks `origin/foo`. `git branch -m` renames the branch, but it
@@ -780,13 +787,20 @@ control path either: it changes what git shows, but it runs no code.
   `git switch -c`, `git commit` and `git switch main` work with no error.
 - The file calls `write` and `edit` use the same `canWrite` as a command. So they refuse the control paths, and they
   can write the other parts of `.git`.
-- Seatbelt closes each control path with a rule on the path. It closes a nested `.git` and the `**` patterns with a
-  regex, as it closes `.env` (`Seatbelt.nameRule`).
+- Seatbelt closes each control path with a deny of writes: a `subpath`, a `literal` for `.git` itself, or for a rule
+  on names a `require-all` of a `subpath`, an optional `require-not` of a `subpath`, and a regex of the names. So the
+  regex holds no path of the host. A rule on names reads each part of the path, as `ControlPath.covers` does. A probe
+  on macOS (2026-11-13) showed that `.git/index` and the refs stay writable, and that a write to `.git/config`, a
+  rename onto it, the removal and the move of `.git`, a write to the configuration or the hooks of a submodule, and a
+  nested `.git` fail.
+- The walk of the optional `Profiles.forCommand` does not enter a `.git` folder or a control path.
 - A backend that cannot close a name (`Backend.closesNames` is false) keeps all of `.git` in the scope read-only, so
   its observations stay true. So on bubblewrap a command cannot commit, as before choice 19. bubblewrap closes each
   other control path that exists with a read-only mount. A mount at a path that does not exist makes an empty file in
   the folder of the person. So on Linux, a control path that does not exist yet stays writable. This is a gap of
-  Linux, as for `.env`.
+  Linux, as for `.env`. The profile of such a backend holds only the control paths that exist when the profile is
+  made, so it does not claim a rule that the backend cannot apply. The escape probes on Linux (2026-11-14) first
+  found that claim: a command could make `.vscode/settings.json`, and the profile said that it could not.
 - A command that needs the network, for example `git fetch`, `git pull` or `git push`, fails in a mode with no
   network. This is the expected result of the mode, and git needs no rule for it.
 - A commit fails when the settings of the person turn on `commit.gpgsign`, because `~/.gnupg` is a secret path.
@@ -807,12 +821,29 @@ clone: `git clone --shared --single-branch --branch <base>`, and then a new bran
   scope.
 - The clone reads the objects of the person through `objects/info/alternates`. Those objects are outside the scope,
   so they stay read-only. The clone copies no object and makes no hard link.
-- After each turn that moved the tip of the branch, the host fetches the branch from the clone into the repository of
-  the person. Then it runs `git update-ref refs/heads/<branch> <new> <old>`, where `<old>` is the last tip that the
-  host wrote. When the person moved the branch, the swap fails, the ref stays, and the host tells the person. A
-  rebase of the session also works, because the swap needs no fast-forward.
-- So the person can run `git log <branch>` and `git merge <branch>` in the main checkout, and `Scopes.stateOf` reads
-  `refs/heads/<branch>` as before. The release item `RemoveWorktree` removes the folder of the clone.
+- `make` refuses a branch that exists in the repository, as `git worktree add -b` did. It makes the branch in the
+  clone and in the repository, at the base. A step that fails after the clone removes the clone.
+- After each turn that moved the tip of the branch, the host puts the tip into the repository of the person
+  (`Scopes.publish`). This is one compare-and-swap: `git push --force-with-lease=refs/heads/<branch>:<old>` from the
+  clone, where `<old>` is the last tip that the host put there. The clone keeps that tip and the branch of the scope
+  in its configuration (`dspy4s.published` and `dspy4s.branch`). That configuration is a control path, so a session
+  cannot change them. A rebase of the session also works, because the swap needs no fast-forward. A push takes the
+  place of the `fetch` and `update-ref` of the first design, because it is one step, and because git refuses to move
+  a branch that is checked out in the repository of the person.
+- git clears the `-c` values for the receiving side of a push. A probe on 2026-11-14 showed that a plain push runs
+  `pre-receive`, `update`, `reference-transaction`, `post-receive` and `post-update` of the repository. So the push
+  names its own receive-pack command, `git -c core.hooksPath=/dev/null -c core.fsmonitor=false receive-pack`, and
+  runs no hook of the clone (`--no-verify`).
+- When git refuses the swap, the branch of the repository stays, and the model gets one message with the reason, the
+  branch and the folder of the clone, so it can tell the person. A later refusal gives no other message until a
+  publish moves the branch again. So the message cannot start a turn after each turn.
+- So the person can run `git log <branch>` and `git merge <branch>` in the main checkout. `Scopes.stateOf` publishes
+  first, and then it reads `refs/heads/<branch>` as before.
+- The release item `RemoveWorktree` publishes first, and then it removes the folder of the clone. The clone stays when
+  a branch or the head of the clone is in no ref of the repository, also with a confirmation, because the removal
+  would lose those commits. A failed publish alone does not keep the clone, so a clone whose branch the person merged
+  and then removed goes. With no confirmation, a clone with a change also stays, as a linked worktree stayed with
+  `git worktree remove`. A linked worktree of a host before choice 19 still goes with `git worktree remove`.
 - A new clone does not copy the configuration of the repository, so a smudge filter of that configuration does not
   run. The guard of `LocalHost.make` stays.
 - A risk stays: `git gc` in the repository of the person can remove an object that the clone needs. This needs a
@@ -1671,8 +1702,8 @@ And these are proposals for the review:
   that is a part of a mask, because a second mask would change the first one.
 - The recorder is `recorded(h)` of 5.3: each guest API call commits `EffectStarted` and `EffectDone`, also `read`,
   `load` and `now`. `input` reads the journal, so it is not an effect. `guarded` stays in phase 7.
-- `Files.local` applies the profile of 5.4 itself: a write only under a writable root and not in `.git`, and no read
-  or write of a hidden path or of a secret file that exists.
+- `Files.local` applies the profile of 5.4 itself: a write only under a writable root and not in a control path, and
+  no read or write of a hidden path or of a secret file that exists.
 - A strategy gives a `Projection`: the status, the last observation and the history. The harness adds the task and
   the API reference, which do not come from the journal. The derived data is a type member of `ContextStrategy`, so
   `Harness` has no third type parameter, and `guestApi` waits for the memory tree.
@@ -2078,10 +2109,10 @@ These points are proposals for the review:
   Before this rule, a chat turn had the task of a program call, which told the model to give the result with
   `submit`. The live sessions of 2026-11-10 gave this rule.
 - The task of a chat turn with a shell also gives the limits of the shell, from the profile of the activation
-  (`WorkRuntime.shellWords`, `Profiles.words`): the places that a command and the file calls can write, the read-only
-  `.git`, the closed paths and the network. It tells the model to stop and tell the person when a task needs a write
-  that the shell refuses. In the live session 00429ec8 (2026-11-11), each `git worktree add` failed with "Operation not
-  permitted", and the model used three steps to find the cause.
+  (`WorkRuntime.shellWords`, `Profiles.words`): the places that a command and the file calls can write, the control
+  paths with their notes (choice 19), the closed paths and the network. It tells the model to stop and tell the person
+  when a task needs a write that the shell refuses. In the live session 00429ec8 (2026-11-11), each `git worktree add`
+  failed with "Operation not permitted", and the model used three steps to find the cause.
 - The task of a work session also holds the files of the project (`ProjectFiles`), after the shell rules and before a
   goal: `AGENTS.md`, then the first of `README.md`, `README`, `README.rst` and `README.txt`, at the top of the folder.
   The activation reads them once through the file calls of the session, so the rules of `read` apply, and the task
@@ -2505,7 +2536,7 @@ These choices are new in this document, and all of them are confirmed:
 | 16 | Confirmed on 2026-11-03. `Data` derives from `Mirror.Of`, and a guest does not write `derives Data` (5.1). A value in an entry is `Json` (4.1). The guest API has `now()`. After one capture error, the host compiles the type definitions of a cell first (6). | Open question 4 below |
 | 17 | Confirmed on 2026-11-03. A commit does a full flush for the intent of a call that can change something outside the session, for each `Input` and for each `Activated` (4.1, 10.2). A power loss can remove the other commits, and a process crash cannot. | Open question 5 below |
 | 18 | Confirmed on 2026-11-04. A cell runs one call at a time. `llmQueryBatched` and `rlmBatched` are one call each, and the host runs their work at the same time. `parallel` is not in the first version (12). | |
-| 19 | Confirmed on 2026-11-13. A session can run the local git commands. In the scope, only the control paths stay read-only: a class of paths in `Layout` that does not depend on the mode, with entries for git, editors and agents. A nested `.git` is a control path. A backend that cannot close a name keeps all of `.git` read-only. A `Worktree` scope is a local clone, and after each turn the host fetches its branch with a compare-and-swap. The sandbox protects containment and confidentiality, not the honesty of git history (5.4). The code does not have this choice yet. | The live session 61ee1bb2 (2026-11-12) |
+| 19 | Confirmed on 2026-11-13. A session can run the local git commands. In the scope, only the control paths stay read-only: a class of paths in `Layout` that does not depend on the mode, with entries for git, editors and agents. A nested `.git` is a control path. A backend that cannot close a name keeps all of `.git` read-only. A `Worktree` scope is a local clone, and after each turn the host puts its branch into the repository with a compare-and-swap (`git push --force-with-lease`). The sandbox protects containment and confidentiality, not the honesty of git history (5.4). The code has this choice since 2026-11-14. | The live session 61ee1bb2 (2026-11-12) |
 
 Open questions:
 
