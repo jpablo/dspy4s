@@ -58,6 +58,7 @@ final case class Secrets(values: Map[String, String]) derives CanEqual:
         case Entry.TurnEnded(outcome)                 => Entry.TurnEnded(turn(outcome))
         case Entry.Ended(outcome, reason)             => Entry.Ended(session(outcome), maskText(reason))
         case Entry.TurnStarted | Entry.StepStarted(_) => entry
+        case Entry.JobEnded(_, _)                     => entry
         case Entry.ModelChanged(model)                => Entry.ModelChanged(model.copy(options = fields(model.options)))
 
   /** A step of a release with each text masked: the paths, the names, the commit and the error (8.7). */

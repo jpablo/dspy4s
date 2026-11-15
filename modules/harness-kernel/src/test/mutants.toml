@@ -241,3 +241,47 @@ name = "Mutant: the model of the session gives a ModelChanged again"
 file = "Decide.scala"
 old = "case Command.ChangeModel(model) if model == s.config.model => Right(Vector.empty)"
 new = "case Command.ChangeModel(model) if model.model.isEmpty     => Right(Vector.empty)"
+
+# ── The end of a job (10.3) ──
+
+[[mutant]]
+name = "Mutant: a JobEnded keeps no end in the record of its job"
+[[mutant.edit]]
+file = "SessionState.scala"
+old = "base.copy(jobs = s.jobs.updatedWith(job)(_.map(_.copy(end = Some(end)))))"
+new = "base.copy(jobs = s.jobs)"
+
+[[mutant]]
+name = "Mutant: a stop mark drops the end of a job"
+[[mutant.edit]]
+file = "SessionState.scala"
+old = "id -> (if covered then job.copy(stopRequested = true) else job)"
+new = "id -> (if covered then job.copy(stopRequested = true, end = None) else job)"
+
+[[mutant]]
+name = "Mutant: a second end of a job commits"
+[[mutant.edit]]
+file = "Decide.scala"
+old = "Right(if s.jobs.get(job).exists(_.end.isEmpty) then Vector(Entry.JobEnded(job, end)) else Vector.empty)"
+new = "Right(if s.jobs.contains(job) then Vector(Entry.JobEnded(job, end)) else Vector.empty)"
+
+[[mutant]]
+name = "Mutant: the end of a job that the session does not have commits"
+[[mutant.edit]]
+file = "Decide.scala"
+old = "Right(if s.jobs.get(job).exists(_.end.isEmpty) then Vector(Entry.JobEnded(job, end)) else Vector.empty)"
+new = "Right(if s.jobs.get(job).forall(_.end.isEmpty) then Vector(Entry.JobEnded(job, end)) else Vector.empty)"
+
+[[mutant]]
+name = "Mutant: a session that has ended takes the end of a job"
+[[mutant.edit]]
+file = "Decide.scala"
+old = "case Command.RecordJobEnd(_, _) if s.closed                => Left(Rejection.SessionClosed)"
+new = "case Command.RecordJobEnd(_, _) if s.closed && s.releasing  => Left(Rejection.SessionClosed)"
+
+[[mutant]]
+name = "Mutant: a Commit of a JobEnded commits"
+[[mutant.edit]]
+file = "Decide.scala"
+old = "    case Entry.ScopeRecorded(_, _)                      => !s.closed"
+new = "    case Entry.ScopeRecorded(_, _) | Entry.JobEnded(_, _) => !s.closed"

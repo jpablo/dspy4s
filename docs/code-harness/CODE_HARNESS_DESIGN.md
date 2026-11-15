@@ -116,6 +116,7 @@ enum Entry derives Schema:
   case TurnEnded(outcome: TurnOutcome)
   case Ended(outcome: SessionOutcome, reason: String)
   case ModelChanged(model: ModelChoice)                        // a person changed the model (CLI_SCREEN.md, 14)
+  case JobEnded(job: EffectId, end: JobEnd)                    // the end of a job, from its host (10.3)
 
 final case class EffectId(cell: Long, n: Int)                  // `cell` is the `seq` of the `Acted` entry
 
@@ -132,7 +133,7 @@ enum TurnOutcome derives Schema:
   case Failed(error: String)
 ```
 
-The entries of one turn form a small language. `Input`, `StopRequested`, `JobsStopRequested`, `Granted`,
+The entries of one turn form a small language. `Input`, `StopRequested`, `JobsStopRequested`, `JobEnded`, `Granted`,
 `ScopeRecorded` and `ModelChanged` can occur at any place:
 
 ```text
@@ -305,6 +306,7 @@ enum Command:
   case Grant(request: RequestId, rule: GuardRule, lifetime: GrantLifetime)
   case Close(outcome: SessionOutcome, reason: String)
   case ChangeModel(model: ModelChoice)
+  case RecordJobEnd(job: EffectId, end: JobEnd)
 
 def decide(command: Command, s: SessionState): Either[Rejection, Vector[Entry]]
 ```
@@ -325,9 +327,11 @@ def decide(command: Command, s: SessionState): Either[Rejection, Vector[Entry]]
 | `Grant` with no pending call | `Granted`. It starts no turn. |
 | `Close` | `Ended`, only with no open turn |
 | `ChangeModel` | `ModelChanged`, also in a turn. With the model of the session, nothing. A session that has ended gives the rejection `SessionClosed`. The fold puts the model in the configuration, so the next call to the policy and a reopen use it (CLI_SCREEN.md, 14.4). |
+| `RecordJobEnd` | `JobEnded`, also with no open turn and in a release (10.3). For a job with an end, or a job that the session does not have, nothing. A session that has ended gives the rejection `SessionClosed`. |
 
 The rules for `Commit`:
 
+- `ModelChanged` and `JobEnded` never commit through `Commit`: only `ChangeModel` and `RecordJobEnd` give them.
 - After `StopRequested`, only outcomes can commit: `EffectDone`, `Observed` and `TurnEnded`.
 - `EffectStarted` needs an `EffectId` of the current cell. So a late message from an old cell cannot enter a later
   cell.
@@ -410,7 +414,7 @@ TurnEnded(Aborted)
 | Grant | A `Once` grant covers one call. A `Turn` grant ends at the next `TurnEnded`. No grant stays after `Ended`, and a journal fork starts with no grants. A repeat of a `Grant` commits nothing. |
 | Pending call | A pending call has no active grant that covers it. `TurnStarted` and `Ended` empty `pending`, and a journal fork starts with no pending calls. A session with no person never gets a pending call. |
 | Guard | `verdict` is a homomorphism from `Guard` to `Verdict`. A grant changes only `Ask`, and more grants never make a result stronger. |
-| Job | An `Abort` changes no job. A stop covers only the jobs with an intent before it. After `Abort` and then `StopJobs(OfLastTurn)`, no job of that turn starts or runs. `Ended` stops all jobs, and a journal fork starts with no jobs. |
+| Job | An `Abort` changes no job. A stop covers only the jobs with an intent before it. After `Abort` and then `StopJobs(OfLastTurn)`, no job of that turn starts or runs. `Ended` stops all jobs, and a journal fork starts with no jobs. A job has at most one `JobEnded`, after its `spawn`. A `JobEnded` changes only the end of its job, and a later stop mark keeps that end. |
 | Repair | `repair` closes each open part, and `repair(state after repair)` is empty. |
 | Store | The store holds only the writes of cells that completed. |
 | Names | The note after a restart lists the names of the cells that completed, and no name of a failed cell. |
@@ -1987,7 +1991,11 @@ enum JobSelector derives Schema:
   case OfLastTurn                   // the open turn, or the last turn if no turn is open
   case All
 
-final case class JobRecord(turn: Long, stopRequested: Boolean) derives Schema
+enum JobEnd derives Schema:
+  case Exited(code: Int)
+  case Stopped                      // a stop mark, or the close of the host, stopped the job
+
+final case class JobRecord(turn: Long, stopRequested: Boolean, end: Option[JobEnd] = None) derives Schema
 ```
 
 1. The writer commits `JobsStopRequested`, and `evolve` marks the jobs that the selector covers.
@@ -2006,9 +2014,19 @@ A client has two controls:
 - **Stop all** sends `Abort`, then `StopJobs(OfLastTurn)`. After `StopRequested`, `decide` accepts no new intent, so
   no job of that turn can start later.
 
+**The end of a job.** When a job ends, the host commits `JobEnded` with the exit code of the job, or with `Stopped`
+after a stop. The host commits it for each job, also for a job with no `report` and for a job that the close of the
+host stops. The close of a session stops its jobs before its writer ends, so these ends reach the journal. A job that
+ends after `Ended` commits nothing. `evolve` puts the end in the `JobRecord`, and `RecordJobEnd` gives one end for
+each job. The entry holds no output, so the output of a job stays lost after a restart.
+
+This rule came on 2026-11-15. In the live scenario store-reopen of 2026-11-10, `waitJob` in a new host gave `Lost` for
+a job that ended with the code 0, because the journal kept no end of a job.
+
 **A crash of the host.** A process can outlive its host. So each job runs under a small wrapper that holds a pipe to
-the host. When the pipe closes, the wrapper stops the process group. After a restart the job table is empty, and
-`status` reports a job with no mark and no row as lost.
+the host. When the pipe closes, the wrapper stops the process group. After a restart the job table is empty. `status`
+then gives the end that the journal recorded. A job with no end is `Stopped` with a stop mark, and lost with no mark:
+it ran when its host crashed.
 
 ### 10.4 Distribution
 

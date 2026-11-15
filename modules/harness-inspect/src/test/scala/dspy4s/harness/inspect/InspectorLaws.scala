@@ -225,6 +225,17 @@ class InspectorLaws extends ScalaCheckSuite:
     assert(ScalaText.of(Entry.StopRequested("line 1\nline 2")).contains("\"\"\"line 1\nline 2\"\"\""))
   }
 
+  test("Inspect: the card of a JobEnded gives the name of the job and its end in the words of the host") {
+    def card(end: JobEnd) =
+      EntryViews.card(Logged(
+        7L,
+        Meta(Start, Source.Harness, Taint.Trusted, true),
+        Entry.JobEnded(EffectId(12L, 0), end)
+      ))
+    assertEquals(card(JobEnd.Exited(3)), "<p>The job 12.0 exited with the code 3.</p>")
+    assertEquals(card(JobEnd.Stopped), "<p>The job 12.0 stopped.</p>")
+  }
+
   test("Inspect L14: the escape gives an entity for each of the five marks of HTML") {
     assertEquals(Html.escape("""<a href="x">'&"""), "&lt;a href=&quot;x&quot;&gt;&#39;&amp;")
   }
@@ -575,6 +586,7 @@ object InspectorLaws:
       Gen.oneOf(GrantLifetime.values.toIndexedSeq).map(Entry.Granted(RequestId("g1"), rule, _)),
       for h <- text; c <- Gen.oneOf(true, false) yield Entry.ScopeRecorded(h, c),
       for m <- text; v <- json(text) yield Entry.ModelChanged(ModelChoice(m, Map("reasoning_effort" -> v))),
+      Gen.oneOf(Gen.choose(0, 255).map(JobEnd.Exited(_)), Gen.const(JobEnd.Stopped)).map(Entry.JobEnded(id, _)),
       text.map(t => Entry.Releasing(Vector(ReleaseItem.Keep(t, "fake")))),
       text.map(t => Entry.Released(ReleaseStep(ReleaseItem.Keep(t, "fake"), ReleaseResult.Failed(t)))),
       Gen.oneOf(

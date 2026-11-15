@@ -488,14 +488,23 @@ spec = true
 uses = ["effect-id"]
 
 [[node]]
+id = "job-end"
+group = "journal"
+kind = "data"
+name = "JobEnd"
+ref = "10.3"
+uses = []
+text = "The end of a job that its host saw: Exited with the code, or Stopped after a stop mark or the close of the host. It holds no output (2026-11-15)."
+
+[[node]]
 id = "entry"
 group = "journal"
 kind = "data"
 name = "Entry"
 ref = "4.1"
 spec = true
-uses = ["versions", "session-config", "request-id", "json", "effect-id", "effect-result", "cell-outcome", "job-selector", "guard-rule", "grant-lifetime", "turn-outcome", "session-outcome", "release-step"]
-text = "The 17 kinds of entry. The entries of one turn form the small language of 4.1. Releasing and Released come with phase 9 (8.7). ModelChanged changes the model of the configuration, for example its reasoning effort (CLI_SCREEN.md, 14.4)."
+uses = ["versions", "session-config", "request-id", "json", "effect-id", "effect-result", "cell-outcome", "job-selector", "guard-rule", "grant-lifetime", "turn-outcome", "session-outcome", "release-step", "job-end"]
+text = "The 18 kinds of entry. The entries of one turn form the small language of 4.1. Releasing and Released come with phase 9 (8.7). ModelChanged changes the model of the configuration, for example its reasoning effort (CLI_SCREEN.md, 14.4). JobEnded records the end of a job, so a later host gives its status and not Lost (10.3, 2026-11-15)."
 
 [[node]]
 id = "logged"
@@ -547,7 +556,8 @@ group = "state"
 kind = "data"
 name = "JobRecord"
 ref = "10.3"
-uses = []
+uses = ["job-end"]
+text = "The turn of a job, its stop mark, and the end that its host recorded with JobEnded, or none."
 
 [[node]]
 id = "position"
@@ -684,7 +694,7 @@ name = "Command"
 ref = "4.5"
 spec = true
 uses = ["versions", "session-config", "request-id", "json", "entry", "job-selector", "guard-rule", "grant-lifetime",
-        "session-outcome"]
+        "session-outcome", "job-end"]
 
 [[node]]
 id = "rejection"
@@ -714,7 +724,7 @@ name = "decide"
 ref = "4.5"
 uses = ["command", "session-state", "rejection", "entry", "repair", "approved-text"]
 proof_uses = ["evolve", "guard-rule"]
-text = "Says which entries a command can commit. It keeps each journal inside the language of 4.1. ChangeModel gives ModelChanged in an open session, also during a turn. The model of the session gives nothing, and a session that has ended gives SessionClosed (CLI_SCREEN.md, 14.4)."
+text = "Says which entries a command can commit. It keeps each journal inside the language of 4.1. ChangeModel gives ModelChanged in an open session, also during a turn. The model of the session gives nothing, and a session that has ended gives SessionClosed (CLI_SCREEN.md, 14.4). RecordJobEnd gives one JobEnded for each job of the session, also with no turn, and a session that has ended gives SessionClosed (10.3)."
 
 [[node]]
 id = "approved-text"
@@ -3219,9 +3229,9 @@ name = "JobTable"
 ops = ["sync", "start", "output", "await", "awaitAll", "status", "close"]
 ref = "10.3"
 spec = true
-uses = ["effect-id", "session-state", "job-status"]
-proof_uses = ["suffix-start"]
-text = "The live part of the jobs: the process groups, the output and the marks. It belongs to the open session, not to the activation. One launcher thread starts each process, because on Linux --die-with-parent follows the thread. sync copies the marks and returns at once, and a marked job does not start. A job of the state with no row is Lost. The end of a job with report goes to the report function of the host."
+uses = ["effect-id", "session-state", "job-status", "job-end"]
+proof_uses = ["suffix-start", "job-status-of"]
+text = "The live part of the jobs: the process groups, the output and the marks. It belongs to the open session, not to the activation. One launcher thread starts each process, because on Linux --die-with-parent follows the thread. sync copies the marks and returns at once, and a marked job does not start. A job of the state with no row has the end that the journal recorded, else Stopped with a stop mark, else Lost. The end of each job goes to recordEnd, and then the end of a job with report goes to the report function of the host. close waits for these calls."
 
 [[node]]
 id = "job-shell"
@@ -3232,7 +3242,7 @@ ops = ["exec", "spawn", "jobOutput", "waitJob", "stopJob"]
 ref = "10.3"
 uses = ["shell", "sandboxed-shell", "job-table", "journal-trait", "files", "job-id", "job-status"]
 proof_uses = ["process-wrapper", "command", "job-table", "rejection", "job-name"]
-text = "The handler of Shell^ in the host. exec goes to the sandbox, and spawn starts a job with SandboxedShell.launch and gives the JobId of its own EffectStarted. stopJob is StopJobs(One(job)), and a refusal gives the cell its words (Rejection.words). A call of a job that the session does not have names the job as /jobs does (jobName). The end of a job with report reaches the host through the table."
+text = "The handler of Shell^ in the host. exec goes to the sandbox, and spawn starts a job with SandboxedShell.launch and gives the JobId of its own EffectStarted. stopJob is StopJobs(One(job)), and a refusal gives the cell its words (Rejection.words). A call of a job that the session does not have names the job as /jobs does (jobName). The end of each job reaches the host through the table. waitJob of a job with no process in this host gives the status of the table: the end of the journal, Stopped or Lost."
 
 [[node]]
 id = "job-name"
@@ -3242,6 +3252,15 @@ name = "jobName"
 ref = "10.3"
 uses = ["effect-id"]
 text = "The name of a job for a person and for the model: the cell and the number of its spawn, for example 12.0. The report of the end of a job, the CLI and the JobId of the model use the same two numbers."
+
+[[node]]
+id = "job-status-of"
+group = "jobs"
+kind = "function"
+name = "jobStatusOf"
+ref = "10.3"
+uses = ["job-end", "job-status"]
+text = "The status of a job with an end of the journal: Exited with its code, or Stopped. waitJob, /jobs and the card of the inspector use it (2026-11-15)."
 
 [[group]]
 id = "work-runtime"
@@ -3739,8 +3758,8 @@ group = "job-laws"
 kind = "law"
 name = "Jobs:"
 ref = "10.3"
-uses = ["job-table", "process-wrapper"]
-text = "A job outlives its call, with its output and its exit code. A stop mark stops a job, with KILL after the grace period, and sync returns at once. A marked job does not start. A job with no row is Lost. The end of a job with report reaches the report of the table. close stops each job."
+uses = ["job-table", "process-wrapper", "local-host"]
+text = "A job outlives its call, with its output and its exit code. A stop mark stops a job, with KILL after the grace period, and sync returns at once. A marked job does not start. A job with no row, no end and no mark is Lost, and a job with no row and an end has that end, also with a mark. The end of each job reaches recordEnd before its report. close stops each job. The host commits the end of each job, also of a job that its close stops, and a new host gives it. A job that ends after Ended commits nothing, and the end of the session does not wait for it."
 
 [[group]]
 id = "work-laws"

@@ -11,9 +11,10 @@ final case class ActiveGrant(rule: GuardRule, lifetime: GrantLifetime) derives S
 final case class OpenCall(op: String, args: Json) derives CanEqual
 
 /** A job is known from the intent of its `spawn`, so a `spawn` that a stop cuts is still in the fold (10.3). `turn` is
-  * the `seq` of the `TurnStarted` of its turn.
+  * the `seq` of the `TurnStarted` of its turn. `end` is the end that its host recorded with `JobEnded`. It is none
+  * while the job runs, and for a job that ran when its host ended.
   */
-final case class JobRecord(turn: Long, stopRequested: Boolean) derives Schema, CanEqual
+final case class JobRecord(turn: Long, stopRequested: Boolean, end: Option[JobEnd] = None) derives Schema, CanEqual
 
 /** Where the open turn stands (4.2). */
 enum Position derives CanEqual:
@@ -163,6 +164,9 @@ def evolve(s: SessionState, logged: Logged): SessionState =
         releasing = false
       )
     case Entry.ModelChanged(model) => base.copy(config = s.config.copy(model = model))
+    case Entry.JobEnded(job, end)  =>
+      // The end of a job that the state does not have changes no job. A stop mark stays with the end.
+      base.copy(jobs = s.jobs.updatedWith(job)(_.map(_.copy(end = Some(end)))))
 
 /** The operation that starts a job (10.3). */
 private val spawnOp = "spawn"

@@ -44,7 +44,8 @@ private val CommandChars = 160
   *   - An `Input` from a source that is not `User`, for example the message at the end of a job: its text after the
   *     sender in words (`sourceWords`), for example `[the session s9] text`.
   *   - The other entries give none. A `StepStarted` gives none too: the status line of the editor shows the step while
-  *     it runs, with a spinner and the time (`Screen.live`).
+  *     it runs, with a spinner and the time (`Screen.live`). A `JobEnded` gives none: `/jobs` shows the end of a job,
+  *     and a job with `report` sends a message.
   */
 def entryText(logged: Logged, reasoning: ReasoningView = ReasoningView.Short): Option[String] =
   rawText(logged, reasoning).map(printable)

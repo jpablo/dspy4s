@@ -12,6 +12,20 @@ class DecideLaws extends ScalaCheckSuite:
 
   private val rule = GuardRule("exec", ArgMatch.Exact(args))
 
+  // A session in a cell whose `spawn` started a job, the same session after the end of the turn, and in its release.
+  private val job       = EffectId(cell, 0)
+  private val spawned   = commit(inCell, Vector(Entry.EffectStarted(job, "spawn", args)))
+  private val afterTurn = commit(
+    spawned,
+    Vector(
+      Entry.EffectDone(job, EffectResult.Value(args, "job")),
+      Entry.Observed("", CellOutcome.Ok, Map.empty),
+      Entry.TurnEnded(TurnOutcome.Replied("started"))
+    )
+  )
+  private val releasing     = commit(afterTurn, Vector(Entry.Releasing(Vector.empty)))
+  private def endOf(n: Int) = Command.RecordJobEnd(job, JobEnd.Exited(n))
+
   // ── Each row of the table of 4.5, and the rules for `Commit` ──
 
   test("Decide table: Activate commits repair(s), then Activated") {
@@ -84,6 +98,39 @@ class DecideLaws extends ScalaCheckSuite:
       decide(Command.StopJobs(JobSelector.All, "stop all"), idle),
       Right(Vector(Entry.JobsStopRequested(JobSelector.All, "stop all")))
     )
+  }
+
+  test(
+    "Decide table: RecordJobEnd commits JobEnded for a job of the session, in a cell, with no turn and in a release"
+  ) {
+    for s <- Vector(spawned, afterTurn, releasing) do
+      assertEquals(decide(endOf(3), s), Right(Vector(Entry.JobEnded(job, JobEnd.Exited(3)))))
+    assertEquals(
+      decide(Command.RecordJobEnd(job, JobEnd.Stopped), afterTurn),
+      Right(Vector(Entry.JobEnded(job, JobEnd.Stopped)))
+    )
+  }
+
+  test(
+    "Decide table: RecordJobEnd commits nothing for a job with an end, and for a job that the session does not have"
+  ) {
+    // So a job has one end in the journal.
+    val done = commit(afterTurn, Vector(Entry.JobEnded(job, JobEnd.Stopped)))
+    assertEquals(decide(endOf(0), done), Right(Vector.empty))
+    assertEquals(decide(Command.RecordJobEnd(EffectId(cell, 1), JobEnd.Exited(0)), afterTurn), Right(Vector.empty))
+    assertEquals(decide(endOf(0), idle), Right(Vector.empty))
+  }
+
+  test("Decide table: RecordJobEnd to a session that has ended commits nothing and gets SessionClosed") {
+    val closed = commit(afterTurn, Vector(Entry.Ended(SessionOutcome.Parked, "done")))
+    assertEquals(decide(endOf(0), closed), Left(Rejection.SessionClosed))
+  }
+
+  test("Decide table: a Commit of a JobEnded is refused, because only RecordJobEnd gives it") {
+    // A worker commits through `Commit`, and only the host sees the end of a job.
+    val end = Entry.JobEnded(job, JobEnd.Exited(0))
+    for s <- Vector(spawned, afterTurn) do
+      assertEquals(decide(Command.Commit(Vector(end)), s), Left(Rejection.OutOfOrder(end)))
   }
 
   test("Decide table: a Grant with a known request id commits nothing") {

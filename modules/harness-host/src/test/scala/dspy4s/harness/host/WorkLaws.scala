@@ -322,6 +322,39 @@ class WorkLaws extends munit.FunSuite:
     }
   }
 
+  test("Work: in a new host, waitJob of a job that ended in the earlier host gives its exit code, not Lost") {
+    // In the live scenario store-reopen (2026-11-10), a job ended with the code 0, and after a reopen in a new host
+    // waitJob gave Lost, because the journal kept no end of a job (10.3). Lost is for a job that ran when its host
+    // ended. The job ends during the turn, so its end must be in the journal before the first host ends.
+    sandboxed()
+    val first = sessionModel(
+      policy("start", Some("""val j = spawn("exit 3"); store("job", j); println("FAKE-FIRST " + waitJob(j, 30))""")),
+      policy("FAKE-STARTED", None)
+    )
+    val again = sessionModel(
+      policy("look", Some("""load[JobId]("job").foreach(j => println("FAKE-AFTER " + waitJob(j, 1)))""")),
+      policy("FAKE-LOOKED", None)
+    )
+    val place = Place()
+    try withRoot { root =>
+        val env    = WorkEnv(place.home, HostList.empty, Backends.detect(), Secrets.none, root)
+        val config = WorkRuntime.config(place.root, "fake-model", limits)
+        withHost(root, Models.withModel(first)(WorkRuntime.forWork(env, limits))) { host =>
+          val handle = opened(host, id(1), Some(config))
+          assertEquals(handle.send(message("m1")), Right(()))
+          assert(eventually(60)(outcomes(handle).size == 1), entries(handle).toString)
+          assert(outputs(handle).exists(_.contains("FAKE-FIRST Exited(3)")), outputs(handle).toString)
+        }
+        withHost(root, Models.withModel(again)(WorkRuntime.forWork(env, limits))) { host =>
+          val handle = opened(host, id(1), None)
+          assertEquals(handle.send(message("m2")), Right(()))
+          assert(eventually(60)(outcomes(handle).size == 2), entries(handle).toString)
+          assert(outputs(handle).exists(_.contains("FAKE-AFTER Exited(3)")), outputs(handle).toString)
+        }
+      }
+    finally place.close()
+  }
+
   test("Work: a job with report = true sends a message with the source Harness at its end, and it starts a turn") {
     sandboxed()
     val model = sessionModel(

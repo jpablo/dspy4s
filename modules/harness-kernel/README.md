@@ -15,7 +15,8 @@ LM, and reads no file. It uses [`harness-guest`](../harness-guest/README.md) and
   Cell ::= ( EffectStarted | EffectDone )* Observed
   ```
 
-  `Input`, `StopRequested`, `JobsStopRequested`, `Granted`, and `ScopeRecorded` can occur at any place.
+  `Input`, `StopRequested`, `JobsStopRequested`, `JobEnded`, `Granted`, `ScopeRecorded`, and `ModelChanged` can occur
+  at any place.
 - **The state is a fold.** `evolve(state, logged)` is the only place where the state changes. It is total and pure.
   `state(journal)` is `journal.foldLeft(SessionState.initial)(evolve)`.
 - **The next piece of work is an unfold.** `next(state)` reads only the state. It gives the next piece of work: wait,
@@ -39,7 +40,7 @@ decide(Command.Send(RequestId("r1"), "Fix the test", Map.empty), s0) match
 
 | Type | Description |
 |------|-------------|
-| `Entry` | The entries of a journal: `Activated`, `Input`, `TurnStarted`, `StepStarted`, `Acted`, `EffectStarted`, `EffectDone`, `Observed`, `StopRequested`, `JobsStopRequested`, `Granted`, `ScopeRecorded`, `TurnEnded`, and `Ended`. |
+| `Entry` | The entries of a journal: `Activated`, `Input`, `TurnStarted`, `StepStarted`, `Acted`, `EffectStarted`, `EffectDone`, `Observed`, `StopRequested`, `JobsStopRequested`, `Granted`, `ScopeRecorded`, `Releasing`, `Released`, `TurnEnded`, `Ended`, `ModelChanged`, and `JobEnded`. |
 | `Logged` | One line of the journal: an entry with its `seq` and its `Meta`. |
 | `Meta` | The data that the model never sees: the time, the `Source`, the `Taint`, and `required`. `required` tells a reader what to do with an entry that it cannot decode: stop the rebuild, or skip the entry. |
 | `Source` / `Taint` | The sender of an entry (`User`, `Controller`, `Harness`, `Policy`, or `Child`), and `External` for a value from outside the session. |
@@ -81,6 +82,9 @@ decide(Command.Send(RequestId("r1"), "Fix the test", Map.empty), s0) match
   call of its cell, so one id names one call. An `EffectDone` of an effect that is already closed adds nothing,
   because an interrupt does not wait for a commit in progress.
 - **A stop is an entry.** `Abort` commits `StopRequested`, and then `next` ends the turn with `Aborted`.
+- **The end of a job is an entry.** The host sends `RecordJobEnd` at the end of each job, and `decide` gives one
+  `JobEnded` for each job. The fold puts the end (`JobEnd`) in the `JobRecord`, so a later host gives the status of
+  the job and not `Lost`. The entry holds no output.
 - **A grant changes only `Ask`.** A session with no person (the owner `Optimizer` or `Cell`) never gets
   `NeedsPerson`, and the call is refused. A `TurnStarted` empties the pending calls, so the model asks again if it
   still needs the call. A grant that answers a pending call also commits an `Input` with the text of `approvedText`.
@@ -99,7 +103,7 @@ decide(Command.Send(RequestId("r1"), "Fix the test", Map.empty), s0) match
 
 | File | Contents |
 |------|----------|
-| `Entry.scala` | `Entry`, `Logged`, `Meta`, `Source`, `Taint`, the outcomes, `JobSelector`, `readOnlyOps`, and `needsFlush` |
+| `Entry.scala` | `Entry`, `Logged`, `Meta`, `Source`, `Taint`, the outcomes, `JobSelector`, `JobEnd`, `readOnlyOps`, and `needsFlush` |
 | `Ids.scala` | `SessionId`, `RequestId`, `EffectId`, and `Versions` |
 | `SessionState.scala` | `SessionState`, `Position`, `evolve`, `state`, and `forked` |
 | `SessionConfig.scala` | `SessionConfig`, `Owner`, `TurnKind`, and `ModelChoice` |

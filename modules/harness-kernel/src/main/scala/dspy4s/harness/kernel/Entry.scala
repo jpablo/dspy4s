@@ -122,14 +122,21 @@ enum JobSelector derives Schema, CanEqual:
 
   case All
 
+/** The end of a job that its host saw (10.3). `Stopped` is the end after a stop: a stop mark, or the close of the host.
+  * The end holds no output, so the output of a job stays lost after a restart.
+  */
+enum JobEnd derives Schema, CanEqual:
+  case Exited(code: Int)
+  case Stopped
+
 /** The entries of a journal (4.1). The entries of one turn form a small language:
   * {{{
   * Turn ::= TurnStarted Step* TurnEnded
   * Step ::= StepStarted [ Acted [ Cell ] ]
   * Cell ::= ( EffectStarted | EffectDone )* Observed
   * }}}
-  * `Input`, `StopRequested`, `JobsStopRequested`, `Granted`, `ScopeRecorded` and `ModelChanged` can occur at any place.
-  * `Releasing` occurs only with no open turn, and each `Released` comes after it (8.7):
+  * `Input`, `StopRequested`, `JobsStopRequested`, `JobEnded`, `Granted`, `ScopeRecorded` and `ModelChanged` can occur
+  * at any place. `Releasing` occurs only with no open turn, and each `Released` comes after it (8.7):
   * {{{
   * Release ::= Releasing JobsStopRequested? Released* Ended
   * }}}
@@ -189,6 +196,11 @@ enum Entry derives Schema, CanEqual:
     * it in the configuration, so the next call to the policy and a reopen use it.
     */
   case ModelChanged(model: ModelChoice)
+
+  /** The end of a job (10.3). The host commits it at the end of each job, also with no `report`, so a later host gives
+    * the status of the job and not `Lost`. The fold puts the end in the record of the job.
+    */
+  case JobEnded(job: EffectId, end: JobEnd)
 
 /** One line of the journal: an entry with its `seq` and its meta (4.1). */
 final case class Logged(seq: Long, meta: Meta, entry: Entry) derives Schema, CanEqual

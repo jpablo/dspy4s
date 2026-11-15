@@ -4,7 +4,7 @@ import dspy4s.core.contracts.RuntimeContext
 import dspy4s.harness.{Budget, Draft, Harness, Journal, MemoryTree, Secrets, TurnEffects, drive, textSuffix}
 import dspy4s.harness.guest.{JobStatus, Mode, Scope}
 import dspy4s.harness.kernel.{Command, EffectId, Entry, Logged, Next, Position, ReleaseItem, ReleaseStep, RequestId}
-import dspy4s.harness.kernel.{JobSelector, Owner, Rejection, ReleasePlans, ReleaseResult, ScopeState}
+import dspy4s.harness.kernel.{JobEnd, JobSelector, Owner, Rejection, ReleasePlans, ReleaseResult, ScopeState}
 import dspy4s.harness.kernel.{irreversible, releasePlan}
 import dspy4s.harness.sandbox.Layout
 import dspy4s.harness.kernel.{
@@ -49,8 +49,9 @@ trait SessionHandle:
   /** The committed state. */
   def state: SessionState
 
-  /** The status of each job of `state` (10.3): `Running` or `Exited` from the job table, and `Stopped` or `Lost` for a
-    * job with no process in this host. A client shows it, for example after a stop that left a job of its turn.
+  /** The status of each job of `state` (10.3): `Running`, `Exited` or `Stopped` from the job table. A job with no
+    * process in this host has the end that the journal recorded, or else `Stopped` with a stop mark and `Lost` with no
+    * mark. A client shows it, for example after a stop that left a job of its turn, and after a reopen.
     */
   def jobStatus: Map[EffectId, JobStatus]
 
@@ -835,6 +836,7 @@ private final class OpenSession private (
       try
         live.foreach(a => step(a.close()))
         part.foreach(p => step(p.close()))
+        // The jobs stop before the writer ends, so the end of each job reaches the journal (10.3).
         step(jobs.close())
         step(recorder.shutdownNow(): Unit)
         step(writer.close())
@@ -1035,6 +1037,13 @@ private final class OpenSession private (
             writer.post(Command.Send(RequestId(s"publish:${id.value}:$turn"), text, Map.empty), Source.Harness): Unit
       case _ => ()
 
+  /** Commits the end of a job (10.3), so a later host gives it as the status of the job. It waits for the commit, and
+    * the close of the job table waits for this call, so the end reaches the journal before the writer ends. A session
+    * that has ended takes no end, and the call gives no error.
+    */
+  private def recordJobEnd(job: EffectId, end: JobEnd): Unit =
+    if !writer.state.closed then writer.run(Command.RecordJobEnd(job, end), Source.Harness): Unit
+
   /** The message of a job with `report` at its end (10.3), for example `The job 4.0 exited with the code 0.` and the
     * end of its output. The model reads it, so it gives the status in words (`jobStatusWords`) and not as a Scala
     * value. The writer of the session gets it, so it also reaches a later activation.
@@ -1135,6 +1144,7 @@ private object OpenSession:
   ): OpenSession =
     val committed = AtomicReference[SessionState => Unit](_ => ())
     val failing   = AtomicReference[String => Unit](_ => ())
+    val recorded  = AtomicReference[(EffectId, JobEnd) => Unit]((_, _) => ())
     val reported  = AtomicReference[(EffectId, JobStatus) => Unit]((_, _) => ())
     val feeds     = Feeds()
     val writer    = Writer(
@@ -1147,10 +1157,15 @@ private object OpenSession:
       s => committed.get()(s),
       e => failing.get()(e)
     )
-    val jobs    = JobTable(place.limits.grace, (job, status) => reported.get()(job, status))
+    val jobs = JobTable(
+      place.limits.grace,
+      (job, end) => recorded.get()(job, end),
+      (job, status) => reported.get()(job, status)
+    )
     val session = OpenSession(id, place, writer, feeds, jobs, start, channel, lock)
     committed.set(s => session.onCommit(s))
     failing.set(e => session.onFailure(e))
+    recorded.set((job, end) => session.recordJobEnd(job, end))
     reported.set((job, status) => session.reportJob(job, status))
     session
 

@@ -128,7 +128,7 @@ harness must do:
 | Concept | What it is | Kind | After a restart |
 |---|---|---|---|
 | Log | The append-only list of the entries of one session | Record | Stored |
-| Entry | One fact in the log: `Activated`, `Input`, `TurnStarted`, `StepStarted`, `Acted`, `EffectStarted`, `EffectDone`, `Observed`, `StopRequested`, `JobsStopRequested`, `Granted`, `ScopeRecorded`, `TurnEnded`, `Ended` | Record | Stored |
+| Entry | One fact in the log: `Activated`, `Input`, `TurnStarted`, `StepStarted`, `Acted`, `EffectStarted`, `EffectDone`, `Observed`, `StopRequested`, `JobsStopRequested`, `Granted`, `ScopeRecorded`, `Releasing`, `Released`, `TurnEnded`, `Ended`, `ModelChanged`, `JobEnded` | Record | Stored |
 | Entry metadata | The source, the taint and the `required` mark of an entry. The model never sees them. | Record | Stored |
 | Cell event | An entry of one cell: `Acted`, `EffectStarted`, `EffectDone`, `Observed` | Record | Stored |
 | Ledger | The sources that a session read and the artifacts that it made | Record | Stored |
