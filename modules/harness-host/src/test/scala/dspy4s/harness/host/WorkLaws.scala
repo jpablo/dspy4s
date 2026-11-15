@@ -322,6 +322,39 @@ class WorkLaws extends munit.FunSuite:
     }
   }
 
+  test("Work: in a new host, waitJob of a job that ended in the earlier host gives its exit code, not Lost") {
+    // In the live scenario store-reopen (2026-11-10), a job ended with the code 0, and after a reopen in a new host
+    // waitJob gave Lost, because the journal kept no end of a job (10.3). Lost is for a job that ran when its host
+    // ended. The job ends during the turn, so its end must be in the journal before the first host ends.
+    sandboxed()
+    val first = sessionModel(
+      policy("start", Some("""val j = spawn("exit 3"); store("job", j); println("FAKE-FIRST " + waitJob(j, 30))""")),
+      policy("FAKE-STARTED", None)
+    )
+    val again = sessionModel(
+      policy("look", Some("""load[JobId]("job").foreach(j => println("FAKE-AFTER " + waitJob(j, 1)))""")),
+      policy("FAKE-LOOKED", None)
+    )
+    val place = Place()
+    try withRoot { root =>
+        val env    = WorkEnv(place.home, HostList.empty, Backends.detect(), Secrets.none, root)
+        val config = WorkRuntime.config(place.root, "fake-model", limits)
+        withHost(root, Models.withModel(first)(WorkRuntime.forWork(env, limits))) { host =>
+          val handle = opened(host, id(1), Some(config))
+          assertEquals(handle.send(message("m1")), Right(()))
+          assert(eventually(60)(outcomes(handle).size == 1), entries(handle).toString)
+          assert(outputs(handle).exists(_.contains("FAKE-FIRST Exited(3)")), outputs(handle).toString)
+        }
+        withHost(root, Models.withModel(again)(WorkRuntime.forWork(env, limits))) { host =>
+          val handle = opened(host, id(1), None)
+          assertEquals(handle.send(message("m2")), Right(()))
+          assert(eventually(60)(outcomes(handle).size == 2), entries(handle).toString)
+          assert(outputs(handle).exists(_.contains("FAKE-AFTER Exited(3)")), outputs(handle).toString)
+        }
+      }
+    finally place.close()
+  }
+
   test("Work: a job with report = true sends a message with the source Harness at its end, and it starts a turn") {
     sandboxed()
     val model = sessionModel(
@@ -819,7 +852,8 @@ class WorkLaws extends munit.FunSuite:
     // In the live session 00429ec8 (2026-11-11), each git worktree add failed with "Operation not permitted", and the
     // model used three steps to find the cause. The task did not say that .git is read-only, that a command can write
     // only in the folder of the session. A file call refuses a .env file, and a command too when the sandbox closes
-    // the name (5.4). Since choice 19, the task names the control paths and the git commands that fail.
+    // the name, or when the walk at the open of the session found the file (5.4). Since choice 19, the task names the
+    // control paths and the git commands that fail.
     val model = sessionModel(policy("FAKE-HELLO", None))
     work(model) { (_, handle) =>
       assertEquals(handle.send(message("m1")), Right(()))
@@ -834,6 +868,9 @@ class WorkLaws extends munit.FunSuite:
         .foreach(words => assert(text.contains(words), s"the task does not name $words:\n$text"))
       val alone = "A file call can neither read nor write a file or a folder whose name is .env"
       assertEquals(text.contains(alone), !closes, text)
+      // A backend that cannot close a name covers the files of the walk at the open of the session (5.4).
+      val walked = "A command can neither read nor write such a file or folder when it was there at the open"
+      assertEquals(text.contains(walked), Backends.detect().exists(!_.closesNames), text)
     }
   }
 

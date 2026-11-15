@@ -19,6 +19,11 @@ enum Command derives CanEqual:
   case Close(outcome: SessionOutcome, reason: String)
   case ChangeModel(model: ModelChoice)
 
+  /** The end of a job that the host saw (10.3). The host sends it at the end of each job, and `decide` gives one
+    * `JobEnded` for it.
+    */
+  case RecordJobEnd(job: EffectId, end: JobEnd)
+
 /** Why `decide` refuses a command (4.5). */
 enum Rejection derives CanEqual:
 

@@ -3,7 +3,7 @@ package dspy4s.harness.cli
 import dspy4s.harness.guest.{Mode, Scope}
 import dspy4s.harness.host.{Activity, ContextUse, MemoryUse, WorkRuntime, jobName}
 import dspy4s.harness.kernel.*
-import dspy4s.harness.{Draft, textPrefix}
+import dspy4s.harness.{Draft, textPrefix, textSuffix}
 import zio.blocks.schema.json.Json
 
 /** The tone of a part of a row of the screen. The console gives each tone a color, or no color with `NO_COLOR`. */
@@ -231,7 +231,18 @@ object Screen:
     * The effort is the effort of the model of the session (`Effort.of`). The context is the count of prompt tokens of
     * the last call to the policy (`context`), with the window of `facts` and the percent of it, as
     * `context 18k of 1M (2%)`. The memory is the size of the last view of the memory and its budget, in characters.
-    * When the line is wider than `width`, the footer shows no memory part (CLI_SCREEN.md, 14.3).
+    *
+    * The footer fits the line to `width` in this order (CLI_SCREEN.md, 14.3, choice 5):
+    *
+    *   1. When the full line fits, the footer shows it.
+    *   2. Else the folder gets shorter (`folderForms`), and the footer takes the longest form whose line, with the
+    *      memory part, fits.
+    *   3. Else the memory part goes, and the footer takes the longest form of the folder whose line fits, the full
+    *      folder first.
+    *   4. Else the folder is `glyphs.more` and the end of its last part. The end fills the room that the other parts
+    *      leave. With no room, the folder part is only `glyphs.more`, and the console cuts the rest at the width.
+    *
+    * The width counts UTF-16 units (`String.length`).
     */
   def footer(
       state  : SessionState,
@@ -243,13 +254,12 @@ object Screen:
       facts  : ModelFacts         = ModelFacts.unknown,
       width  : Int                = Int.MaxValue
   ): Row =
-    val folder = folderOf(state)
-    val shown  =
-      if home.nonEmpty && (folder == home || folder.startsWith(home + "/")) then "~" + folder.drop(home.length)
-      else folder
+    val path  = folderOf(state)
+    val shown = visible(
+      if home.nonEmpty && (path == home || path.startsWith(home + "/")) then "~" + path.drop(home.length) else path
+    )
     val pending = state.pending.size
     val head    = Vector(
-      Option.when(shown.nonEmpty)(visible(shown)),
       Some(modeName(state.config.mode)),
       Option.when(state.config.model.model.nonEmpty)(visible(state.config.model.model)),
       Effort.of(state.config.model).map(level => s"effort ${visible(level)}"),
@@ -260,9 +270,27 @@ object Screen:
       Option.when(jobs > 0)(count(jobs, "job")),
       Option.when(pending > 0)(if pending == 1 then "1 call waits" else s"$pending calls wait")
     ).flatten
-    def line(parts: Vector[String]): String = "  " + parts.mkString(s" ${glyphs.dot} ")
-    val full                                = line(head ++ kept ++ tail)
-    Row.of(if full.length <= width then full else line(head ++ tail), Tone.Dim)
+    val lean = head ++ tail
+    // The line with the folder part `folder`, and with no folder part for an empty folder.
+    def line(folder: String, parts: Vector[String]): String =
+      "  " + (Option.when(folder.nonEmpty)(folder).toVector ++ parts).mkString(s" ${glyphs.dot} ")
+    val forms                                         = folderForms(shown, glyphs)
+    def fitted(parts: Vector[String]): Option[String] = forms.iterator.map(line(_, parts)).find(_.length <= width)
+    // Rule 4: `glyphs.more` and the end of the last part fill the room that the other parts leave.
+    def cut: String =
+      if shown.isEmpty then line("", lean)
+      else
+        val last = shown.split('/').filter(_.nonEmpty).lastOption.getOrElse(shown)
+        line(glyphs.more + textSuffix(last, width - line(glyphs.more, lean).length), lean)
+    Row.of(fitted(head ++ kept ++ tail).orElse(fitted(lean)).getOrElse(cut), Tone.Dim)
+
+  /** The forms of the folder `shown` for the footer, in the order that the footer tries them: the folder, then the
+    * shorter forms. A shorter form is `glyphs.more`, a `/` and the last k parts of the folder, for k from the count of
+    * parts less one down to 1. A folder of one part has no shorter form (CLI_SCREEN.md, 14.3, choice 5).
+    */
+  private def folderForms(shown: String, g: Glyphs): Vector[String] =
+    val parts = shown.split('/').toVector.filter(_.nonEmpty)
+    shown +: (parts.size - 1 to 1 by -1).toVector.map(k => s"${g.more}/${parts.takeRight(k).mkString("/")}")
 
   /** The context of `use` in words: the prompt tokens, and with a window `window`, the window with `unit` and the
     * percent, as `18k of 1M (2%)` or `18k of 1M tokens (2%)`. With no window, the count with `unit`.

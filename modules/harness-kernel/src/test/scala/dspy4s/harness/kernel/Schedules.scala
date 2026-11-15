@@ -64,8 +64,8 @@ object Schedules:
   /** The sender of the messages of the owner. `ReportLaws` uses the same sender. */
   private val ownerSource = Source.Controller
 
-  /** Random runs with crashes, stops, late messages, grants, jobs and power losses. The owners of the sessions are the
-    * user, a session, a cell and an optimizer, and the guards have rules that overlap.
+  /** Random runs with crashes, stops, late messages, grants, jobs, ends of jobs and power losses. The owners of the
+    * sessions are the user, a session, a cell and an optimizer, and the guards have rules that overlap.
     */
   def schedules: Gen[Run] =
     Gen.zip(Gen.long, Gen.prob(0.25)).map((seed, losses) => simulate(Random(seed), losses))
@@ -196,10 +196,13 @@ object Schedules:
         running = running + id
         true
 
-    def applyStops(s: SessionState): Unit =
+    /** Copies the stop marks of `s`, and gives the jobs that ran and stop now. */
+    def applyStops(s: SessionState): Set[EffectId] =
       val stopped = s.jobs.collect { case (id, job) if job.stopRequested => id }.toSet
+      val ended   = running & stopped
       marked = marked ++ stopped
       running = running -- stopped
+      ended
 
   private def simulate(random: Random, losses: Boolean): Run =
     val config = Fixtures.config(
@@ -231,7 +234,10 @@ object Schedules:
       pendingStarts = Vector.empty
       host.send(Command.Activate(versions, config))
       table = JobTableModel()
-      table.applyStops(host.live)
+      stops()
+
+    // The host copies the stop marks to its table, and records the end of each job that the marks stop (10.3).
+    def stops(): Unit = table.applyStops(host.live).foreach(id => host.send(Command.RecordJobEnd(id, JobEnd.Stopped)))
 
     def startJob(id: EffectId): Unit =
       val result =
@@ -351,19 +357,24 @@ object Schedules:
             // "Stop all". After the stop, no new intent can commit, so no job of that turn can start later.
             host.send(Command.Abort("all"))
             host.send(Command.StopJobs(JobSelector.OfLastTurn, "all"))
-            table.applyStops(host.live)
+            stops()
           case 87 =>
             val which = random.nextInt(3) match
               case 0 => JobSelector.All
               case 1 => JobSelector.OfLastTurn
               case _ => host.live.jobs.keys.headOption.fold(JobSelector.All)(JobSelector.One(_))
             host.send(Command.StopJobs(which, "one"))
-            table.applyStops(host.live)
+            stops()
           case n if n >= 94 => grant()
           case 93           =>
             host.send(Command.Close(SessionOutcome.Parked, "park"))
-            table.applyStops(host.live)
-          case 92 => if host.live.closed then host.send(Command.Activate(versions, config))
+            stops()
+          case 92                           => if host.live.closed then host.send(Command.Activate(versions, config))
+          case 85 if table.running.nonEmpty =>
+            // A job ends by itself, and the host records its exit code (10.3).
+            val id = table.running.head
+            table.running = table.running - id
+            host.send(Command.RecordJobEnd(id, JobEnd.Exited(random.nextInt(3))))
           case 86 =>
             // A person changes the effort of the model (CLI_SCREEN.md, 14.4), also during a turn.
             val level = Vector("none", "low", "high")(random.nextInt(3))

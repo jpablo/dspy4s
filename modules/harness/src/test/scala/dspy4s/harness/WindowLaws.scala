@@ -7,6 +7,8 @@ import org.scalacheck.Gen
 import org.scalacheck.Prop.forAllNoShrink
 import zio.blocks.schema.json.Json
 
+import java.util.Locale
+
 import Support.*
 
 /** The laws of the window strategy and of the status section (CODE_HARNESS_DESIGN.md, 7). A step k of the history holds
@@ -32,7 +34,8 @@ class WindowLaws extends ScalaCheckSuite:
   private def stepsIn(p: Projection): Vector[Int] =
     p.history.messages.flatMap(m => "text-(\\d+)".r.findFirstMatchIn(m.toString).map(_.group(1).toInt))
 
-  test("Window: the projection depends only on the entries, not on their times") {
+  test("Window: the projection depends on the entries and the time between them, not on the clock time") {
+    // The times of the cells and of the turn are differences of times, so a shift of all the times changes nothing.
     val entries = steps(Vector("a", "b", "c"))
     assertEquals(Window.project(logOf(1L, entries*), (), 10_000), Window.project(logOf(999L, entries*), (), 10_000))
   }
@@ -44,11 +47,13 @@ class WindowLaws extends ScalaCheckSuite:
     }
   }
 
-  test("Window: the last observation is in the projection, cut to at most half of the budget") {
+  test("Window: the last observation is in the projection, cut to at most half of the budget, then its time") {
+    // Each entry of `logOf` has the same time, so each cell takes 0.0 s.
     val long = "x" * 10_000
     val p    = Window.project(logOf(1L, steps(Vector("a", long))*), (), 4_000)
-    assertEquals(p.observation, Window.cut(long, 2_000))
-    assertEquals(Window.project(logOf(1L, steps(Vector("a", "short"))*), (), 4_000).observation, "short")
+    assertEquals(p.observation, s"${Window.cut(long, 2_000)}\nThe cell took 0.0 s.")
+    val short = Window.project(logOf(1L, steps(Vector("a", "short"))*), (), 4_000)
+    assertEquals(short.observation, "short\nThe cell took 0.0 s.")
   }
 
   test("Window: cut keeps a short text, and cuts a long one with a note of the rest") {
@@ -118,6 +123,161 @@ class WindowLaws extends ScalaCheckSuite:
     assertEquals(status, Status(2, 5, Vector("a", "b"), TurnKind.Program))
     assert(status.render.contains("Step 3 of 5"), status.render)
     assert(status.render.contains("a, b"), status.render)
+  }
+
+  /** A log with the time of each entry in milliseconds, and `seq` from 0. */
+  private def timed(entries: (Long, Entry)*): Vector[Logged] =
+    entries.toVector.zipWithIndex.map { case ((at, entry), i) =>
+      Logged(i.toLong, Meta(at, Source.Harness, Taint.Trusted, true), entry)
+    }
+
+  test(
+    "Window: the output of each cell ends with its time, and the status gives the time of the turn and of the last " +
+      "call to the model"
+  ) {
+    // In session 00429ec8 (2026-11-11), the model saw no times, so it gave a false reason for a slow turn. The times
+    // come from the journal alone, so the projection stays a pure function of the journal (7).
+    val log = timed(
+      0L      -> Entry.Activated(versions, config(steps = 5)),
+      0L      -> Entry.Input(RequestId("task"), "the task", Map.empty),
+      1_000L  -> Entry.TurnStarted,
+      1_000L  -> Entry.StepStarted(0),
+      4_000L  -> Entry.Acted("", "text-0", Some("code-0")),
+      6_500L  -> Entry.Observed("out-0", CellOutcome.Ok, Map.empty),
+      6_500L  -> Entry.StepStarted(1),
+      8_500L  -> Entry.Acted("", "text-1", Some("code-1")),
+      20_700L -> Entry.Observed("out-1", CellOutcome.Ok, Map.empty),
+      20_700L -> Entry.StepStarted(2)
+    )
+    val p = Window.project(log, (), 40_000)
+    assert(p.observation.startsWith("out-1"), p.observation)
+    assert(p.observation.endsWith("The cell took 12.2 s."), p.observation)
+    // The message of step 1 holds the output of step 0, with its time.
+    assert(p.history.messages.exists(_.toString.contains("The cell took 2.5 s.")), p.history.messages.toString)
+    // The call to the model of step 1 took 2.0 s, and the turn started 19.7 s before the last entry.
+    assert(p.status.contains("The turn has run for 19.7 s, and the last call to the model took 2.0 s."), p.status)
+    // Before the first step, the turn has no call to the model, so the status gives no time.
+    val first = Window.project(log.take(4), (), 40_000)
+    assert(!first.status.contains(" s."), first.status)
+  }
+
+  /** A turn of the kind `kind` with two cells and the outputs `first` and `second`. The first cell takes 2.5 s, the
+    * call to the model of step 1 takes 2.0 s, and the second cell takes 12.2 s. The last entry comes 19.7 s after the
+    * start of the turn.
+    */
+  private def twoCells(kind: TurnKind, first: String, second: String): Vector[(Long, Entry)] =
+    Vector(
+      0L      -> Entry.Activated(versions, config(kind, steps = 5)),
+      0L      -> Entry.Input(RequestId("task"), "the task", Map.empty),
+      1_000L  -> Entry.TurnStarted,
+      1_000L  -> Entry.StepStarted(0),
+      4_000L  -> Entry.Acted("", "text-0", Some("code-0")),
+      6_500L  -> Entry.Observed(first, CellOutcome.Ok, Map.empty),
+      6_500L  -> Entry.StepStarted(1),
+      8_500L  -> Entry.Acted("", "text-1", Some("code-1")),
+      20_700L -> Entry.Observed(second, CellOutcome.Ok, Map.empty),
+      20_700L -> Entry.StepStarted(2)
+    )
+
+  /** The times of `twoCells` in the status. */
+  private def twoCellsTimes: String = "The turn has run for 19.7 s, and the last call to the model took 2.0 s."
+
+  /** The field `observation` of each message of the history of `p`, oldest first. */
+  private def seenIn(p: Projection): Vector[String] =
+    p.history.messages.flatMap(m => DynamicValues.recordGet(m, "observation").flatMap(DynamicValues.asString))
+
+  /** The text of a projection: the status, the observation and each message of the history. */
+  private def textOf(p: Projection): String =
+    (p.status +: p.observation +: p.history.messages.map(_.toString)).mkString("\n")
+
+  test("Window: a cut output keeps its time note, in the observation and in the message of the history") {
+    val long = "x" * 10_000
+    Vector(TurnKind.Program, TurnKind.Chat).foreach { kind =>
+      val p = Window.project(timed(twoCells(kind, long, long)*), (), 8_000)
+      assertEquals(p.observation, s"${Window.cut(long, 4_000)}\nThe cell took 12.2 s.", kind.toString)
+      assertEquals(seenIn(p).lastOption, Some(s"${Window.cut(long, 1_000)}\nThe cell took 2.5 s."), kind.toString)
+    }
+  }
+
+  test("Window: a cell with an empty output gives only its time note") {
+    val p = Window.project(timed(twoCells(TurnKind.Program, "", "")*), (), 40_000)
+    assertEquals(p.observation, "The cell took 12.2 s.")
+    assertEquals(seenIn(p).lastOption, Some("The cell took 2.5 s."))
+  }
+
+  test("Window: a cell with no Observed, for example after a stop, has no time note") {
+    Vector(TurnKind.Program, TurnKind.Chat).foreach { kind =>
+      val stopped = twoCells(kind, "out-0", "out-1").take(8) :+ (9_000L -> Entry.StopRequested("FAKE-STOP"))
+      val log     = timed(stopped*)
+      val text    = textOf(Window.project(log, (), 40_000))
+      // Only the cell of step 0 has an `Observed`, so each note in the projection is the note of that cell.
+      assertEquals("The cell took [0-9.-]+ s\\.".r.findAllIn(text).toSet, Set("The cell took 2.5 s."), text)
+    }
+  }
+
+  test("Window: a chat and a program call give the same times in the status and in the outputs") {
+    val program = Window.project(timed(twoCells(TurnKind.Program, "out-0", "out-1")*), (), 40_000)
+    val chat    = Window.project(timed(twoCells(TurnKind.Chat, "out-0", "out-1")*), (), 40_000)
+    assert(program.status.endsWith(twoCellsTimes), program.status)
+    assert(chat.status.endsWith(twoCellsTimes), chat.status)
+    assertEquals(chat.observation, "out-1\nThe cell took 12.2 s.")
+    assertEquals(program.observation, chat.observation)
+    assertEquals(seenIn(chat).lastOption, Some("out-0\nThe cell took 2.5 s."))
+    assertEquals(seenIn(program).lastOption, seenIn(chat).lastOption)
+    // The memory tree projects the open turn with `openTurn`, so it gets the same times.
+    assertEquals(Window.openTurn(timed(twoCells(TurnKind.Chat, "out-0", "out-1")*), 40_000).status, chat.status)
+  }
+
+  test("Window: in a chat, the time note comes right after the output, before the messages that came during the cell") {
+    val log = timed(
+      0L     -> Entry.Activated(versions, config(TurnKind.Chat, steps = 5)),
+      0L     -> Entry.Input(RequestId("m1"), "FAKE-QUESTION", Map.empty),
+      1_000L -> Entry.TurnStarted,
+      1_000L -> Entry.StepStarted(0),
+      4_000L -> Entry.Acted("", "text-0", Some("code-0")),
+      5_000L -> Entry.Input(RequestId("m2"), "FAKE-MESSAGE", Map.empty),
+      6_500L -> Entry.Observed("out-0", CellOutcome.Ok, Map.empty),
+      6_500L -> Entry.StepStarted(1)
+    )
+    val p = Window.project(log, (), 40_000)
+    assertEquals(p.observation, "out-0\nThe cell took 2.5 s.\nThe harness wrote: FAKE-MESSAGE")
+  }
+
+  test("Status: in a chat, the times are of the open turn, and a new turn has no time before its first call") {
+    val ended = twoCells(TurnKind.Chat, "out-0", "out-1") ++ Vector(
+      21_000L -> Entry.Acted("", "FAKE-REPLY", None),
+      21_000L -> Entry.TurnEnded(TurnOutcome.Replied("FAKE-REPLY")),
+      30_000L -> Entry.Input(RequestId("m2"), "FAKE-SECOND", Map.empty),
+      30_000L -> Entry.TurnStarted,
+      30_000L -> Entry.StepStarted(0)
+    )
+    val before = Window.project(timed(ended*), (), 40_000).status
+    assert(!before.contains(" s."), before)
+    val acted = ended ++ Vector(
+      33_000L -> Entry.Acted("", "text-2", Some("code-2")),
+      34_000L -> Entry.Observed("out-2", CellOutcome.Ok, Map.empty),
+      34_000L -> Entry.StepStarted(1)
+    )
+    val after = Window.project(timed(acted*), (), 40_000).status
+    assert(after.endsWith("The turn has run for 4.0 s, and the last call to the model took 3.0 s."), after)
+  }
+
+  test("Status: the times have one decimal and a dot, also in a locale with a decimal comma") {
+    val original = Locale.getDefault
+    Locale.setDefault(Locale.GERMANY)
+    try
+      val p = Window.project(timed(twoCells(TurnKind.Program, "out-0", "out-1")*), (), 40_000)
+      assert(p.observation.endsWith("The cell took 12.2 s."), p.observation)
+      assert(p.status.endsWith(twoCellsTimes), p.status)
+    finally Locale.setDefault(original)
+  }
+
+  test("Status: a negative time, for example after a change of the clock, is 0.0 s") {
+    assertEquals(Window.cellNote(-1_000L), "The cell took 0.0 s.")
+    assertEquals(
+      TurnTimes(-1_000L, -1L).render,
+      "The turn has run for 0.0 s, and the last call to the model took 0.0 s."
+    )
   }
 
   /** The status text before the step `step` of a turn of the kind `kind` with the step limit 10. */

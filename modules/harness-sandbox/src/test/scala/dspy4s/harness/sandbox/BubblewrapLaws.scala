@@ -29,6 +29,39 @@ class BubblewrapLaws extends EscapeProbes(Bubblewrap, "Bubblewrap:", proxies = f
     finally place.close()
   }
 
+  test(
+    "Bubblewrap: the flags cover each secret file of the walk, mount each folder above it on itself before the control " +
+      "paths, and mount no path through a symbolic link"
+  ) {
+    // A command can move a folder above a mount, and the mount goes with it (the escape probes, 2026-11-15).
+    val place = Place()
+    try
+      val s    = place.scope
+      val deep = JFiles.createDirectories(s.resolve("app/conf")).resolve(".env.local")
+      JFiles.writeString(deep, "FAKE-DEEP"): Unit
+      JFiles.createDirectories(s.resolve("app/hooks")): Unit
+      JFiles.createSymbolicLink(s.resolve(".env.outside"), place.outside.resolve("r.txt")): Unit
+      val layout                 = place.layout.copy(hooks = Vector(s.resolve("app/hooks")))
+      val profile                = Profiles.forShell(Mode.local, s, layout, HostList.empty, Bubblewrap.closesNames)
+      val flags                  = Bubblewrap.flags(profile, s)
+      def at(args: String*): Int =
+        val i = flags.indexOfSlice(args)
+        assert(i >= 0, s"${args.mkString(" ")}: $flags")
+        i
+      val scope = at("--bind", s.toString, s.toString)
+      val app   = at("--bind", s.resolve("app").toString, s.resolve("app").toString)
+      val conf  = at("--bind", s.resolve("app/conf").toString, s.resolve("app/conf").toString)
+      val hooks = at("--ro-bind", s.resolve("app/hooks").toString, s.resolve("app/hooks").toString)
+      val cover = at("--ro-bind", "/dev/null", deep.toString)
+      assert(scope < app && app < conf && conf < hooks && hooks < cover, flags)
+      at("--ro-bind", "/dev/null", s.resolve(".env").toString): Unit
+      at("--ro-bind", "/dev/null", place.outside.resolve("r.txt").toString): Unit
+      assert(!flags.contains(s.resolve(".env.outside").toString), flags)
+      // A folder above a secret outside the writable roots needs no mount: a command cannot move it.
+      assert(!flags.contains(place.outside.toString), flags)
+    finally place.close()
+  }
+
   test("Bubblewrap: a profile that can write the seccomp filter gets no command line") {
     // A command could change the filter of a later command.
     assume(Bubblewrap.works(), "bubblewrap does not work on this host")

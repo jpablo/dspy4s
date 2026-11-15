@@ -152,6 +152,54 @@ class EffectLaws extends ScalaCheckSuite:
     }
   }
 
+  test("Job: after JobEnded the record of the job holds its end, and a later stop mark keeps the end") {
+    // A later host gives the end as the status of the job, and not Lost (10.3).
+    val job     = EffectId(cell, 0)
+    val spawned = state(journal((cellEntries() :+ Entry.EffectStarted(job, "spawn", args))*))
+    assertEquals(spawned.jobs.get(job).map(_.end), Some(None))
+    val ended = commit(spawned, Vector(Entry.JobEnded(job, JobEnd.Exited(3))))
+    assertEquals(ended.jobs.get(job), Some(JobRecord(spawned.lastTurn, stopRequested = false, Some(JobEnd.Exited(3)))))
+    val marked = commit(ended, Vector(Entry.Ended(SessionOutcome.Parked, "done")))
+    assertEquals(marked.jobs.get(job), Some(JobRecord(spawned.lastTurn, stopRequested = true, Some(JobEnd.Exited(3)))))
+  }
+
+  property("Job: a JobEnded changes only the end of its job, and nothing for a job that the state does not have") {
+    val end = JobEnd.Exited(7)
+    forAll(schedules) { run =>
+      for s <- everyState(run); job <- s.jobs.keys.toVector.take(1) :+ EffectId(-1L, 0) do
+        val after = commit(s, Vector(Entry.JobEnded(job, end)))
+        assertEquals(after.jobs.keySet, s.jobs.keySet)
+        for (id, record) <- s.jobs do
+          assertEquals(after.jobs(id), if id == job then record.copy(end = Some(end)) else record, s"the job $id")
+        assertEquals(after.copy(jobs = s.jobs), s.copy(nextSeq = s.nextSeq + 1))
+    }
+  }
+
+  property("Job: a journal has at most one JobEnded for each job, and it comes after the spawn of the job") {
+    forAll(schedules) { run =>
+      val entries = run.journal.map(_.entry)
+      val spawned = entries.scanLeft(Set.empty[EffectId]) {
+        case (ids, Entry.EffectStarted(id, "spawn", _)) => ids + id
+        case (ids, _)                                   => ids
+      }
+      for (entry, ids) <- entries.zip(spawned) do
+        entry match
+          case Entry.JobEnded(job, _) => assert(ids(job), s"the end of $job comes before its spawn")
+          case _                      => ()
+      val ends = entries.collect { case Entry.JobEnded(job, _) => job }
+      assertEquals(ends.distinct, ends)
+    }
+  }
+
+  test("Job: the random runs have ends of jobs, with an exit code and after a stop") {
+    // So the laws of the random runs also see JobEnded.
+    val ends = Iterator.continually(schedules.sample).flatten.take(300).flatMap(_.journal).collect {
+      case Logged(_, _, Entry.JobEnded(_, end)) => end
+    }.toSet
+    assert(ends.exists { case JobEnd.Exited(_) => true; case _ => false }, ends.toString)
+    assert(ends(JobEnd.Stopped), ends.toString)
+  }
+
   property("Job: a journal fork starts with no jobs") {
     forAll(schedules)(run => assert(forked(run.journal).jobs.isEmpty))
   }

@@ -1,17 +1,21 @@
 package dspy4s.harness.host
 
+import dspy4s.harness.{Journal, Support}
+import dspy4s.harness.Support.answer
 import dspy4s.harness.guest.JobStatus
 import dspy4s.harness.kernel.*
 import dspy4s.harness.host.HostSupport.*
 import dspy4s.harness.sandbox.ProcessWrapper
+import zio.blocks.schema.json.Json
 
+import java.nio.file.Path
 import java.util.concurrent.{ConcurrentLinkedQueue, CountDownLatch, TimeUnit}
 import java.util.concurrent.atomic.AtomicBoolean
 import scala.concurrent.duration.*
 import scala.jdk.CollectionConverters.*
 
-/** The laws of the job table (CODE_HARNESS_DESIGN.md, 10.3). The jobs are real processes under the wrapper, with no
-  * sandbox: the sandbox gets its tests in the laws of a work session.
+/** The laws of the job table (CODE_HARNESS_DESIGN.md, 10.3), and of the end of a job in the journal of a host. The jobs
+  * are real processes under the wrapper, with no sandbox: the sandbox gets its tests in the laws of a work session.
   */
 class JobLaws extends munit.FunSuite:
 
@@ -27,7 +31,7 @@ class JobLaws extends munit.FunSuite:
 
   /** A table with a grace period of 1 second, whose reports go into `reports`. */
   private def table(reports: ConcurrentLinkedQueue[(EffectId, JobStatus)] = ConcurrentLinkedQueue()): JobTable =
-    JobTable(1.second, (id, status) => reports.add((id, status)): Unit)
+    JobTable(1.second, (_, _) => (), (id, status) => reports.add((id, status)): Unit)
 
   test("Jobs: a job outlives the call that starts it, output reads its output, and await gives its exit code") {
     val jobs = table()
@@ -105,9 +109,45 @@ class JobLaws extends munit.FunSuite:
     finally jobs.close()
   }
 
-  test("Jobs: the status of a job of the state with no row in the table is Lost") {
+  test("Jobs: the status of a job of the state with no row in the table, no end and no stop mark is Lost") {
     val jobs = table()
     try assertEquals(jobs.status(job, withJob(job, marked = false)), JobStatus.Lost)
+    finally jobs.close()
+  }
+
+  test("Jobs: the status of a job with no row in the table is the end that its host recorded, also with a stop mark") {
+    // A later host gives the end of the journal, and not Lost (the live scenario store-reopen of 2026-11-10).
+    def ended(end: JobEnd, marked: Boolean): SessionState =
+      SessionState.initial.copy(jobs = Map(job -> JobRecord(2L, stopRequested = marked, Some(end))))
+    val jobs = table()
+    try
+      assertEquals(jobs.status(job, ended(JobEnd.Exited(3), marked = false)), JobStatus.Exited(3))
+      assertEquals(jobs.status(job, ended(JobEnd.Exited(0), marked = true)), JobStatus.Exited(0))
+      assertEquals(jobs.status(job, ended(JobEnd.Stopped, marked = false)), JobStatus.Stopped)
+    finally jobs.close()
+  }
+
+  test("Jobs: the end of each job, also with no report, gives its id and its end to recordEnd, before its report") {
+    val calls = ConcurrentLinkedQueue[String]()
+    val jobs  = JobTable(
+      1.second,
+      (id, end) => calls.add(s"end ${jobName(id)} $end"): Unit,
+      (id, status) => calls.add(s"report ${jobName(id)} $status"): Unit
+    )
+    try
+      assertEquals(jobs.start(job, launch("exit 3"), report = true), Right(()))
+      assert(eventually()(calls.size == 2), calls.toString)
+      assertEquals(jobs.start(EffectId(4L, 1), launch("exit 0"), report = false), Right(()))
+      assert(eventually()(calls.size == 3), calls.toString)
+      val stopped = EffectId(4L, 2)
+      assertEquals(jobs.start(stopped, launch("sleep 30"), report = false), Right(()))
+      jobs.sync(withJob(stopped, marked = true))
+      assert(eventually()(calls.size == 4), calls.toString)
+      Thread.sleep(300)
+      assertEquals(
+        calls.asScala.toVector,
+        Vector("end 4.0 Exited(3)", "report 4.0 Exited(3)", "end 4.1 Exited(0)", "end 4.2 Stopped")
+      )
     finally jobs.close()
   }
 
@@ -140,7 +180,7 @@ class JobLaws extends munit.FunSuite:
   test("Jobs: the report of a job sees its whole output") {
     val outputs = java.util.concurrent.ConcurrentHashMap[EffectId, String]()
     val ref     = java.util.concurrent.atomic.AtomicReference[JobTable]()
-    val jobs    = JobTable(1.second, (id, _) => outputs.put(id, ref.get.output(id).getOrElse("")): Unit)
+    val jobs    = JobTable(1.second, (_, _) => (), (id, _) => outputs.put(id, ref.get.output(id).getOrElse("")): Unit)
     ref.set(jobs)
     try
       // The race of the report and the reader is short, so the law runs many jobs with a long output.
@@ -211,4 +251,105 @@ class JobLaws extends munit.FunSuite:
     finally
       jobs.close()
       running("sleep 336").foreach(_.destroyForcibly(): Unit)
+  }
+
+  // ── The end of a job in the journal of a host ──
+
+  /** Writes a journal of the session `id(1)` whose turn started the job `job` with a `spawn`, and ended. The `Acted`
+    * entry has the `seq` 4, so the cell of the job is 4.
+    */
+  private def spawned(root: Path): Unit =
+    val log = Support.logOf(
+      1000L,
+      Entry.Activated(Support.versions, config()),
+      Entry.Input(RequestId("m1"), "FAKE-START", Map.empty),
+      Entry.TurnStarted,
+      Entry.StepStarted(0),
+      Entry.Acted("", "", Some("spawn(\"FAKE\")")),
+      Entry.EffectStarted(job, "spawn", Json.Null),
+      Entry.EffectDone(job, EffectResult.Value(Json.Null, "job")),
+      Entry.Observed("", CellOutcome.Ok, Map.empty),
+      Entry.TurnEnded(TurnOutcome.Replied("FAKE-STARTED"))
+    )
+    val file = SessionFile.open(SessionFile.pathOf(root, id(1)), id(1)).fold(e => fail(e), identity)
+    assertEquals(file.append(log, flush = true), Right(()))
+    file.close()
+
+  /** A runtime whose first activation starts the process of the job `job` with `command`, and whose turn answers. */
+  private def starting(command: String): SessionRuntime =
+    val script  = ScriptRuntime(_ => Support.Script(Vector(answer("FAKE-HI"))))
+    val started = AtomicBoolean(false)
+    new SessionRuntime:
+      def activate(session: SessionId, config: SessionConfig, journal: Journal, jobs: JobTable): Activation =
+        if started.compareAndSet(false, true) then jobs.start(job, launch(command), report = false): Unit
+        script.activate(session, config, journal, jobs)
+
+  /** The status of each job of the session `id(1)` in a new host at `root`, with the entries of its journal. */
+  private def reopened(root: Path): (Map[EffectId, JobStatus], Vector[Entry]) =
+    withHost(root, ScriptRuntime(_ => Support.Script(Vector.empty))) { host =>
+      val handle = opened(host, id(1), None)
+      (handle.jobStatus, entries(handle))
+    }
+
+  test("Jobs: the host commits the end of each job, also with no report, and a new host gives that end as its status") {
+    withRoot { root =>
+      spawned(root)
+      withHost(root, starting("exit 3")) { host =>
+        val handle = opened(host, id(1), None)
+        assertEquals(handle.send(message("m2")), Right(()))
+        assert(eventually()(entries(handle).contains(Entry.JobEnded(job, JobEnd.Exited(3)))), entries(handle).toString)
+        assertEquals(handle.jobStatus, Map(job -> JobStatus.Exited(3)))
+      }
+      val (status, log) = reopened(root)
+      assertEquals(status, Map(job -> JobStatus.Exited(3)))
+      assertEquals(log.count(_ == Entry.JobEnded(job, JobEnd.Exited(3))), 1, log.toString)
+    }
+  }
+
+  test("Jobs: the close of the host commits the end of each job that the close stops, before the writer ends") {
+    withRoot { root =>
+      spawned(root)
+      try
+        withHost(root, starting("sleep 337"), HostLimits(grace = 1.second)) { host =>
+          val handle = opened(host, id(1), None)
+          assertEquals(handle.send(message("m2")), Right(()))
+          assert(eventually()(running("sleep 337").nonEmpty), "the job did not start")
+          assert(eventually()(outcomes(handle).size == 2), entries(handle).toString)
+        }
+        assert(eventually(5)(running("sleep 337").isEmpty), "the job stays after the close")
+        // The close commits no stop mark, so with no end in the journal the job would be Lost.
+        val (status, log) = reopened(root)
+        assert(log.contains(Entry.JobEnded(job, JobEnd.Stopped)), log.toString)
+        assertEquals(status, Map(job -> JobStatus.Stopped))
+      finally running("sleep 337").foreach(_.destroyForcibly(): Unit)
+    }
+  }
+
+  test("Jobs: a job that ends after the end of its session commits nothing, and the end of the session does not wait") {
+    withRoot { root =>
+      spawned(root)
+      try
+        withHost(root, starting("sleep 339"), HostLimits(grace = 1.second)) { host =>
+          val handle = opened(host, id(1), None)
+          assertEquals(handle.send(message("m2")), Right(()))
+          assert(eventually()(running("sleep 339").nonEmpty), "the job did not start")
+          assert(eventually()(outcomes(handle).size == 2), entries(handle).toString)
+          assertEquals(handle.run(Command.Close(SessionOutcome.Parked, "FAKE-PARK")).map(_.closed), Right(true))
+          assert(eventually()(running("sleep 339").isEmpty), "Ended did not stop the job")
+        }
+        // The reopen comes at once, so it gets the lock only when the end of the session did not wait for the writer.
+        // Only the Activated of the reopen comes after Ended. Ended marks the job, so a new host gives Stopped.
+        val (status, log) = reopened(root)
+        val after         = log.drop(log.indexOf(Entry.Ended(SessionOutcome.Parked, "FAKE-PARK")) + 1)
+        assert(log.contains(Entry.Ended(SessionOutcome.Parked, "FAKE-PARK")), log.toString)
+        assert(
+          after.forall {
+            case Entry.Activated(_, _) => true
+            case _                     => false
+          },
+          log.toString
+        )
+        assertEquals(status, Map(job -> JobStatus.Stopped))
+      finally running("sleep 339").foreach(_.destroyForcibly(): Unit)
+    }
   }

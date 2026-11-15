@@ -67,7 +67,8 @@ object Support:
     * Step ::= StepStarted [ Acted [ Cell ] ]
     * Cell ::= ( EffectStarted | EffectDone )* Observed
     * }}}
-    * `Input`, `StopRequested`, `JobsStopRequested`, `Granted` and `ScopeRecorded` can come at any place.
+    * `Input`, `StopRequested`, `JobsStopRequested`, `JobEnded`, `Granted`, `ScopeRecorded` and `ModelChanged` can come
+    * at any place.
     */
   def isTurn(entries: Vector[Entry]): Boolean =
     val letters = entries.flatMap {

@@ -191,6 +191,17 @@ class ScreenLaws extends munit.FunSuite:
     )
   }
 
+  test("Screen: the end of a job prints no line, because /jobs shows it and a job with report sends a message") {
+    val log = Vector(
+      at(1, 0, Entry.JobEnded(EffectId(3, 0), JobEnd.Exited(0))),
+      at(2, 0, Entry.Input(RequestId("r2"), "The job 3.0 exited with the code 0.", Map.empty)),
+      at(3, 0, Entry.JobEnded(EffectId(3, 1), JobEnd.Stopped))
+    )
+    assertEquals(printed(log), Vector("● The job 3.0 exited with the code 0."))
+    assertEquals(entryText(log(0)), None)
+    assertEquals(entryText(log(2)), None)
+  }
+
   test("Screen: the end of a turn names each outcome") {
     def end(outcome: TurnOutcome): String =
       printed(Vector(at(1, 0, Entry.TurnStarted), at(2, 63_000, Entry.TurnEnded(outcome)))).last

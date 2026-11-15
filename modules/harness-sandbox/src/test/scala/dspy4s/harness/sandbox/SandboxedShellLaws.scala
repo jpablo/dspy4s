@@ -3,8 +3,10 @@ package dspy4s.harness.sandbox
 import dspy4s.harness.guest.{Files as GuestFiles, Mode}
 import munit.FunSuite
 
-import java.nio.file.Files
+import java.nio.file.{Files, Path}
+import java.util.concurrent.ConcurrentLinkedQueue
 import java.util.concurrent.atomic.AtomicInteger
+import scala.jdk.CollectionConverters.*
 
 /** The laws of the handler of `Shell` (5.3): `exec` runs only in a sandbox. The tests with the `Direct` backend check
   * the handler on each host, and the tests with a real backend skip on a host with none.
@@ -43,21 +45,26 @@ class SandboxedShellLaws extends FunSuite:
     try body(place)
     finally place.close()
 
-  /** A backend that counts its calls. It runs the command as it is. */
+  /** A backend that counts its calls and keeps the profile of each call. It runs the command as it is. */
   private final class Counting extends Backend:
-    val calls                                                                                                         = AtomicInteger(0)
-    val name                                                                                                          = "counting"
-    def works(): Boolean                                                                                              = true
-    def wrap(profile: Profile, cwd: java.nio.file.Path, argv: Vector[String], proxyPort: Option[Int]): Vector[String] =
+    val calls                                                                                           = AtomicInteger(0)
+    val profiles                                                                                        = ConcurrentLinkedQueue[Profile]()
+    val name                                                                                            = "counting"
+    def works(): Boolean                                                                                = true
+    def wrap(profile: Profile, cwd: Path, argv: Vector[String], proxyPort: Option[Int]): Vector[String] =
       calls.incrementAndGet(): Unit
+      profiles.add(profile): Unit
       argv
 
   test("Exec: with no backend, exec fails and the command does not run") {
     withPlace { place =>
       val marker = place.scope.resolve("marker")
-      val error  = intercept[SandboxError](shell(place, backend = None).exec(s"touch '$marker'"))
+      val none   = shell(place, backend = None)
+      val error  = intercept[SandboxError](none.exec(s"touch '$marker'"))
       assert(error.getMessage.contains("No OS sandbox works on this host"), error.getMessage)
       assert(!Files.exists(marker))
+      // No command runs, so the shell needs no walk for the secret files.
+      assertEquals(none.profile, Profiles.forMode(Mode.local, place.scope, place.layout, HostList.empty))
     }
   }
 
@@ -142,11 +149,79 @@ class SandboxedShellLaws extends FunSuite:
     }
   }
 
-  test("Exec: bubblewrap cannot close a name, so a command reads a file with a secret name (the gap of 5.4)") {
+  test(
+    "Exec: on a backend that cannot close a name, a command reads no file with a secret name that was there when the " +
+      "shell started, also in a sub folder"
+  ) {
+    // bubblewrap cannot close a name, so before this rule a command read .env on Linux (the gap of 5.4, 2026-11-12).
+    // The shell of an activation walks the scope once, and the backend covers each file that the walk finds.
     val backend = Backends.detect()
     assume(backend.exists(!_.closesNames), "the sandbox of this host closes the names")
     withPlace { place =>
-      assertEquals(shell(place, backend = backend).exec("cat .env"), "FAKE-ENV")
+      Files.createDirectories(place.scope.resolve("app/conf"))
+      Files.writeString(place.scope.resolve("app/conf/.env.local"), "FAKE-DEEP"): Unit
+      Files.writeString(place.scope.resolve(".envrc"), "FAKE-RC"): Unit
+      Files.writeString(place.scope.resolve("notes.env.txt"), "FAKE-NOTES"): Unit
+      val sh  = shell(place, backend = backend)
+      val top = sh.exec("cat .env 2>&1; echo FAKE-DONE")
+      assert(!top.contains("FAKE-ENV") && top.contains("FAKE-DONE"), top)
+      val deep = sh.exec("cat app/conf/.env.local 2>&1; echo FAKE-DONE")
+      assert(!deep.contains("FAKE-DEEP") && deep.contains("FAKE-DONE"), deep)
+      assert(sh.profile.isHidden(place.scope.resolve(".env")), sh.profile.toString)
+      assert(sh.profile.isHidden(place.scope.resolve("app/conf/.env.local")), sh.profile.toString)
+      // Only a secret name is closed.
+      assertEquals(sh.exec("cat .envrc notes.env.txt"), "FAKE-RCFAKE-NOTES")
+    }
+  }
+
+  test(
+    "Exec: on a backend that cannot close a name, the shell walks once at its start, and each command gets that profile"
+  ) {
+    // A walk before each command made each command wait in a large scope (5.4), so a later file is not hidden.
+    withPlace { place =>
+      val backend = Counting()
+      val sh      = shell(place, backend = Some(backend))
+      Files.writeString(place.scope.resolve(".env.later"), "FAKE-LATER"): Unit
+      sh.exec("true"): Unit
+      sh.exec("true"): Unit
+      assertEquals(backend.profiles.asScala.toVector, Vector(sh.profile, sh.profile))
+      assert(sh.profile.isHidden(place.scope.resolve(".env")), sh.profile.toString)
+      assert(!sh.profile.isHidden(place.scope.resolve(".env.later")), sh.profile.toString)
+    }
+  }
+
+  test(
+    "Exec: on a backend that cannot close a name, a file with a secret name that is made after the shell started stays " +
+      "readable, and the shell of the next activation covers it"
+  ) {
+    // The rule of 5.4 for such a backend: one walk at the start of each activation, and no walk before a command.
+    val backend = Backends.detect()
+    assume(backend.exists(!_.closesNames), "the sandbox of this host closes the names")
+    withPlace { place =>
+      val sh = shell(place, backend = backend)
+      assertEquals(sh.exec("echo FAKE-MADE > .env.made && cat .env.made"), "FAKE-MADE\n")
+      Files.writeString(place.scope.resolve(".env.person"), "FAKE-PERSON"): Unit
+      assertEquals(sh.exec("cat .env.made .env.person"), "FAKE-MADE\nFAKE-PERSON")
+      val next = shell(place, backend = backend).exec("cat .env.made .env.person 2>&1; echo FAKE-DONE")
+      assert(!next.contains("FAKE-MADE") && !next.contains("FAKE-PERSON") && next.contains("FAKE-DONE"), next)
+    }
+  }
+
+  test(
+    "Exec: on a backend that cannot close a name, a command reads no target of a symbolic link with a secret name, and " +
+      "the command runs"
+  ) {
+    val backend = Backends.detect()
+    assume(backend.exists(!_.closesNames), "the sandbox of this host closes the names")
+    withPlace { place =>
+      val real = Files.createDirectories(place.scope.resolve("conf")).resolve("real.txt")
+      Files.writeString(real, "FAKE-REAL"): Unit
+      Files.createSymbolicLink(place.scope.resolve(".env.outside"), place.outside.resolve("r.txt")): Unit
+      Files.createSymbolicLink(place.scope.resolve(".env.inside"), real): Unit
+      Files.createSymbolicLink(place.scope.resolve(".env.relative"), Path.of("conf/real.txt")): Unit
+      val sh  = shell(place, backend = backend)
+      val out = sh.exec("cat .env.outside .env.inside .env.relative conf/real.txt 2>&1; echo FAKE-DONE")
+      assert(!out.contains("FAKE-OUTSIDE") && !out.contains("FAKE-REAL") && out.contains("FAKE-DONE"), out)
     }
   }
 

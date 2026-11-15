@@ -3,13 +3,14 @@
 #
 # `python3 scripts/mutants/mutants.py modules/harness-host/src/test/mutants.toml` applies each mutant alone, runs the
 # suites of `tests`, and restores the code. The whole suite of the host takes minutes, so `tests` names only the laws of
-# the exchange file, of the journal file and of the scopes. The mutants of the scopes break a rule of choice 19 (5.4)
-# of docs/code-harness/CODE_HARNESS_DESIGN.md: the clone of a Worktree scope and the publish of its branch.
+# the exchange file, of the journal file, of the scopes and of the jobs. The mutants of the scopes break a rule of
+# choice 19 (5.4) of docs/code-harness/CODE_HARNESS_DESIGN.md: the clone of a Worktree scope and the publish of its
+# branch. The mutants of the jobs break a rule of the end of a job in the journal (10.3 of the same file).
 
 module = "harness-host"
 project = "harnessHost"
 sources = "modules/harness-host/src/main/scala/dspy4s/harness/host"
-tests = "dspy4s.harness.host.ExchangeFileLaws dspy4s.harness.host.SessionFileLaws dspy4s.harness.host.ScopesLaws"
+tests = "dspy4s.harness.host.ExchangeFileLaws dspy4s.harness.host.SessionFileLaws dspy4s.harness.host.ScopesLaws dspy4s.harness.host.JobLaws"
 
 # ── The labels (4.2) ──
 
@@ -154,3 +155,53 @@ file = "SessionHost.scala"
 old = "refusalSent = true"
 new = "refusalSent = false"
 
+# ── The end of a job in the journal (10.3) ──
+
+[[mutant]]
+name = "Mutant: the table gives the end of a job only with report"
+[[mutant.edit]]
+file = "Jobs.scala"
+old = "              Try(recordEnd(id, end)): Unit"
+new = "              if report then Try(recordEnd(id, end)): Unit"
+
+[[mutant]]
+name = "Mutant: the report of a job comes before its end"
+[[mutant.edit]]
+file = "Jobs.scala"
+old = "              Try(recordEnd(id, end)): Unit\n              if report then Try(this.report(id, jobStatusOf(end))): Unit"
+new = "              if report then Try(this.report(id, jobStatusOf(end))): Unit\n              Try(recordEnd(id, end)): Unit"
+
+[[mutant]]
+name = "Mutant: the status of a job with no row ignores its recorded end"
+[[mutant.edit]]
+file = "Jobs.scala"
+old = "      record.flatMap(_.end).map(jobStatusOf).getOrElse {"
+new = "      Option.empty[JobEnd].map(jobStatusOf).getOrElse {"
+
+[[mutant]]
+name = "Mutant: the stop mark of a job wins over its recorded end"
+[[mutant.edit]]
+file = "Jobs.scala"
+old = "      record.flatMap(_.end).map(jobStatusOf).getOrElse {\n        if record.exists(_.stopRequested) then JobStatus.Stopped else JobStatus.Lost\n      }"
+new = "      if record.exists(_.stopRequested) then JobStatus.Stopped\n      else record.flatMap(_.end).map(jobStatusOf).getOrElse(JobStatus.Lost)"
+
+[[mutant]]
+name = "Mutant: the host commits no end of a job"
+[[mutant.edit]]
+file = "SessionHost.scala"
+old = "if !writer.state.closed then writer.run(Command.RecordJobEnd(job, end), Source.Harness): Unit"
+new = "if writer.state.closed then writer.run(Command.RecordJobEnd(job, end), Source.Harness): Unit"
+
+[[mutant]]
+name = "Mutant: the writer of a session ends before its jobs"
+[[mutant.edit]]
+file = "SessionHost.scala"
+old = "        step(jobs.close())\n        step(recorder.shutdownNow(): Unit)\n        step(writer.close())"
+new = "        step(writer.close())\n        step(recorder.shutdownNow(): Unit)\n        step(jobs.close())"
+
+[[mutant]]
+name = "Mutant: the end of a job after Ended waits for the writer"
+[[mutant.edit]]
+file = "SessionHost.scala"
+old = "if !writer.state.closed then writer.run(Command.RecordJobEnd(job, end), Source.Harness): Unit"
+new = "if writer.log.nonEmpty then writer.run(Command.RecordJobEnd(job, end), Source.Harness): Unit"

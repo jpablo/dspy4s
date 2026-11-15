@@ -23,8 +23,9 @@ def jobStarts(log: Vector[Logged]): Map[EffectId, JobStart] =
   commands.map((job, command) => job -> JobStart(command, outcomes.get(job)))
 
 /** The text of `/jobs`: one line for each job in the order of `jobOrder`, with its `jobName`, its status and its
-  * command in quotes. A job with no row in the job table and no process did not start when its call failed or waits for
-  * an approval, starts while its call runs, and is lost with its host after its call ran.
+  * command in quotes. After a reopen, a job has the end that the journal recorded (`JobEnded`). A job with no process
+  * and no end did not start when its call failed or waits for an approval, starts while its call runs, and is lost with
+  * its host after its call ran.
   */
 def jobsText(current: SessionState, starts: Map[EffectId, JobStart], status: Map[EffectId, JobStatus]): String =
   val jobs = jobOrder(current)

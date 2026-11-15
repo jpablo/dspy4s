@@ -116,6 +116,7 @@ enum Entry derives Schema:
   case TurnEnded(outcome: TurnOutcome)
   case Ended(outcome: SessionOutcome, reason: String)
   case ModelChanged(model: ModelChoice)                        // a person changed the model (CLI_SCREEN.md, 14)
+  case JobEnded(job: EffectId, end: JobEnd)                    // the end of a job, from its host (10.3)
 
 final case class EffectId(cell: Long, n: Int)                  // `cell` is the `seq` of the `Acted` entry
 
@@ -132,7 +133,7 @@ enum TurnOutcome derives Schema:
   case Failed(error: String)
 ```
 
-The entries of one turn form a small language. `Input`, `StopRequested`, `JobsStopRequested`, `Granted`,
+The entries of one turn form a small language. `Input`, `StopRequested`, `JobsStopRequested`, `JobEnded`, `Granted`,
 `ScopeRecorded` and `ModelChanged` can occur at any place:
 
 ```text
@@ -305,6 +306,7 @@ enum Command:
   case Grant(request: RequestId, rule: GuardRule, lifetime: GrantLifetime)
   case Close(outcome: SessionOutcome, reason: String)
   case ChangeModel(model: ModelChoice)
+  case RecordJobEnd(job: EffectId, end: JobEnd)
 
 def decide(command: Command, s: SessionState): Either[Rejection, Vector[Entry]]
 ```
@@ -325,9 +327,11 @@ def decide(command: Command, s: SessionState): Either[Rejection, Vector[Entry]]
 | `Grant` with no pending call | `Granted`. It starts no turn. |
 | `Close` | `Ended`, only with no open turn |
 | `ChangeModel` | `ModelChanged`, also in a turn. With the model of the session, nothing. A session that has ended gives the rejection `SessionClosed`. The fold puts the model in the configuration, so the next call to the policy and a reopen use it (CLI_SCREEN.md, 14.4). |
+| `RecordJobEnd` | `JobEnded`, also with no open turn and in a release (10.3). For a job with an end, or a job that the session does not have, nothing. A session that has ended gives the rejection `SessionClosed`. |
 
 The rules for `Commit`:
 
+- `ModelChanged` and `JobEnded` never commit through `Commit`: only `ChangeModel` and `RecordJobEnd` give them.
 - After `StopRequested`, only outcomes can commit: `EffectDone`, `Observed` and `TurnEnded`.
 - `EffectStarted` needs an `EffectId` of the current cell. So a late message from an old cell cannot enter a later
   cell.
@@ -410,7 +414,7 @@ TurnEnded(Aborted)
 | Grant | A `Once` grant covers one call. A `Turn` grant ends at the next `TurnEnded`. No grant stays after `Ended`, and a journal fork starts with no grants. A repeat of a `Grant` commits nothing. |
 | Pending call | A pending call has no active grant that covers it. `TurnStarted` and `Ended` empty `pending`, and a journal fork starts with no pending calls. A session with no person never gets a pending call. |
 | Guard | `verdict` is a homomorphism from `Guard` to `Verdict`. A grant changes only `Ask`, and more grants never make a result stronger. |
-| Job | An `Abort` changes no job. A stop covers only the jobs with an intent before it. After `Abort` and then `StopJobs(OfLastTurn)`, no job of that turn starts or runs. `Ended` stops all jobs, and a journal fork starts with no jobs. |
+| Job | An `Abort` changes no job. A stop covers only the jobs with an intent before it. After `Abort` and then `StopJobs(OfLastTurn)`, no job of that turn starts or runs. `Ended` stops all jobs, and a journal fork starts with no jobs. A job has at most one `JobEnded`, after its `spawn`. A `JobEnded` changes only the end of its job, and a later stop mark keeps that end. |
 | Repair | `repair` closes each open part, and `repair(state after repair)` is empty. |
 | Store | The store holds only the writes of cells that completed. |
 | Names | The note after a restart lists the names of the cells that completed, and no name of a failed cell. |
@@ -793,12 +797,12 @@ control path either: it changes what git shows, but it runs no code.
   on macOS (2026-11-13) showed that `.git/index` and the refs stay writable, and that a write to `.git/config`, a
   rename onto it, the removal and the move of `.git`, a write to the configuration or the hooks of a submodule, and a
   nested `.git` fail.
-- The walk of the optional `Profiles.forCommand` does not enter a `.git` folder or a control path.
+- The walk of Linux (`Profiles.forShell`, below) does not enter a `.git` folder or a control path.
 - A backend that cannot close a name (`Backend.closesNames` is false) keeps all of `.git` in the scope read-only, so
   its observations stay true. So on bubblewrap a command cannot commit, as before choice 19. bubblewrap closes each
   other control path that exists with a read-only mount. A mount at a path that does not exist makes an empty file in
   the folder of the person. So on Linux, a control path that does not exist yet stays writable. This is a gap of
-  Linux, as for `.env`. The profile of such a backend holds only the control paths that exist when the profile is
+  Linux, as for a `.env` file that is made after the start of an activation. The profile of such a backend holds only the control paths that exist when the profile is
   made, so it does not claim a rule that the backend cannot apply. The escape probes on Linux (2026-11-14) first
   found that claim: a command could make `.vscode/settings.json`, and the profile said that it could not.
 - A command that needs the network, for example `git fetch`, `git pull` or `git push`, fails in a mode with no
@@ -860,8 +864,9 @@ compare each backend with these observations.
   `~/.codex/auth.json`, `~/.claude/.credentials.json`, `~/.m2/settings.xml`, `~/.gradle/gradle.properties`,
   `~/.sbt/.credentials`, `~/.ivy2/.credentials`, `~/.cargo/credentials`, `~/.cargo/credentials.toml`,
   `~/.local/share/keyrings`, `~/.pgpass`, `~/.vault-token` and `~/.terraform.d/credentials.tfrc.json`. A file or a
-  folder with the name `.env` or `.env.*` is secret in each folder. A file call refuses such a name, and on macOS a
-  command cannot reach it either (the next item). A proposal: the design names only `~/.ssh`, `~/.aws` and `.env`.
+  folder with the name `.env` or `.env.*` is secret in each folder. A file call refuses such a name. On macOS a
+  command cannot reach it either, and on Linux a command cannot reach such a file that was there at the start of the
+  activation (the walk of Linux, below). A proposal: the design names only `~/.ssh`, `~/.aws` and `.env`.
 - The host list is a set of patterns: `name`, `name:port` or `name:*`. A name `*.d` matches each subdomain of `d`. A
   pattern with no port allows only the ports 80 and 443. A proposal: the design gives the host list no type.
 - Seatbelt denies by default, as in Codex. A child can start programs, read files, and look only at the processes of
@@ -875,21 +880,43 @@ compare each backend with these observations.
   `socketpair` for a datagram pair, `io_uring_setup`, and each call of another ABI. A stream pair from `socketpair`
   stays allowed. The filter exists for aarch64 and x86_64, and on another host bubblewrap does not work. Seatbelt
   denies these connections by default.
-- Commands use the fixed profile of the mode, with no walk of the scope. Until 2026-11-12, the shell walked the
-  writable roots for secret names before each command, and it read the times of each folder. So each command waited in
-  a large scope: the first `exec` waited 34 s in a scope of 1.75 million entries, and 9.7 s in a scope of 300,000
-  folders. Now a backend that can close a name (`Backend.closesNames`) gets the secret names in its profile
-  (`Profile.hiddenNames`). Seatbelt closes each name with one rule on the path, a regex for each folder
-  (`Seatbelt.nameRule`). A probe on macOS showed that the rule also stops a read through a symbolic link, a hard link,
-  a move and a new file with a secret name, and that `.envrc` and `notes.env.txt` stay open. bubblewrap cannot close a
-  name, so on Linux a command can read, write, link or move a file named `.env` or `.env.*`. A proposal for the
-  review: this gap of Linux goes against the rule of CODE_HARNESS.md that `.env` is not readable. The words of the
-  task tell the model which rule its host has. The optional `Profiles.forCommand` and `SecretIndex` utilities remain,
-  and the shell does not use them.
-- A future full scan must start only on request, show progress and accept a stop. Session startup and normal commands
-  must not wait for it. Automatic checks must have a fixed work limit and use paths that the harness already has;
-  they must not walk the scope. The harness can suggest a full scan from those paths, but must not start one to decide
-  whether to suggest it. There is no client command for an on-demand scan yet.
+- The commands of a shell use one profile (`Profiles.forShell`), which the shell makes at its start, with no walk
+  before a command. The host makes one shell for each activation. Until 2026-11-12, the shell walked the writable
+  roots for secret names before each command, and it read the times of each folder. So each command waited in a large
+  scope: the first `exec` waited 34 s in a scope of 1.75 million entries, and 9.7 s in a scope of 300,000 folders, and
+  a command waited 30.6 s in a scope of about 202,000 folders. Commit 51a9123a removed that walk. A backend that can
+  close a name (`Backend.closesNames`) gets the secret names in its profile (`Profile.hiddenNames`). Seatbelt closes
+  each name with one rule on the path, a regex for each folder (`Seatbelt.nameRule`). A probe on macOS showed that the
+  rule also stops a read through a symbolic link, a hard link, a move and a new file with a secret name, and that
+  `.envrc` and `notes.env.txt` stay open. macOS has no walk. The words of the task tell the model which rule its host
+  has.
+- **The walk of Linux (2026-11-15).** From 2026-11-12 to 2026-11-15, a command on Linux could read, write, link or
+  move a file named `.env` or `.env.*`, against the rule of CODE_HARNESS.md that `.env` is not readable. The person
+  chose this rule on 2026-11-15. bubblewrap cannot close a name, so the shell of each activation walks the writable
+  roots once, at its start (`Profiles.forShell`, `SecretIndex`). The walk does not enter a folder with the name `.git`,
+  `node_modules` or `target` below a writable root (`SecretIndex.Skipped`), a control path or a hidden part, and it
+  does not follow a link. bubblewrap covers each file and folder that the walk found: the null device over a file, and
+  an empty read-only folder over a folder. The profile keeps the secret names of the walk (`Profile.foundNames`), so
+  the words of the task give the rule and its limit. The file calls of a work session use the profile of the shell
+  too.
+  - The limit: a file with a secret name that is made after the start of an activation stays readable and writable
+    to a command until the session opens again. This is true for a file of a command and for a file of the person. A
+    file with a secret name in `.git`, `node_modules` or `target` also stays readable to a command.
+  - The cost: the activation waits for the walk. One walk of `~/GitHub` on macOS (2026-11-15) listed 61,000 folders in
+    4.9 s to 5.4 s, with a warm file cache. With no skip of `node_modules` and `target`, it listed 127,000 folders in
+    19.2 s the first time, and in 9.5 s to 10.2 s after that. The walk shows no progress and has no stop.
+  - A command cannot move a mount, but it can move a folder above a mount, and the mount goes with the folder. The
+    escape probes on Linux showed that the next command then read the file at its new path. So bubblewrap also mounts
+    each folder between a writable root and a covered path on itself (`Bubblewrap.flags`). A command cannot move or
+    remove such a folder. These mounts come before the mounts of the control paths, so they do not cover a control
+    path in such a folder.
+  - bwrap cannot mount at a path through a symbolic link, and then each command fails. So bubblewrap covers only a
+    real path. For a link with a secret name, the walk also gives the real target, and bubblewrap covers the target. A
+    command can remove or change such a link, but it cannot read the target through it.
+- The walk of Linux is the only automatic walk. A later full scan must start only on request, show progress and
+  accept a stop, and a normal command must not wait for it. Other automatic checks must have a fixed work limit and
+  use paths that the harness already has. The harness can suggest a full scan from those paths, but must not start one
+  to decide whether to suggest it. There is no client command for an on-demand scan yet.
 - Seatbelt escapes a quote, a backslash, a newline and a return in a path, so a file name cannot stop the next
   commands.
 - A backend works when `/bin/sh -c true` runs under its own command line. A probe with other arguments can pass in a
@@ -1233,8 +1260,26 @@ final case class PolicyStep(text: String, code: Option[String])
 - **Cheap steps first.** A strategy cuts long observations with no LM call, and it adds a note that says how to read
   the remainder. A summary that does not shrink is rejected.
 - **The status section.** `status` holds the names in the REPL, the keys of the store, the scope, and the jobs with
-  their states: running, exited, stopped or lost. It is typed, and it renders only its changes, so the prompt prefix
-  stays the same.
+  their states: running, exited, stopped or lost. It also holds the times of the open turn (see "The times"). It is
+  typed, and it renders only its changes, so the prompt prefix stays the same.
+- **The times.** These rules were made with the user on 2026-11-15. In session 00429ec8 (2026-11-11), the model saw no
+  times, so it gave a false reason for a slow turn.
+  - Each cell output that the model sees ends with its time on its own line, for example "The cell took 12.3 s." The
+    time of a cell is the time of its `Observed` minus the time of its `Acted`. The note comes after the cut of the
+    output, so a cut does not remove it, in the observation and in each message of the history. In a chat, the note
+    comes right after the output, before the messages that came during the cell. A cell with no `Observed`, for
+    example after a stop, has no note. An empty output gives only the note.
+  - The status ends with the times of the open turn, for example "The turn has run for 19.7 s, and the last call to
+    the model took 2.0 s." The time of the turn is the time of the last entry minus the time of the last
+    `TurnStarted`. The time of the last call is the time of the last `Acted` of the open turn minus the time of its
+    `StepStarted`, so it includes the memory update. Before the first `Acted` of the open turn, the status gives no
+    time.
+  - The seconds have one decimal and a dot, also in another locale (`Locale.ROOT`). A negative time, for example
+    after a change of the clock, is 0.0 s.
+  - The texts come from the times of the journal alone (`Logged.meta.atMillis`), so `project` stays a pure function
+    of the journal. A shift of all the times gives the same projection. A chat, a program call (RLM) and the open turn
+    of the memory tree get the same times. The memory messages of earlier turns (`MemoryLog`) keep their text, because
+    a new text gives new keys, and the stored lines of each session then build again.
 - **The last step of a chat.** A chat has one more step after the step limit, which only answers (4.3). Before the
   step `steps - 1` of a chat, the status says "Step n of n. The next step only answers, with no code." Before the step
   `steps`, it says "The last step: answer with no code." A program call has no step that only answers, so its last
@@ -1987,7 +2032,11 @@ enum JobSelector derives Schema:
   case OfLastTurn                   // the open turn, or the last turn if no turn is open
   case All
 
-final case class JobRecord(turn: Long, stopRequested: Boolean) derives Schema
+enum JobEnd derives Schema:
+  case Exited(code: Int)
+  case Stopped                      // a stop mark, or the close of the host, stopped the job
+
+final case class JobRecord(turn: Long, stopRequested: Boolean, end: Option[JobEnd] = None) derives Schema
 ```
 
 1. The writer commits `JobsStopRequested`, and `evolve` marks the jobs that the selector covers.
@@ -2006,9 +2055,19 @@ A client has two controls:
 - **Stop all** sends `Abort`, then `StopJobs(OfLastTurn)`. After `StopRequested`, `decide` accepts no new intent, so
   no job of that turn can start later.
 
+**The end of a job.** When a job ends, the host commits `JobEnded` with the exit code of the job, or with `Stopped`
+after a stop. The host commits it for each job, also for a job with no `report` and for a job that the close of the
+host stops. The close of a session stops its jobs before its writer ends, so these ends reach the journal. A job that
+ends after `Ended` commits nothing. `evolve` puts the end in the `JobRecord`, and `RecordJobEnd` gives one end for
+each job. The entry holds no output, so the output of a job stays lost after a restart.
+
+This rule came on 2026-11-15. In the live scenario store-reopen of 2026-11-10, `waitJob` in a new host gave `Lost` for
+a job that ended with the code 0, because the journal kept no end of a job.
+
 **A crash of the host.** A process can outlive its host. So each job runs under a small wrapper that holds a pipe to
-the host. When the pipe closes, the wrapper stops the process group. After a restart the job table is empty, and
-`status` reports a job with no mark and no row as lost.
+the host. When the pipe closes, the wrapper stops the process group. After a restart the job table is empty. `status`
+then gives the end that the journal recorded. A job with no end is `Stopped` with a stop mark, and lost with no mark:
+it ran when its host crashed.
 
 ### 10.4 Distribution
 
@@ -2095,8 +2154,9 @@ These points are proposals for the review:
 - A study of the TUI libraries for Scala and Java (2026-11-11) found no Scala library that fits better than JLine:
   termflow uses only the alternate screen, and TamboUI and termflow bring the JLine 3 bundle, a second copy of the
   JLine packages. TamboUI, with its inline runner, is the choice for a richer client later.
-- A work session starts no walk for secret files at its open or activation. Commands use the fixed profile (5.4),
-  with no directory walk before `exec` or `spawn`. On macOS, that profile closes the secret names with one rule.
+- On macOS, a work session starts no walk for secret files: the profile of the shell closes the secret names with one
+  rule (5.4). On Linux, the shell of each activation walks the scope once at its start, since 2026-11-15. No command
+  waits for a walk before `exec` or `spawn`.
 - The line editor has the screen of [CLI_SCREEN.md](CLI_SCREEN.md), phase A (2026-11-11). `Screen` reads each entry: a
   finished step goes into the history as its text and one summary line of its cell, for example `▸ Ran 2 commands, read
   1 file · 1.4 s #17`, and the reply shows in full. The step that runs is the live block, above a rule and the prompt `›

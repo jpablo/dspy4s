@@ -706,6 +706,13 @@ call:
 | `Shell^`, `Files^` and `Network^` (full mode) | The policy of local mode, plus the network through a proxy that applies the host list of the `guarded` handler. |
 | Each mode | The classified paths and the secrets of the user (for example `~/.ssh`, `~/.aws` and `.env`) are not readable. The other paths outside the workspace are read-only. |
 
+On Linux, `.env` has a limit ([CODE_HARNESS_DESIGN.md](CODE_HARNESS_DESIGN.md), 5.4, 2026-11-15). bubblewrap cannot
+close a file name, so the shell walks the workspace once at the start of each activation, and it covers each `.env`
+file that it finds. A `.env` file that is made after the start of the activation stays readable to a command until
+the next activation. The walk does not enter `.git`, `node_modules` or `target`, so a `.env` file in such a folder
+stays readable too. One walk of a workspace with 61,000 folders took about 5 s on macOS. On macOS, Seatbelt closes
+the name in each folder with no walk.
+
 Law: the authority of a child process is at most the authority of the capabilities in scope at its `exec` call.
 With this law, the rule of F2 holds for `exec`.
 

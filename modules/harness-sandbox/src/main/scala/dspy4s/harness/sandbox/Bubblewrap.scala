@@ -1,6 +1,7 @@
 package dspy4s.harness.sandbox
 
 import java.nio.file.{Files as JFiles, Path}
+import scala.util.Try
 
 /** The backend for Linux: `bwrap` (CODE_HARNESS.md, F8).
   *
@@ -38,6 +39,11 @@ object Bubblewrap extends Backend:
     * that exists can have a mount, so a new file with a secret name has none, and nor has a control path that does not
     * exist yet (5.4). A mount cannot close a name, so a profile with a rule on names gets no flags: such a profile
     * comes only from a backend that closes names (`Backend.closesNames`).
+    *
+    * A command cannot move a mount, but it can move a folder above one, and the mount goes with the folder. Then the
+    * next command, with the same profile, finds the secret at a new path with no cover. So each folder between a
+    * writable root and a covered secret is a mount of itself too (`anchors`). These mounts come before the mounts of
+    * the control paths, so they do not cover a control path in such a folder.
     */
   def flags(profile: Profile, cwd: Path): Vector[String] =
     val paths = profile.controls.map(_.shape).map {
@@ -49,10 +55,27 @@ object Bubblewrap extends Backend:
     val base       = Vector("--ro-bind", "/", "/", "--dev", "/dev", "--proc", "/proc")
     val writable   = profile.writable.filter(JFiles.isDirectory(_)).flatMap(p => Vector("--bind", p.toString, p.toString))
     val readOnly   = paths.filter(JFiles.exists(_)).flatMap(p => Vector("--ro-bind", p.toString, p.toString))
-    val hidden     = profile.hidden.distinct
+    // bwrap cannot mount at a path through a symbolic link, and then each command fails. The profile also holds the
+    // real path of each such secret (`SecretIndex`, `Layout.forSession`), so the mount at the real path covers it.
+    val hidden = profile.hidden.distinct.filter(isReal)
     // A mount inside a covered folder fails, because the empty folder does not have the path.
-    val secrets = hidden.filterNot(p => hidden.exists(q => !q.equals(p) && p.startsWith(q))).flatMap(cover)
-    namespaces ++ base ++ writable ++ readOnly ++ secrets ++ Vector("--chdir", cwd.toString)
+    val secrets  = hidden.filterNot(p => hidden.exists(q => !q.equals(p) && p.startsWith(q)))
+    val anchored = anchors(profile.writable, secrets).flatMap(p => Vector("--bind", p.toString, p.toString))
+    namespaces ++ base ++ writable ++ anchored ++ readOnly ++ secrets.flatMap(cover) ++ Vector("--chdir", cwd.toString)
+
+  /** The folders between a root of `writable` and a path of `secrets`, from the top, with no repeat. Each path of
+    * `secrets` is a real path, so each folder is a folder and not a symbolic link.
+    */
+  private def anchors(writable: Vector[Path], secrets: Vector[Path]): Vector[Path] =
+    secrets.flatMap { path =>
+      writable.filter(root => path.startsWith(root) && !path.equals(root)).flatMap { root =>
+        val relative = root.relativize(path)
+        (1 until relative.getNameCount).map(n => root.resolve(relative.subpath(0, n)))
+      }
+    }.distinct
+
+  /** True when `path` exists and is its real path: no part of it is a symbolic link. */
+  private def isReal(path: Path): Boolean = Try(path.toRealPath().equals(path)).getOrElse(false)
 
   /** The mount that covers a secret: an empty read-only folder over a folder, and the null device over a file. */
   private def cover(path: Path): Vector[String] =

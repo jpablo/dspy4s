@@ -118,6 +118,27 @@ old = "val readOnly   = paths.filter(JFiles.exists(_)).flatMap(p => Vector(\"--r
 new = "val readOnly   = paths.filter(_ => false).map(_.toString)"
 
 [[mutant]]
+name = "Mutant: bubblewrap mounts no folder above a secret, so a command can move the folder and its cover"
+[[mutant.edit]]
+file = "Bubblewrap.scala"
+old = "val anchored = anchors(profile.writable, secrets).flatMap("
+new = "val anchored = anchors(profile.writable, secrets).take(0).flatMap("
+
+[[mutant]]
+name = "Mutant: the mounts of the folders above a secret come after the control paths and cover them"
+[[mutant.edit]]
+file = "Bubblewrap.scala"
+old = "namespaces ++ base ++ writable ++ anchored ++ readOnly ++ secrets.flatMap(cover)"
+new = "namespaces ++ base ++ writable ++ readOnly ++ anchored ++ secrets.flatMap(cover)"
+
+[[mutant]]
+name = "Mutant: bubblewrap mounts a secret at a path through a symbolic link, so each command fails"
+[[mutant.edit]]
+file = "Bubblewrap.scala"
+old = "val hidden = profile.hidden.distinct.filter(isReal)"
+new = "val hidden = profile.hidden.distinct.filter(p => JFiles.exists(p) || isReal(p))"
+
+[[mutant]]
 name = "Mutant: the journals are readable"
 [[mutant.edit]]
 file = "Profile.scala"
@@ -131,12 +152,49 @@ file = "Profile.scala"
 old = "name.endsWith(p.drop(1)) && name.length > p.length - 1"
 new = "name.endsWith(p.drop(2))"
 
+# ── The walk at the start of a shell, on a backend that cannot close a name (5.4, 2026-11-15) ──
+
 [[mutant]]
-name = "Mutant: the profile of a command hides no secret file"
+name = "Mutant: the shell of a backend that cannot close a name hides no secret file"
 [[mutant.edit]]
 file = "Profile.scala"
 old = "profile.hide(secretFiles(profile, layout.secretNames))"
 new = "profile"
+
+[[mutant]]
+name = "Mutant: the shell of a backend that closes names walks, and its profile closes no name"
+[[mutant.edit]]
+file = "SandboxedShell.scala"
+old = "Profiles.forShell(config.mode, root, layout, hosts, sandbox.closesNames)"
+new = "Profiles.forShell(config.mode, root, layout, hosts, sandbox.closesNames && false)"
+
+[[mutant]]
+name = "Mutant: the shell with no backend walks"
+[[mutant.edit]]
+file = "SandboxedShell.scala"
+old = "backend.fold(Profiles.forMode(config.mode, root, layout, hosts))("
+new = "backend.fold(Profiles.forShell(config.mode, root, layout, hosts, false))("
+
+[[mutant]]
+name = "Mutant: the shell does not keep the names of its walk, so the words give no rule of the walk"
+[[mutant.edit]]
+file = "Profile.scala"
+old = ".copy(foundNames = layout.secretNames)"
+new = ".copy(foundNames = Set.empty)"
+
+[[mutant]]
+name = "Mutant: the words give the rule of the walk only for a profile with no walk"
+[[mutant.edit]]
+file = "Profile.scala"
+old = "Option.when(fileOnly.nonEmpty && profile.foundNames.nonEmpty)("
+new = "Option.when(fileOnly.nonEmpty && profile.foundNames.isEmpty)("
+
+[[mutant]]
+name = "Mutant: the shell walks before each command"
+[[mutant.edit]]
+file = "SandboxedShell.scala"
+old = "val sandboxed = sandbox.wrap(profile, root,"
+new = "val sandboxed = sandbox.wrap(Profiles.forShell(config.mode, root, layout, hosts, sandbox.closesNames), root,"
 
 [[mutant]]
 name = "Mutant: a secret name matches only the same name"
@@ -146,11 +204,25 @@ old = "part == name || part.startsWith(name + \".\")"
 new = "part == name"
 
 [[mutant]]
-name = "Mutant: the walk enters .git"
+name = "Mutant: the walk enters .git, node_modules, target and the control paths"
 [[mutant.edit]]
 file = "Profile.scala"
-old = "if git || profile.controls.exists(_.covers(dir)) || profile.isHidden(dir) then ()"
-new = "if (git && false) || profile.isHidden(dir) then ()"
+old = "if skipped || profile.controls.exists(_.covers(dir)) || profile.isHidden(dir) then ()"
+new = "if (skipped && false) || profile.isHidden(dir) then ()"
+
+[[mutant]]
+name = "Mutant: the walk enters node_modules and target"
+[[mutant.edit]]
+file = "Profile.scala"
+old = "val Skipped: Set[String] = Set(\".git\", \"node_modules\", \"target\")"
+new = "val Skipped: Set[String] = Set(\".git\")"
+
+[[mutant]]
+name = "Mutant: the walk skips a writable root with the name target"
+[[mutant.edit]]
+file = "Profile.scala"
+old = "!profile.writable.exists(dir.equals)"
+new = "!profile.writable.exists(_ => false)"
 
 [[mutant]]
 name = "Mutant: the walk does not hide the target of a symbolic link"
@@ -349,11 +421,11 @@ old = "SandboxedShell.stop(seen :+ process.toHandle)"
 new = "SandboxedShell.stop(Vector(process.toHandle))"
 
 [[mutant]]
-name = "Mutant: the shell takes a profile that closes no secret name"
+name = "Mutant: the shell of a backend that cannot close a name takes the profile of the mode, with no walk"
 [[mutant.edit]]
 file = "SandboxedShell.scala"
-old = "Profiles.forMode(config.mode, root, layout, hosts, backend.exists(_.closesNames))"
-new = "Profiles.forMode(config.mode, root, layout, hosts, backend.exists(_ => false))"
+old = "Profiles.forShell(config.mode, root, layout, hosts, sandbox.closesNames)"
+new = "Profiles.forMode(config.mode, root, layout, hosts, sandbox.closesNames)"
 
 [[mutant]]
 name = "Mutant: the Seatbelt policy closes no secret name"

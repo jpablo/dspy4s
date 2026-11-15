@@ -3,7 +3,7 @@ package dspy4s.harness.host
 import dspy4s.harness.{Journal, suffixStart}
 import dspy4s.harness.guest.{Files, JobId, JobStatus, Shell}
 import dspy4s.harness.host.Interrupts.{uninterruptibly, uninterruptiblyWithin}
-import dspy4s.harness.kernel.{Command, EffectId, JobSelector, SessionState, Source}
+import dspy4s.harness.kernel.{Command, EffectId, JobEnd, JobSelector, SessionState, Source}
 import dspy4s.harness.sandbox.SandboxedShell
 
 import java.io.{InputStream, InputStreamReader}
@@ -19,15 +19,23 @@ import scala.util.Try
   *
   * The table starts each process on one launcher thread that lives as long as the table. On Linux, `--die-with-parent`
   * of bubblewrap stops a process when the thread that started it ends, and a cell thread ends with its cell. A stop
-  * runs on a thread of the table, so `sync` returns at once. When a job with `report` ends, the table calls `report`
-  * with its id and status, and the host posts the message to the writer of the session.
+  * runs on a thread of the table, so `sync` returns at once.
+  *
+  * When a job ends, the table calls `recordEnd` with its id and its end, and the host commits the end to the journal of
+  * the session (`JobEnded`), so a later host knows it. After that, for a job with `report`, the table calls `report`
+  * with the id and the status, and the host posts the message to the writer of the session. `close` waits for these
+  * calls, so the end of a job that the close stops also reaches the journal before the writer ends.
   *
   * A stop closes the standard input of the job: the wrapper then stops the group and the tree of the command with TERM,
   * a grace period and KILL, and it ends after the stop (`ProcessWrapper`). When the job still runs after the grace
   * period of the table and one more second, the table sends TERM and then KILL to the process and each descendant that
   * it sees, for a process with no wrapper.
   */
-final class JobTable(grace: FiniteDuration, report: (EffectId, JobStatus) => Unit) extends AutoCloseable:
+final class JobTable(
+    grace    : FiniteDuration,
+    recordEnd: (EffectId, JobEnd) => Unit,
+    report   : (EffectId, JobStatus) => Unit
+) extends AutoCloseable:
   import JobTable.*
 
   private val rows             = ConcurrentHashMap[EffectId, Row]()
@@ -48,7 +56,8 @@ final class JobTable(grace: FiniteDuration, report: (EffectId, JobStatus) => Uni
     }
 
   /** Starts the job `id` with `launch` on the launcher thread, unless the table has a stop mark for `id` (10.3, step
-    * 3). Then it does not start the process, and it gives an error. With `report`, the end of the job calls `report`.
+    * 3). Then it does not start the process, and it gives an error. The end of the job calls `recordEnd`, and then
+    * `report` when `report` is true.
     *
     * An interrupt of the caller does not stop the wait for the launch, because the launcher starts the process also
     * after the interrupt. The job gets its row, and the caller gets its interrupt again before `start` returns.
@@ -70,7 +79,10 @@ final class JobTable(grace: FiniteDuration, report: (EffectId, JobStatus) => Uni
               // pipe open makes it wait at most `ReaderWait`.
               row.drained.await(ReaderWait.toMillis, TimeUnit.MILLISECONDS): Unit
               row.ended.countDown()
-              if report then Try(this.report(id, statusOf(row))): Unit
+              // The end goes to the journal first, so the message of the report comes after it.
+              val end = endOf(row)
+              Try(recordEnd(id, end)): Unit
+              if report then Try(this.report(id, jobStatusOf(end))): Unit
             }
           }
     }
@@ -96,12 +108,16 @@ final class JobTable(grace: FiniteDuration, report: (EffectId, JobStatus) => Uni
       row.ended.await((end - System.nanoTime()).max(0L), TimeUnit.NANOSECONDS)
     }
 
-  /** The status of the job `id` (10.3). A job of `state` with no row in the table is `Lost`: its host ended. A job with
-    * a stop mark and no row is `Stopped`.
+  /** The status of the job `id` (10.3). A job of `state` with no row in the table has the end that its host recorded
+    * (`JobEnded`), also with a stop mark. With no end, a job with a stop mark is `Stopped`, and another job is `Lost`:
+    * it ran when its host ended.
     */
   def status(id: EffectId, state: SessionState): JobStatus =
     Option(rows.get(id)).map(statusOf).getOrElse {
-      if state.jobs.get(id).exists(_.stopRequested) then JobStatus.Stopped else JobStatus.Lost
+      val record = state.jobs.get(id)
+      record.flatMap(_.end).map(jobStatusOf).getOrElse {
+        if record.exists(_.stopRequested) then JobStatus.Stopped else JobStatus.Lost
+      }
     }
 
   /** Stops each job that runs: TERM, the grace period, then KILL. It waits for the stops, also for a job whose stop
@@ -126,9 +142,11 @@ final class JobTable(grace: FiniteDuration, report: (EffectId, JobStatus) => Uni
       uninterruptiblyWithin(ReaderWait)(left => helpers.awaitTermination(left, TimeUnit.NANOSECONDS): Unit)
 
   private def statusOf(row: Row): JobStatus =
-    if row.process.isAlive then JobStatus.Running
-    else if row.stopped then JobStatus.Stopped
-    else JobStatus.Exited(row.process.exitValue())
+    if row.process.isAlive then JobStatus.Running else jobStatusOf(endOf(row))
+
+  /** The end of a job whose process ended: `Stopped` after a stop, and else its exit code. */
+  private def endOf(row: Row): JobEnd =
+    if row.stopped then JobEnd.Stopped else JobEnd.Exited(row.process.exitValue())
 
   /** The stop of one job, once: the end of the pipe of its wrapper, then TERM and KILL for a process with no wrapper.
     */
@@ -210,13 +228,22 @@ object JobTable:
   */
 def jobName(job: EffectId): String = s"${job.cell}.${job.n}"
 
+/** The status of a job with the end `ending` (10.3). The model gets it from `waitJob`, and a person from `/jobs`. */
+def jobStatusOf(ending: JobEnd): JobStatus =
+  ending match
+    case JobEnd.Exited(code) => JobStatus.Exited(code)
+    case JobEnd.Stopped      => JobStatus.Stopped
+
 /** The handler of `Shell^` in a session of the host (5.3, 10.3). `exec` goes to `inner`. A job starts with
   * `inner.launch`, and the table holds it.
   *
   *   - `spawn` gives the `JobId` of its own `EffectStarted`: the open effect of the op `spawn` in `journal`. The calls
   *     of one cell run one at a time, so the cell has only that one open.
-  *   - With `report`, the end of the job sends a message with `Source.Harness`. The message reaches a step of the open
-  *     turn, or it starts a turn when no turn is open.
+  *   - The end of each job goes to the journal (`JobEnded`). With `report`, the end of the job also sends a message
+  *     with `Source.Harness`. The message reaches a step of the open turn, or it starts a turn when no turn is open.
+  *   - `waitJob` of a job with no process in this host gives `JobTable.status`: the end in the journal, `Stopped` for a
+  *     job with a stop mark, or else `Lost`. `jobOutput` of such a job gives an empty text, because the journal keeps
+  *     no output.
   *   - `stopJob(job)` runs `StopJobs(One(job))` (10.3). A refusal throws an exception with the refusal in words
   *     (`Rejection.words`), because the cell reads it.
   *   - `jobOutput`, `waitJob` and `stopJob` of a job that the session does not have throw an exception that names the

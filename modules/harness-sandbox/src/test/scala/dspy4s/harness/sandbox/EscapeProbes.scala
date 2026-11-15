@@ -35,31 +35,34 @@ abstract class EscapeProbes(backend: Backend, law: String, proxies: Boolean) ext
     val unix   = UnixServer()
     val proxy  = HostProxy.start(listed)
     try
-      // The profile of each command, as in `exec`: the profile of the mode, with the secret names closed when the
-      // backend can close a name.
-      def profile(): Profile          = Profiles.forMode(mode, place.scope, place.layout, listed, backend.closesNames)
+      // The folders of the control paths (5.4, choice 19), so a write probe tests the rule and not a missing folder.
+      Vector(".git/hooks", ".git/modules/s", "sub", ".vscode").foreach(f =>
+        JFiles.createDirectories(place.scope.resolve(f))
+      )
+      val nested = JFiles.createDirectories(place.scope.resolve("app/conf")).resolve(".env.local")
+      JFiles.writeString(nested, "FAKE-DEEP"): Unit
+      // The profile of each command, as in `exec`: the profile of the shell, which the shell makes once at its start
+      // (`Profiles.forShell`). It closes the secret names when the backend can close a name, and else it covers the
+      // files of the walk at the start. Each probe is a command of the same shell.
+      val profile                     = Profiles.forShell(mode, place.scope, place.layout, listed, backend.closesNames)
       def sh(command: String): String =
         val argv = Vector("/bin/sh", "-c", command)
         Support.run(
-          if sandboxed then backend.wrap(profile(), place.scope, argv, Some(proxy.port)) else argv,
+          if sandboxed then backend.wrap(profile, place.scope, argv, Some(proxy.port)) else argv,
           place.scope
         )
       // With no sandbox, a plain child can write and read each file.
       def allows(byProfile: Boolean): Boolean = !sandboxed || byProfile
       def write(path: Path): Probe            =
-        val allowed = allows(profile().canWrite(path))
+        val allowed = allows(profile.canWrite(path))
         sh(s"echo x > '$path'"): Unit
         Probe(s"write $path", JFiles.exists(path), allowed)
       def read(path: Path, value: String): Probe =
-        val allowed = allows(profile().canRead(path))
+        val allowed = allows(profile.canRead(path))
         Probe(s"read $path", sh(s"cat '$path'").contains(value), allowed)
       val secret = place.secrets.resolve("id_fake")
       val env    = place.scope.resolve(".env")
       val pid    = ProcessHandle.current().pid()
-      // The folders of the control paths (5.4, choice 19), so a write probe tests the rule and not a missing folder.
-      Vector(".git/hooks", ".git/modules/s", "sub", ".vscode").foreach(f =>
-        JFiles.createDirectories(place.scope.resolve(f))
-      )
       Vector(
         write(place.scope.resolve("w1")),
         write(place.temp.resolve("w2")),
@@ -81,25 +84,34 @@ abstract class EscapeProbes(backend: Backend, law: String, proxies: Boolean) ext
         Probe(
           "a hard link to a secret",
           sh(s"ln '$secret' '${place.scope}/hl' 2>&1; cat '${place.scope}/hl'").contains("FAKE-KEY"),
-          allows(profile().canRead(secret))
+          allows(profile.canRead(secret))
         ), {
-          val allowed = allows(profile().canRead(env))
+          val allowed = allows(profile.canRead(env))
           Probe(
             "a hard link to a file with a secret name",
             sh(s"ln '$env' '${place.scope}/hl-env' 2>&1; cat '${place.scope}/hl-env'").contains("FAKE-ENV"),
             allowed
           )
         }, {
-          val allowed = allows(profile().canWrite(env))
+          val allowed = allows(profile.canWrite(env))
           Probe(
             "a move of a file with a secret name",
             sh(s"mv '$env' '${place.scope}/moved-env' 2>&1; cat '${place.scope}/moved-env'").contains("FAKE-ENV"),
             allowed
           )
         }, {
+          // A command cannot move a file that the backend covers. With a move of a folder above it, the cover would go
+          // with the folder, and the next command would find the file at a new path with no cover.
+          sh(s"mv '${place.scope}/app' '${place.scope}/moved-app' 2>&1"): Unit
+          Probe(
+            "a move of a folder above a file with a secret name",
+            sh(s"cat '${place.scope}/moved-app/conf/.env.local'").contains("FAKE-DEEP"),
+            allows(profile.canRead(nested))
+          )
+        }, {
           val deep = place.outside.resolve("deep")
           sh(s"""sh -c "sh -c 'echo x > $deep'""""): Unit
-          Probe("a write outside from a child of a child", JFiles.exists(deep), allows(profile().canWrite(deep)))
+          Probe("a write outside from a child of a child", JFiles.exists(deep), allows(profile.canWrite(deep)))
         }, {
           val target = place.outside.resolve("hard")
           JFiles.writeString(target, "original"): Unit
@@ -117,7 +129,7 @@ abstract class EscapeProbes(backend: Backend, law: String, proxies: Boolean) ext
         }, {
           val target = place.outside.resolve("moved")
           sh(s"echo x > '${place.scope}/moved' && mv '${place.scope}/moved' '$target'"): Unit
-          Probe("a move out of the scope", JFiles.exists(target), allows(profile().canWrite(target)))
+          Probe("a move out of the scope", JFiles.exists(target), allows(profile.canWrite(target)))
         },
         Probe(
           "the network with no proxy",
@@ -129,7 +141,7 @@ abstract class EscapeProbes(backend: Backend, law: String, proxies: Boolean) ext
           sh(
             s"curl -s -m 5 -x http://127.0.0.1:${proxy.port} http://localhost:${server.port}/"
           ).contains("FAKE-SERVER"),
-          !sandboxed || (proxies && profile().canConnect("localhost"))
+          !sandboxed || (proxies && profile.canConnect("localhost"))
         ),
         Probe(
           "another host through the proxy",
@@ -193,7 +205,7 @@ abstract class EscapeProbes(backend: Backend, law: String, proxies: Boolean) ext
         Vector("/bin/sh", "-c", s"git init -q -b main && git $id commit -q --allow-empty -m one"),
         scope
       ): Unit
-      val profile                        = Profiles.forMode(Mode.local, scope, place.layout, listed, backend.closesNames)
+      val profile                        = Profiles.forShell(Mode.local, scope, place.layout, listed, backend.closesNames)
       def done(command: String): Boolean =
         val argv = backend.wrap(profile, scope, Vector("/bin/sh", "-c", s"$command && echo DONE"), None)
         Support.run(argv, scope).contains("DONE")
@@ -215,7 +227,7 @@ abstract class EscapeProbes(backend: Backend, law: String, proxies: Boolean) ext
     assume(works, s"${backend.name} does not work on this host")
     val place = Place()
     try Vector(Mode.local, Mode.full, Mode.local.meet(Mode.closed)).foreach { mode =>
-        val profile = Profiles.forMode(mode, place.scope, place.layout, listed)
+        val profile = Profiles.forShell(mode, place.scope, place.layout, listed, backend.closesNames)
         val argv    = backend.wrap(profile, place.scope, Vector("/bin/sh", "-c", "echo ran"), Some(1))
         assertEquals(Support.run(argv, place.scope), "ran\n", s"mode $mode")
       }

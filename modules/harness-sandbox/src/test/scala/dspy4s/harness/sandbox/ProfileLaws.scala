@@ -244,7 +244,10 @@ class ProfileLaws extends ScalaCheckSuite:
     finally place.close()
   }
 
-  test("Authority: the profile of a command hides each file with a secret name that exists in a writable root") {
+  test(
+    "Authority: on a backend that cannot close a name, the profile of a shell hides each file with a secret name that " +
+      "exists in a writable root at its start"
+  ) {
     val place = Place()
     try
       val s = place.scope
@@ -255,7 +258,7 @@ class ProfileLaws extends ScalaCheckSuite:
       }
       JFiles.writeString(place.temp.resolve(".env.t"), "x"): Unit
       JFiles.createSymbolicLink(s.resolve(".env.link"), place.outside.resolve("r.txt")): Unit
-      val command = Profiles.forCommand(Mode.local, s, place.layout, HostList.empty)
+      val shell = Profiles.forShell(Mode.local, s, place.layout, HostList.empty, closesNames = false)
       // The files with a secret name, a folder with one and the files in it, and the target of a symbolic link.
       Vector(
         s.resolve(".env"),
@@ -265,16 +268,22 @@ class ProfileLaws extends ScalaCheckSuite:
         place.temp.resolve(".env.t"),
         s.resolve(".env.link"),
         place.outside.resolve("r.txt")
-      ).foreach(path => assert(!command.canRead(path) && !command.canWrite(path), s"$path is not hidden"))
+      ).foreach(path => assert(!shell.canRead(path) && !shell.canWrite(path), s"$path is not hidden"))
       // Other names, and .git, which is read-only and which the walk skips.
       Vector(s.resolve(".envrc"), s.resolve("my.env"), s.resolve(".git/.env"))
-        .foreach(path => assert(command.canRead(path), s"$path is hidden"))
-      // A new file with a secret name holds only data of the command.
-      assert(command.canWrite(s.resolve(".env.new")) && command.canWrite(s.resolve("app/.env.production")))
+        .foreach(path => assert(shell.canRead(path), s"$path is hidden"))
+      // A file with a secret name that is made after the start is not hidden until the next activation.
+      assert(shell.canWrite(s.resolve(".env.new")) && shell.canWrite(s.resolve("app/.env.production")))
+      assertEquals(shell.foundNames, place.layout.secretNames)
       // A mode with no child process has no writable root, so nothing to walk.
       assertEquals(
-        Profiles.forCommand(Mode.readOnly, s, place.layout, HostList.empty).hidden,
+        Profiles.forShell(Mode.readOnly, s, place.layout, HostList.empty, closesNames = false).hidden,
         Profiles.forMode(Mode.readOnly, s, place.layout, HostList.empty).hidden
+      )
+      // A backend that closes a name needs no walk.
+      assertEquals(
+        Profiles.forShell(Mode.local, s, place.layout, HostList.empty, closesNames = true),
+        Profiles.forMode(Mode.local, s, place.layout, HostList.empty, closesNames = true)
       )
     finally place.close()
   }
@@ -451,6 +460,35 @@ class ProfileLaws extends ScalaCheckSuite:
     finally place.close()
   }
 
+  test("Index: the walk does not enter .git, node_modules or target below a writable root, and it walks such a root") {
+    // These folders hold most of the folders of a large scope (5.4, 2026-11-15).
+    val place = Place()
+    try
+      val s       = place.scope
+      val skipped = Vector("node_modules/p/.env", "target/.env.local", "app/node_modules/.env", "app/target/x/.env")
+      val kept    = Vector("targets/.env", "my_target/.env", "app/node_modules.d/.env")
+      (skipped ++ kept ++ Vector("sub/.git/.env")).map(s.resolve).foreach { file =>
+        JFiles.createDirectories(file.getParent): Unit
+        JFiles.writeString(file, "FAKE"): Unit
+      }
+      val profile = Profiles.forMode(Mode.local, s, place.layout, HostList.empty)
+      val found   = Profiles.secretFiles(profile, place.layout.secretNames).toSet
+      (skipped :+ "sub/.git/.env").map(s.resolve).foreach(path => assert(!found.contains(path), s"$path: $found"))
+      (kept :+ ".env").map(s.resolve).foreach(path => assert(found.contains(path), s"$path: $found"))
+      // A writable root with such a name is walked.
+      val root  = JFiles.createDirectories(place.base.resolve("target"))
+      val named = Profile(
+        canRun = true,
+        writable = Vector(root),
+        controls = Vector.empty,
+        hidden = Vector.empty,
+        net = Net.Closed
+      )
+      JFiles.writeString(root.resolve(".env"), "FAKE"): Unit
+      assertEquals(Profiles.secretFiles(named, place.layout.secretNames), Vector(root.resolve(".env")))
+    finally place.close()
+  }
+
   test("Index: a folder that the index cannot read is hidden as a whole") {
     // The command can chmod its own folder, and then it could read a secret file that the walk did not see.
     val place  = Place()
@@ -529,6 +567,29 @@ class ProfileLaws extends ScalaCheckSuite:
     assert(both >= 0 && closing.indexOf(names) > both, closing)
     assert(!closing.contains("A file call can neither"), closing)
     assert(open.contains(s"A file call can neither read nor write $names."), open)
+    assert(!open.contains("at the open of the session") && !closing.contains("at the open of the session"), open)
+  }
+
+  test(
+    "Secret names: on a backend that cannot close a name, the words of the shell say that a command cannot reach such " +
+      "a file that was there at the open of the session, and can reach one that is made later"
+  ) {
+    // The walk at the start of the shell finds no file here, because the scope does not exist. The words do not
+    // depend on what it found.
+    val shell = Profiles.forShell(Mode.local, scope, layout, hosts, closesNames = false)
+    val words = Profiles.words(shell, scope, layout)
+    val names = "a file or a folder whose name is .env or starts with \".env.\" (for example .env.local)"
+    val file  = words.indexOf(s"A file call can neither read nor write $names.")
+    val start = words.indexOf(
+      "A command can neither read nor write such a file or folder when it was there at the open of the session."
+    )
+    val later = words.indexOf(
+      "A command can read and write such a file or folder that is made after the open, until the session opens again."
+    )
+    assert(file >= 0 && start > file && later > start, words)
+    // Seatbelt closes the names in each folder, so its words give no rule of a walk.
+    val closing = Profiles.words(Profiles.forShell(Mode.local, scope, layout, hosts, closesNames = true), scope, layout)
+    assert(!closing.contains("at the open of the session"), closing)
   }
 
   property("Words: the words of a profile name what it can write, its control paths, its closed paths and its net") {
