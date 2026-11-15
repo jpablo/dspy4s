@@ -138,10 +138,12 @@ final class WorkRuntime(
         // The hooks folder of the scope is read once for each activation (5.4, choice 19).
         val made = Layout.forSession(env.home, env.journals, Layout.hooksFolder(scope).toVector)
         layout = Some(made)
-        // The profile of the shell, so the words of the task give the rules of the sandbox of this host.
-        val profile  = Profiles.forMode(config.mode, scope, made, env.hosts, env.backend.exists(_.closesNames))
+        // On a backend that cannot close a name, the start of the shell walks the scope once (5.4).
         val commands = SandboxedShell(config, made, env.hosts, env.backend, limits.execTimeout)
         shell = Some(commands)
+        // The profile of the shell, so the words of the task and the file calls give the rules of the sandbox of this
+        // host. On a backend that cannot close a name, it also hides the files of the walk.
+        val profile  = commands.profile
         val turns    = TurnBudget(journal, limits.modelCalls)
         val recorder = Recorder(journal, () => turns.closed, env.secrets.maskJson)
         val store    = SnapshotStore()

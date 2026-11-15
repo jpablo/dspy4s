@@ -797,12 +797,12 @@ control path either: it changes what git shows, but it runs no code.
   on macOS (2026-11-13) showed that `.git/index` and the refs stay writable, and that a write to `.git/config`, a
   rename onto it, the removal and the move of `.git`, a write to the configuration or the hooks of a submodule, and a
   nested `.git` fail.
-- The walk of the optional `Profiles.forCommand` does not enter a `.git` folder or a control path.
+- The walk of Linux (`Profiles.forShell`, below) does not enter a `.git` folder or a control path.
 - A backend that cannot close a name (`Backend.closesNames` is false) keeps all of `.git` in the scope read-only, so
   its observations stay true. So on bubblewrap a command cannot commit, as before choice 19. bubblewrap closes each
   other control path that exists with a read-only mount. A mount at a path that does not exist makes an empty file in
   the folder of the person. So on Linux, a control path that does not exist yet stays writable. This is a gap of
-  Linux, as for `.env`. The profile of such a backend holds only the control paths that exist when the profile is
+  Linux, as for a `.env` file that is made after the start of an activation. The profile of such a backend holds only the control paths that exist when the profile is
   made, so it does not claim a rule that the backend cannot apply. The escape probes on Linux (2026-11-14) first
   found that claim: a command could make `.vscode/settings.json`, and the profile said that it could not.
 - A command that needs the network, for example `git fetch`, `git pull` or `git push`, fails in a mode with no
@@ -864,8 +864,9 @@ compare each backend with these observations.
   `~/.codex/auth.json`, `~/.claude/.credentials.json`, `~/.m2/settings.xml`, `~/.gradle/gradle.properties`,
   `~/.sbt/.credentials`, `~/.ivy2/.credentials`, `~/.cargo/credentials`, `~/.cargo/credentials.toml`,
   `~/.local/share/keyrings`, `~/.pgpass`, `~/.vault-token` and `~/.terraform.d/credentials.tfrc.json`. A file or a
-  folder with the name `.env` or `.env.*` is secret in each folder. A file call refuses such a name, and on macOS a
-  command cannot reach it either (the next item). A proposal: the design names only `~/.ssh`, `~/.aws` and `.env`.
+  folder with the name `.env` or `.env.*` is secret in each folder. A file call refuses such a name. On macOS a
+  command cannot reach it either, and on Linux a command cannot reach such a file that was there at the start of the
+  activation (the walk of Linux, below). A proposal: the design names only `~/.ssh`, `~/.aws` and `.env`.
 - The host list is a set of patterns: `name`, `name:port` or `name:*`. A name `*.d` matches each subdomain of `d`. A
   pattern with no port allows only the ports 80 and 443. A proposal: the design gives the host list no type.
 - Seatbelt denies by default, as in Codex. A child can start programs, read files, and look only at the processes of
@@ -879,21 +880,43 @@ compare each backend with these observations.
   `socketpair` for a datagram pair, `io_uring_setup`, and each call of another ABI. A stream pair from `socketpair`
   stays allowed. The filter exists for aarch64 and x86_64, and on another host bubblewrap does not work. Seatbelt
   denies these connections by default.
-- Commands use the fixed profile of the mode, with no walk of the scope. Until 2026-11-12, the shell walked the
-  writable roots for secret names before each command, and it read the times of each folder. So each command waited in
-  a large scope: the first `exec` waited 34 s in a scope of 1.75 million entries, and 9.7 s in a scope of 300,000
-  folders. Now a backend that can close a name (`Backend.closesNames`) gets the secret names in its profile
-  (`Profile.hiddenNames`). Seatbelt closes each name with one rule on the path, a regex for each folder
-  (`Seatbelt.nameRule`). A probe on macOS showed that the rule also stops a read through a symbolic link, a hard link,
-  a move and a new file with a secret name, and that `.envrc` and `notes.env.txt` stay open. bubblewrap cannot close a
-  name, so on Linux a command can read, write, link or move a file named `.env` or `.env.*`. A proposal for the
-  review: this gap of Linux goes against the rule of CODE_HARNESS.md that `.env` is not readable. The words of the
-  task tell the model which rule its host has. The optional `Profiles.forCommand` and `SecretIndex` utilities remain,
-  and the shell does not use them.
-- A future full scan must start only on request, show progress and accept a stop. Session startup and normal commands
-  must not wait for it. Automatic checks must have a fixed work limit and use paths that the harness already has;
-  they must not walk the scope. The harness can suggest a full scan from those paths, but must not start one to decide
-  whether to suggest it. There is no client command for an on-demand scan yet.
+- The commands of a shell use one profile (`Profiles.forShell`), which the shell makes at its start, with no walk
+  before a command. The host makes one shell for each activation. Until 2026-11-12, the shell walked the writable
+  roots for secret names before each command, and it read the times of each folder. So each command waited in a large
+  scope: the first `exec` waited 34 s in a scope of 1.75 million entries, and 9.7 s in a scope of 300,000 folders, and
+  a command waited 30.6 s in a scope of about 202,000 folders. Commit 51a9123a removed that walk. A backend that can
+  close a name (`Backend.closesNames`) gets the secret names in its profile (`Profile.hiddenNames`). Seatbelt closes
+  each name with one rule on the path, a regex for each folder (`Seatbelt.nameRule`). A probe on macOS showed that the
+  rule also stops a read through a symbolic link, a hard link, a move and a new file with a secret name, and that
+  `.envrc` and `notes.env.txt` stay open. macOS has no walk. The words of the task tell the model which rule its host
+  has.
+- **The walk of Linux (2026-11-15).** From 2026-11-12 to 2026-11-15, a command on Linux could read, write, link or
+  move a file named `.env` or `.env.*`, against the rule of CODE_HARNESS.md that `.env` is not readable. The person
+  chose this rule on 2026-11-15. bubblewrap cannot close a name, so the shell of each activation walks the writable
+  roots once, at its start (`Profiles.forShell`, `SecretIndex`). The walk does not enter a folder with the name `.git`,
+  `node_modules` or `target` below a writable root (`SecretIndex.Skipped`), a control path or a hidden part, and it
+  does not follow a link. bubblewrap covers each file and folder that the walk found: the null device over a file, and
+  an empty read-only folder over a folder. The profile keeps the secret names of the walk (`Profile.foundNames`), so
+  the words of the task give the rule and its limit. The file calls of a work session use the profile of the shell
+  too.
+  - The limit: a file with a secret name that is made after the start of an activation stays readable and writable
+    to a command until the session opens again. This is true for a file of a command and for a file of the person. A
+    file with a secret name in `.git`, `node_modules` or `target` also stays readable to a command.
+  - The cost: the activation waits for the walk. One walk of `~/GitHub` on macOS (2026-11-15) listed 61,000 folders in
+    4.9 s to 5.4 s, with a warm file cache. With no skip of `node_modules` and `target`, it listed 127,000 folders in
+    19.2 s the first time, and in 9.5 s to 10.2 s after that. The walk shows no progress and has no stop.
+  - A command cannot move a mount, but it can move a folder above a mount, and the mount goes with the folder. The
+    escape probes on Linux showed that the next command then read the file at its new path. So bubblewrap also mounts
+    each folder between a writable root and a covered path on itself (`Bubblewrap.flags`). A command cannot move or
+    remove such a folder. These mounts come before the mounts of the control paths, so they do not cover a control
+    path in such a folder.
+  - bwrap cannot mount at a path through a symbolic link, and then each command fails. So bubblewrap covers only a
+    real path. For a link with a secret name, the walk also gives the real target, and bubblewrap covers the target. A
+    command can remove or change such a link, but it cannot read the target through it.
+- The walk of Linux is the only automatic walk. A later full scan must start only on request, show progress and
+  accept a stop, and a normal command must not wait for it. Other automatic checks must have a fixed work limit and
+  use paths that the harness already has. The harness can suggest a full scan from those paths, but must not start one
+  to decide whether to suggest it. There is no client command for an on-demand scan yet.
 - Seatbelt escapes a quote, a backslash, a newline and a return in a path, so a file name cannot stop the next
   commands.
 - A backend works when `/bin/sh -c true` runs under its own command line. A probe with other arguments can pass in a
@@ -2131,8 +2154,9 @@ These points are proposals for the review:
 - A study of the TUI libraries for Scala and Java (2026-11-11) found no Scala library that fits better than JLine:
   termflow uses only the alternate screen, and TamboUI and termflow bring the JLine 3 bundle, a second copy of the
   JLine packages. TamboUI, with its inline runner, is the choice for a richer client later.
-- A work session starts no walk for secret files at its open or activation. Commands use the fixed profile (5.4),
-  with no directory walk before `exec` or `spawn`. On macOS, that profile closes the secret names with one rule.
+- On macOS, a work session starts no walk for secret files: the profile of the shell closes the secret names with one
+  rule (5.4). On Linux, the shell of each activation walks the scope once at its start, since 2026-11-15. No command
+  waits for a walk before `exec` or `spawn`.
 - The line editor has the screen of [CLI_SCREEN.md](CLI_SCREEN.md), phase A (2026-11-11). `Screen` reads each entry: a
   finished step goes into the history as its text and one summary line of its cell, for example `▸ Ran 2 commands, read
   1 file · 1.4 s #17`, and the reply shows in full. The step that runs is the live block, above a rule and the prompt `›

@@ -22,7 +22,7 @@ final case class Layout(
     temp       : Path, // the private temporary directory of the session
     journals   : Path, // the folder of the journals: closed to each profile (5.4)
     secrets    : Vector[Path], // the secret paths, for example ~/.ssh (5.6)
-    secretNames: Set[String], // the names of secret files: see `Profiles.forCommand`
+    secretNames: Set[String], // the names of secret files: see `Profiles.forShell`
     hooks      : Vector[Path] = Vector.empty // the folders of `core.hooksPath` of the scope (`hooksFolder`, choice 19)
 )
 
@@ -219,6 +219,10 @@ object ControlPath:
   * `reads` is the read access of the file calls of the session, which run in the JVM and not in a child (8.7). So a
   * mode with `Files` and no `Shell`, as the controller has, still reads its files. A child process reads only with
   * `canRun`.
+  *
+  * `foundNames` are the secret names of the walk at the start of a shell (`Profiles.forShell`). `hidden` holds the
+  * files with these names that the walk found. A file with such a name that is made after the walk is not hidden, so a
+  * child can read it. Only the words of the profile read `foundNames`.
   */
 final case class Profile(
     canRun     : Boolean, // a child process can start
@@ -226,8 +230,9 @@ final case class Profile(
     controls   : Vector[ControlPath], // the parts of the scope that stay read-only in each mode (5.4, choice 19)
     hidden     : Vector[Path], // a child can neither read nor write under these: the secrets, the journals, the secret files
     net        : Net,
-    reads      : Boolean     = false,    // the file calls of the session can read, with no child process (8.7)
-    hiddenNames: Set[String] = Set.empty // a child can neither read nor write a part with one of these names (5.4)
+    reads      : Boolean     = false,     // the file calls of the session can read, with no child process (8.7)
+    hiddenNames: Set[String] = Set.empty, // a child can neither read nor write a part with one of these names (5.4)
+    foundNames : Set[String] = Set.empty  // the secret names of the walk at the start of the shell (5.4)
 ):
 
   def isHidden(path: Path): Boolean =
@@ -345,12 +350,21 @@ object Profiles:
         case Exactly(path)  => JFiles.exists(path)
         case Named(_, _, _) => false)
 
-  /** An optional profile with the secret names hidden: the profile of the mode, and each file with a secret name that
-    * exists in a writable root. This walks the roots. `SandboxedShell` uses `forMode` instead, with no walk.
+  /** The profile of each command of a shell (5.4). `SandboxedShell` makes it once, at its start, and the host makes one
+    * shell for each activation.
+    *
+    *   - With `closesNames`, for a backend that closes a name, it is the profile of the mode with the secret names
+    *     (`hiddenNames`), and there is no walk.
+    *   - Else, one walk of the writable roots finds each file and folder with a secret name (`secretFiles`), and the
+    *     profile hides them, so the backend covers each one. The profile also gets the secret names as `foundNames`, so
+    *     its words give this rule. A file with a secret name that is made after the walk is not hidden until the next
+    *     activation. One walk of a scope with 61,000 folders took 5 s on macOS (2026-11-15), so a walk before each
+    *     command costs too much.
     */
-  def forCommand(mode: Mode, scope: Path, layout: Layout, hosts: HostList): Profile =
-    val profile = forMode(mode, scope, layout, hosts)
-    profile.hide(secretFiles(profile, layout.secretNames))
+  def forShell(mode: Mode, scope: Path, layout: Layout, hosts: HostList, closesNames: Boolean): Profile =
+    val profile = forMode(mode, scope, layout, hosts, closesNames)
+    if closesNames then profile
+    else profile.hide(secretFiles(profile, layout.secretNames)).copy(foundNames = layout.secretNames)
 
   /** What a command and a file call of `profile` can do, in words for the model of a session with the scope `scope` and
     * the layout `layout` (5.4). The text comes from the profile and the layout, so it gives the same rules as the
@@ -371,12 +385,17 @@ object Profiles:
       ) ++ profile.controls.map(_.note).filter(_.nonEmpty).distinct
       val examples = layout.secrets.filter(profile.isHidden).flatMap(p => Option(p.getFileName)).map(_.toString)
         .distinct.take(3)
-      // A file call refuses a secret name in each case, and a command only when the backend closes the name.
+      // A file call refuses a secret name in each case. A command cannot reach it when the backend closes the name,
+      // and else only when the walk at the start of the shell found it (`foundNames`).
       val names = layout.secretNames.toVector.sorted.map(name =>
         s"a file or a folder whose name is $name or starts with \"$name.\" (for example $name.local)"
       )
       val (both, fileOnly) = if profile.hiddenNames.nonEmpty then (names, Vector.empty) else (Vector.empty, names)
-      val closed           =
+      val found            = Option.when(fileOnly.nonEmpty && profile.foundNames.nonEmpty)(
+        "A command can neither read nor write such a file or folder when it was there at the open of the session. A " +
+          "command can read and write such a file or folder that is made after the open, until the session opens again."
+      )
+      val closed =
         Option.when(examples.nonEmpty)(s"the secret paths of the home folder (for example ${list(examples, "and")})") ++
           Option.when(profile.isHidden(layout.journals))("the journals of the harness") ++ both
       val network = profile.net match
@@ -387,7 +406,8 @@ object Profiles:
       (Vector(s"A command and the calls write and edit can change files only under ${list(places, "and")}.") ++
         controls ++
         Option.when(closed.nonEmpty)(s"A command and a file call can neither read nor write ${list(closed, "or")}.") ++
-        Option.when(fileOnly.nonEmpty)(s"A file call can neither read nor write ${list(fileOnly, "or")}.") :+
+        Option.when(fileOnly.nonEmpty)(s"A file call can neither read nor write ${list(fileOnly, "or")}.") ++
+        found :+
         network).mkString(" ")
 
   /** The items of `items` in one text, with `word` before the last one: "a", "a and b", or "a, b and c". */
@@ -397,18 +417,20 @@ object Profiles:
 
   /** The files and folders in the writable roots of `profile` with a name of `names`, or with the name and a dot, and
     * the target of each one that is a symbolic link, and each folder that the walk cannot read. The walk does not
-    * follow a link, and it does not enter a `.git` folder, a control path, a hidden part, or a folder that it found. A
-    * new index does the walk, so the walk and `SecretIndex` cannot give different files.
+    * follow a link, and it does not enter a folder of `SecretIndex.Skipped` (`.git`, `node_modules` and `target`), a
+    * control path, a hidden part, or a folder that it found. A new index does the walk, so the walk and `SecretIndex`
+    * cannot give different files.
     */
   def secretFiles(profile: Profile, names: Set[String]): Vector[Path] = SecretIndex(names).find(profile)
 
 /** The secret files of the writable roots of a profile, with a cache of the folders (CODE_HARNESS_DESIGN.md, 5.4).
   *
   * `find` gives the files of `Profiles.secretFiles`: each file and folder with a secret name of `names`, and the real
-  * target of each one that is a symbolic link. The walk does not enter a `.git` folder, a control path, a hidden part,
-  * or a folder with a secret name, and it does not follow a link. It also gives each folder that it cannot read, apart
-  * from a writable root: the command can change the mode of its own folder, and then it could read a secret file that
-  * the walk did not see. So bubblewrap covers the folder, and Seatbelt denies it. A folder that is gone is skipped.
+  * target of each one that is a symbolic link. The walk does not enter a folder of `Skipped` below a writable root, a
+  * control path, a hidden part, or a folder with a secret name, and it does not follow a link. It also gives each
+  * folder that it cannot read, apart from a writable root: the command can change the mode of its own folder, and then
+  * it could read a secret file that the walk did not see. So bubblewrap covers the folder, and Seatbelt denies it. A
+  * folder that is gone is skipped.
   *
   * The index keeps the listing of each folder between two calls, so a find of a large scope does not list each folder
   * again. A find still reads the attributes of each kept folder. It lists a folder again when its last-modified time,
@@ -455,9 +477,10 @@ final class SecretIndex(names: Set[String], settle: FiniteDuration = 2.seconds):
         while todo.nonEmpty do
           if stop() then throw CancellationException("The find of the secret files stopped.")
           val dir = todo.pop()
-          // A .git folder holds many objects, and a backend that closes no name keeps it read-only (5.4).
-          val git = Option(dir.getFileName).exists(_.toString == ".git")
-          if git || profile.controls.exists(_.covers(dir)) || profile.isHidden(dir) then ()
+          // A writable root has no skipped name, whatever its name is.
+          val skipped = Option(dir.getFileName).exists(name => SecretIndex.Skipped.contains(name.toString)) &&
+            !profile.writable.exists(dir.equals)
+          if skipped || profile.controls.exists(_.covers(dir)) || profile.isHidden(dir) then ()
           else if secret(dir) && !profile.writable.exists(_.equals(dir)) then found.addOne(dir): Unit
           else if !next.contains(dir) then
             read.incrementAndGet(): Unit
@@ -489,6 +512,13 @@ final class SecretIndex(names: Set[String], settle: FiniteDuration = 2.seconds):
             SecretIndex.list(dir, now, start, settle, secret)
 
 object SecretIndex:
+
+  /** The names of the folders that a walk does not enter below a writable root (5.4). A `.git` folder holds many
+    * objects, and a backend that closes no name keeps it read-only. `node_modules` and `target` hold the files of the
+    * build tools, and in a large scope they hold most of the folders. So on a backend that cannot close a name, a file
+    * with a secret name in such a folder stays readable to a command.
+    */
+  val Skipped: Set[String] = Set(".git", "node_modules", "target")
 
   /** The progress of a find: the folders that it read, and the folders that the find before it read, if any. */
   final case class Progress(folders: Long, total: Option[Long]) derives CanEqual

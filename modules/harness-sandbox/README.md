@@ -14,9 +14,10 @@ API of [`harness-guest`](../harness-guest/README.md).
   child can then write under the scope and under the private temporary directory of the session, but not in the `.git`
   folder of the scope. The secret paths and the folder of the journals are hidden in each mode. A child has the network
   only with `Network^` too, and then only through the proxy of the host list.
-- **Secret files.** Before each command, the shell finds each file with a secret name in the writable roots, for
-  example `.env` or `.env.local`. It hides these files from that command. A command can make a new file with a secret name.
-  That file holds only data of the command, and the next command cannot read it.
+- **Secret files.** A file call refuses each file with a secret name, for example `.env` or `.env.local`. On macOS,
+  Seatbelt closes these names for each command in each folder, with no walk. bubblewrap cannot close a name, so on
+  Linux the shell walks the writable roots once at its start, and bubblewrap covers each such file that the walk found.
+  A file with a secret name that is made after the start stays readable to a command until the next activation.
 - **An allowlist of variables.** The harness process holds the keys of the LM provider. A command gets only the names
   of `Environment.allowed` and the names of `SessionConfig.env`. A name that contains a secret word, for example `KEY`,
   `TOKEN`, or `SECRET`, never goes through.
@@ -38,12 +39,12 @@ finally shell.close()
 | `Backend` | An OS sandbox: `name`, `works()`, and `wrap(profile, cwd, argv, proxyPort)`, which gives the command line. |
 | `Backends` | `all`, and `detect()`, the first backend that works on this host. |
 | `Seatbelt` | The backend for macOS. Its SBPL profile denies by default. A child can see only the processes of its own sandbox, and it cannot reach launchd and the other services of the system. |
-| `Bubblewrap` | The backend for Linux. The root is read-only, and the writable roots are writable. An empty folder or the null device covers each secret. A new pid namespace hides the other processes. |
+| `Bubblewrap` | The backend for Linux. The root is read-only, and the writable roots are writable. An empty folder or the null device covers each secret, and each folder above a secret in a writable root is a mount of itself, so a command cannot move it. A new pid namespace hides the other processes. |
 | `Seccomp` | The BPF filter that bubblewrap loads for each command. It refuses `socket` for `AF_UNIX`, `socketpair` for a datagram pair, `io_uring_setup`, and each call of another ABI. It exists for aarch64 and x86_64. |
 | `Profile` / `Net` | What a child can do, and its network: `Closed`, or `Proxy(hosts)`. `hide` gives a profile that allows less. |
-| `Profiles` | `forMode`, the profile of a mode, and `forCommand`, the profile of a mode with the secret files that exist when the command starts. |
+| `Profiles` | `forMode`, the profile of a mode, and `forShell`, the profile of the commands of a shell. On a backend that cannot close a name, `forShell` also hides the secret files that exist when the shell starts. |
 | `Layout` | The places of the host that a profile names: the private temporary directory, the folder of the journals, the secret paths (for example `~/.ssh` and `~/.aws`), and the secret names. `Layout.forSession` makes one. |
-| `SecretIndex` | The walk that finds the secret files, with a cache of the folders between two commands. |
+| `SecretIndex` | The walk that finds the secret files, with a cache of the folders between two finds. It does not enter `.git`, `node_modules` or `target`. |
 | `HostList` | The patterns of the proxy: `name`, `name:port`, `name:*`, and `*.domain`. A pattern with no port allows only the ports 80 and 443. |
 | `HostProxy` | The proxy of a host list. It serves at most `limit` connections at a time, and it ends a connection after the idle time. |
 | `Environment` | The allowlist of variables, the secret words, and `forChild`, which gives the variables of a command. |

@@ -1761,7 +1761,7 @@ ref = "5.4"
 spec = true
 uses = ["net", "layout", "control-path"]
 proof_uses = ["host-list"]
-text = "What a child process can do, as observations: canRun, canRead(path), canWrite(path) and canConnect(host). A backend turns a profile into the rules of the OS. hide(paths) gives a profile that allows less: nothing under the paths. Profiles.words gives the same rules in words for the task of the model: the places that a command can write, the control paths with their notes, the closed paths and the network. hiddenNames are the secret names that the backend closes in each folder, and isHidden, canRead and canWrite read them. forMode gives them only for a backend that closes a name (5.4)."
+text = "What a child process can do, as observations: canRun, canRead(path), canWrite(path) and canConnect(host). A backend turns a profile into the rules of the OS. hide(paths) gives a profile that allows less: nothing under the paths. Profiles.words gives the same rules in words for the task of the model: the places that a command can write, the control paths with their notes, the closed paths and the network. hiddenNames are the secret names that the backend closes in each folder, and isHidden, canRead and canWrite read them. forMode gives them only for a backend that closes a name (5.4). foundNames are the secret names of the walk at the start of a shell, and only the words read them."
 
 [[node]]
 id = "profile-for-mode"
@@ -1775,15 +1775,15 @@ proof_uses = ["control-path"]
 text = "The profile of the table of 5.4: no child process without Shell^ and Files^; writes only under the scope and the private temporary directory, apart from the control paths, which do not depend on the mode; the proxy only with Network^; in each mode, the secrets and the journals are not readable, and the other paths are read-only. A backend that closes names gets the parts of git that run code (.git itself, hooks, config, config.worktree, commondir, the same files of submodules and worktrees, a nested .git), and another backend gets all of .git (choice 19)."
 
 [[node]]
-id = "profile-for-command"
+id = "profile-for-shell"
 group = "profile"
 kind = "function"
-name = "forCommand"
+name = "forShell"
 ref = "5.4"
 spec = true
 uses = ["mode", "layout", "host-list", "profile"]
 proof_uses = ["profile-for-mode", "profile", "secret-index"]
-text = "The profile of one command: the profile of the mode, which also hides each file with a secret name that exists in a writable root when the command starts, and the target of each one that is a symbolic link. The walk skips each .git folder and each control path. A command can make a new file with a secret name, and the next command cannot read it."
+text = "The profile of the commands of a shell, which the shell makes once at its start, and the host makes one shell for each activation. A backend that closes names gets the profile of the mode with the secret names, and no walk. On another backend, one walk hides each file with a secret name that exists in a writable root at the start, and the target of each one that is a symbolic link, and the profile keeps the names as foundNames. A file with a secret name that is made later stays readable until the next activation (2026-11-15). The shell with no backend takes the profile of the mode, with no walk."
 
 [[node]]
 id = "secret-index"
@@ -1794,7 +1794,7 @@ ops = ["find", "listings", "progress"]
 ref = "5.4"
 spec = true
 uses = ["profile", "layout"]
-text = "The secret files of the writable roots, with a cache of the listing of each folder. It lists a folder again when its change time, last-modified time or file key differs, or when it changed in the last 2 seconds, because a file time on Linux can be coarse. A folder that it cannot read is hidden as a whole. The shell does not use it since 2026-11-12: a walk before each command made each command wait in a large scope (5.4)."
+text = "The secret files of the writable roots, with a cache of the listing of each folder. It lists a folder again when its change time, last-modified time or file key differs, or when it changed in the last 2 seconds, because a file time on Linux can be coarse. A folder that it cannot read is hidden as a whole. It does not enter a folder with the name .git, node_modules or target below a writable root (Skipped). A walk before each command made each command wait in a large scope, so since 2026-11-15 the shell of a backend that cannot close a name walks once, at its start (5.4)."
 
 # ── Phase 3: the environment of a child process (5.6) ───────────────────────────────────────────────────────────
 
@@ -1869,7 +1869,7 @@ ref = "5.4"
 spec = true
 uses = ["backend", "profile"]
 proof_uses = ["seccomp"]
-text = "The bwrap arguments of a profile: the root read-only, the scope and the temporary directory writable, each control path that exists read-only (all of .git, because a mount cannot close a name), an empty folder or file over each secret, and new namespaces for the pids and the network. A proposal: on Linux the network stays closed also with Network^, because the proxy needs a bridge into the namespace. That is less authority, so the law holds. It cannot close a name, so a command reads a file with a secret name in the scope: the gap of 5.4."
+text = "The bwrap arguments of a profile: the root read-only, the scope and the temporary directory writable, each control path that exists read-only (all of .git, because a mount cannot close a name), an empty folder or file over each secret, and new namespaces for the pids and the network. A proposal: on Linux the network stays closed also with Network^, because the proxy needs a bridge into the namespace. That is less authority, so the law holds. It cannot close a name, so it covers the files with a secret name of the walk at the start of the shell, at their real paths. Each folder between a writable root and a covered secret is a mount of itself, before the control paths, so a command cannot move the secret to a path with no cover (2026-11-15)."
 
 [[group]]
 id = "seccomp"
@@ -1945,8 +1945,8 @@ ops = ["exec", "close", "launch", "stopAll"]
 ref = "5.3"
 spec = true
 uses = ["shell", "files", "session-config", "layout", "host-list", "backend"]
-proof_uses = ["profile-for-mode", "profile-for-command", "child-env", "host-proxy", "process-wrapper"]
-text = "Shell.sandboxed(root, profile) of 5.3. exec runs the command in the backend, under the profile of the mode of the session, with the allowlist of variables and a time limit. With no backend, or in a mode with no child process, exec fails and the command does not run. spawn and the job table come with phase 7."
+proof_uses = ["profile-for-mode", "profile-for-shell", "child-env", "host-proxy", "process-wrapper"]
+text = "Shell.sandboxed(root, profile) of 5.3. exec runs the command in the backend, under the profile of the shell (forShell), with the allowlist of variables and a time limit. The shell makes the profile once at its start, so on Linux the walk for the secret files runs once for each activation and not before each command. With no backend, or in a mode with no child process, exec fails and the command does not run. spawn and the job table come with phase 7."
 
 # ── Phase 3: the laws ───────────────────────────────────────────────────────────────────────────────────────────
 
@@ -1973,8 +1973,8 @@ group = "profile-laws"
 kind = "law"
 name = "Authority:"
 ref = "5.4"
-uses = ["profile-for-mode", "profile-for-command"]
-text = "The profile of a mode allows a child process only with Shell^ and Files^, a write only under the scope or the private temporary directory and never in a control path, a host only with Network^ and on the list, and in no mode a read or a write of a secret or of the journals. The profile of a command also hides each file with a secret name that exists in a writable root, apart from .git."
+uses = ["profile-for-mode", "profile-for-shell"]
+text = "The profile of a mode allows a child process only with Shell^ and Files^, a write only under the scope or the private temporary directory and never in a control path, a host only with Network^ and on the list, and in no mode a read or a write of a secret or of the journals. On a backend that cannot close a name, the profile of a shell also hides each file with a secret name that exists in a writable root at its start, apart from .git. A backend that closes names gets the profile of the mode with no walk."
 
 [[node]]
 id = "law-control-paths"
@@ -1992,7 +1992,7 @@ kind = "law"
 name = "Index:"
 ref = "5.4"
 uses = ["secret-index", "profile-for-mode"]
-text = "After each change of the files, the index gives the secret files of a new walk. A folder that changed in the last two seconds is listed again, also with the same time, and a folder that the index cannot read is hidden as a whole."
+text = "After each change of the files, the index gives the secret files of a new walk. A folder that changed in the last two seconds is listed again, also with the same time, and a folder that the index cannot read is hidden as a whole. The walk does not enter .git, node_modules or target below a writable root, and it walks a writable root with such a name."
 
 [[node]]
 id = "law-secret-names"
@@ -2001,7 +2001,7 @@ kind = "law"
 name = "Secret names:"
 ref = "5.4"
 uses = ["profile", "layout"]
-text = "A profile of a backend that closes names closes each path with a part that is a secret name, at each depth, as a file and as a folder, and keeps .envrc and notes.env.txt open. The words say that a command and a file call cannot reach a secret name only when the backend closes it, and else that a file call cannot."
+text = "A profile of a backend that closes names closes each path with a part that is a secret name, at each depth, as a file and as a folder, and keeps .envrc and notes.env.txt open. The words say that a command and a file call cannot reach a secret name only when the backend closes it, and else that a file call cannot. On a backend that cannot close a name, the words of a shell also say that a command cannot reach such a file that was there at the open of the session, and that it can reach one that is made later."
 
 [[node]]
 id = "law-host-list"
@@ -2044,7 +2044,7 @@ kind = "law"
 name = "Seatbelt:"
 ref = "5.4"
 uses = ["seatbelt", "profile-for-mode"]
-text = "On macOS, for the profile of each mode of 5.2, a real child process can do what the probes of the profile allow and nothing more: writes in the scope, in the temporary directory, outside, in .git, in the control paths of git and of the tools, and in a nested .git; reads of a secret, a .env file, a secret file with a quote in its name and the journals; a new file with a secret name; a hard link to a secret and to a .env file; a move of a .env file; a UNIX socket of the host; a child of the child; the network, directly and through the proxy; the processes outside the sandbox and launchd. When the backend works, a command runs under the profile of each mode with a child process. In a real repository, git switch -c and git commit run as the profile allows, and git config, a new hook and a nested git init do not (choice 19)."
+text = "On macOS, for the profile of each mode of 5.2, a real child process can do what the probes of the profile allow and nothing more: writes in the scope, in the temporary directory, outside, in .git, in the control paths of git and of the tools, and in a nested .git; reads of a secret, a .env file, a secret file with a quote in its name and the journals; a new file with a secret name; a hard link to a secret and to a .env file; a move of a .env file and of a folder above a .env file; a UNIX socket of the host; a child of the child; the network, directly and through the proxy; the processes outside the sandbox and launchd. When the backend works, a command runs under the profile of each mode with a child process. In a real repository, git switch -c and git commit run as the profile allows, and git config, a new hook and a nested git init do not (choice 19)."
 
 [[group]]
 id = "bubblewrap-laws"
@@ -2060,8 +2060,8 @@ group = "bubblewrap-laws"
 kind = "law"
 name = "Bubblewrap:"
 ref = "5.4"
-uses = ["bubblewrap", "profile-for-mode"]
-text = "On Linux with bwrap, the probes of Seatbelt give what the profile allows, apart from the network of Network^, which stays closed. The tests skip on a host with no working bwrap. scripts/sandbox-linux/run.sh runs them in a podman container, and the blueprint reads its report. A stop of the wrapper at each point of the start of bwrap leaves no process of the command. The flags mount each control path that exists read-only, and a profile with a rule on names gets no flags."
+uses = ["bubblewrap", "profile-for-mode", "profile-for-shell"]
+text = "On Linux with bwrap, the probes of Seatbelt give what the profile of the shell allows, apart from the network of Network^, which stays closed. The tests skip on a host with no working bwrap. scripts/sandbox-linux/run.sh runs them in a podman container, and the blueprint reads its report. A stop of the wrapper at each point of the start of bwrap leaves no process of the command. The flags mount each control path that exists read-only, and a profile with a rule on names gets no flags. The flags cover each secret file of the walk, mount each folder above it on itself before the control paths, and mount no path through a symbolic link."
 
 [[group]]
 id = "seccomp-laws"
@@ -2113,7 +2113,7 @@ name = "Exec:"
 ref = "5.3"
 uses = ["sandboxed-shell"]
 proof_uses = ["backend-detect"]
-text = "With no backend, or in a mode with no child process, exec fails and the command does not run. Else the command runs in the sandbox of the mode: it sees only the variables of the allowlist, it cannot write outside the scope, also from its own child, and the time limit stops it and its children. A zombie counts as stopped, so the handler does not wait for it. The secret paths of the home folder and the journals stay closed. On a backend that closes names, a command reaches no file and no folder with a secret name, also through a link, a copy or a move, and it cannot make one. On bubblewrap a command reads such a file: the gap of 5.4."
+text = "With no backend, or in a mode with no child process, exec fails and the command does not run. Else the command runs in the sandbox of the mode: it sees only the variables of the allowlist, it cannot write outside the scope, also from its own child, and the time limit stops it and its children. A zombie counts as stopped, so the handler does not wait for it. The secret paths of the home folder and the journals stay closed. On a backend that closes names, a command reaches no file and no folder with a secret name, also through a link, a copy or a move, and it cannot make one. On a backend that cannot close a name, the shell walks once at its start, and each command gets that profile: a command reads no file with a secret name that was there at the start, also in a sub folder or through a symbolic link, and it reads such a file that is made later, until the shell of the next activation covers it."
 
 # ── Phase 3: the mutants of the sandbox ─────────────────────────────────────────────────────────────────────────
 
