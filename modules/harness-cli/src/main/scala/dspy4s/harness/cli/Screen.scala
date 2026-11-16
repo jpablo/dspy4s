@@ -159,9 +159,7 @@ object Screen:
       case Entry.EffectStarted(id, op, args) =>
         (screen.withCell(c => c.copy(calls = c.calls :+ CallView(id, op, args, at, None))), Vector.empty)
       case Entry.EffectDone(id, result) =>
-        val ended = screen.withCell(c =>
-          c.copy(calls = c.calls.map(k => if k.id == id then k.copy(end = Some((result, at))) else k))
-        )
+        val ended = screen.withCell(c => c.copy(calls = endCall(c.calls, id, (result, at))))
         result match
           case EffectResult.NeedsApproval(rule) =>
             (ended.withStep(s => s.copy(asked = s.asked :+ (logged.seq -> rule))), Vector.empty)
@@ -677,10 +675,24 @@ object Screen:
       case Some(step) => (screen.withStep(_.copy(printed = true)), stepRows(step, look))
       case None       => (screen, Vector.empty)
 
+  /** `calls` with the end `end` on the call `id`. A cell runs one guest call at a time, so the call that ends is the
+    * last one, and the search from the end stops at once. Thus each entry of a cell costs a constant time, and the
+    * screen of a cell with many calls draws in linear time. In a live run of 2026-11-16, each end mapped all the calls
+    * of the cell, and the client could not open a session whose cell had 251,090 calls. A call that is not the last one
+    * still gets its end. An unknown id changes no call.
+    */
+  private def endCall(calls: Vector[CallView], id: EffectId, end: (EffectResult, Long)): Vector[CallView] =
+    val i = calls.lastIndexWhere(_.id == id)
+    if i < 0 then calls else calls.updated(i, calls(i).copy(end = Some(end)))
+
+  // A change of the last step or of its cell copies no list of calls: `Vector.updated`, `Vector.:+` and `Map.updated`
+  // keep the old structure. So each entry costs a constant time, also in a cell with many calls.
   extension (screen: Screen)
     private def withTurn(f: TurnView => TurnView): Screen = screen.copy(turn = screen.turn.map(f))
     private def withStep(f: StepView => StepView): Screen =
-      screen.withTurn(t => t.steps.lastOption.fold(t)(last => t.copy(steps = t.steps.init :+ f(last))))
+      screen.withTurn(t =>
+        t.steps.lastOption.fold(t)(last => t.copy(steps = t.steps.updated(t.steps.size - 1, f(last))))
+      )
     private def withCell(f: CellView => CellView): Screen =
       val changed = screen.withStep(s => s.copy(cell = s.cell.map(f)))
       changed.turn.flatMap(_.steps.lastOption).flatMap(_.cell).fold(changed)(c =>

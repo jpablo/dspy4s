@@ -96,6 +96,10 @@ object Window extends ContextStrategy:
     *   - The first step after a new activation has the note of the lost names (`NewReplNote.afterActivation`) in its
     *     observation, before its messages. Only the observation of that step holds the note. A program call has one
     *     activation, so its projection has no such note.
+    *   - The first step of a turn whose start cleared one or more pending calls has the note of the refused calls
+    *     (`RefusedCallNote.afterTurnStart`) in its observation, after the note of the lost names and before its
+    *     messages. Only the observation of that step holds the note. The memory tree uses this projection for the open
+    *     turn (`openTurn`), so it gets the note too.
     *   - An earlier turn is a message whose observation holds all its messages, and whose text is its reply: the text
     *     of `Replied`, or the text of the report of another outcome (`TurnOutcome.report`) and then the last text of
     *     the turn. So the model reads the outcome in words, and not as a Scala value.
@@ -106,8 +110,8 @@ object Window extends ContextStrategy:
     val acted         = open.filter(_.acted)
     val current       = open.lastOption.filterNot(_.acted)
     val heardNow      = current.fold(Vector.empty[String])(_.heard)
-    val renewed       = NewReplNote.afterActivation(journal).toVector
-    val observation   = seen(acted.flatMap(_.cell).lastOption, renewed ++ heardNow, budget / 2)
+    val notes         = (NewReplNote.afterActivation(journal) ++ RefusedCallNote.afterTurnStart(journal)).toVector
+    val observation   = seen(acted.flatMap(_.cell).lastOption, notes ++ heardNow, budget / 2)
     val before        = None +: acted.map(_.cell)
     val stepMessages  = acted.zipWithIndex.map { (step, k) =>
       message(seen(before(k), step.heard, budget / 8), step.text, step.code, budget / 8)

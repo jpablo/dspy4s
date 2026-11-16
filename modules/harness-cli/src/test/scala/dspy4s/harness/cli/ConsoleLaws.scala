@@ -275,6 +275,20 @@ class ConsoleLaws extends munit.FunSuite:
     }
   }
 
+  // In a live run of 2026-11-16, Ctrl-C during a turn left a frozen copy of the live block, its status line and its
+  // rule on the screen, above the result of the stop. /stop, which Enter sends, left no copy.
+  test("CLI editor: Ctrl-C on an empty line keeps no live block in the history, as Enter does") {
+    val live = AtomicReference(busy("  FAKE-ROW-A", "  FAKE-ROW-B"))
+    editing(live) { (_, writer, out, got) =>
+      assert(soon(seen(out).exists(_.contains("FAKE-ROW-B"))), seen(out).mkString("\n"))
+      writer.write("\u0003".getBytes(UTF_8))
+      writer.flush()
+      assert(soon(got.get == Typed.Interrupt), String.valueOf(got.get))
+      val shown = seen(out)
+      assert(!shown.exists(_.contains("FAKE-ROW")), shown.mkString("\n"))
+    }
+  }
+
   test("CLI editor: Ctrl-O runs the action of the client during a read") {
     val live   = AtomicReference(busy("  FAKE-ROW-A"))
     val counts = java.util.concurrent.atomic.AtomicInteger(0)

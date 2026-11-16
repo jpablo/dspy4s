@@ -23,6 +23,10 @@ package dspy4s.harness.kernel
   * no open turn and during a release. A job with an end, or a job that the state does not have, gives no entry, so a
   * job has one end in the journal. A session that has ended gives `Rejection.SessionClosed`. Only this command gives
   * `JobEnded`, so a `Commit` of it is refused.
+  *
+  * The rule of the stop of one job (10.3): `StopJobs(One(job))` of a job with an end gives `Rejection.JobEnded`, so the
+  * person or the cell learns that the job has ended. `OfLastTurn` and `All` stay valid for each job, because a stop
+  * mark after the end keeps the end.
   */
 def decide(command: Command, s: SessionState, sender: Source = Source.User): Either[Rejection, Vector[Entry]] =
   command match
@@ -58,7 +62,11 @@ def decide(command: Command, s: SessionState, sender: Source = Source.User): Eit
     case Command.Abort(reason) =>
       Right(if s.position != Position.NoTurn && !s.stopping then Vector(Entry.StopRequested(reason)) else Vector.empty)
     case Command.StopJobs(which, reason) =>
-      if s.closed then Left(Rejection.SessionClosed) else Right(Vector(Entry.JobsStopRequested(which, reason)))
+      if s.closed then Left(Rejection.SessionClosed)
+      else
+        which match
+          case JobSelector.One(job) if ended(s, job) => Left(Rejection.JobEnded(job))
+          case _                                     => Right(Vector(Entry.JobsStopRequested(which, reason)))
     case Command.Grant(request, _, _) if s.requests(request) => Right(Vector.empty)
     case Command.Grant(_, _, _) if s.closed                  => Left(Rejection.SessionClosed)
     case Command.Grant(_, _, _) if s.releasing               => Left(Rejection.Releasing)
@@ -79,6 +87,9 @@ def decide(command: Command, s: SessionState, sender: Source = Source.User): Eit
     case Command.RecordJobEnd(_, _) if s.closed                => Left(Rejection.SessionClosed)
     case Command.RecordJobEnd(job, end)                        =>
       Right(if s.jobs.get(job).exists(_.end.isEmpty) then Vector(Entry.JobEnded(job, end)) else Vector.empty)
+
+/** True when the journal has the end of the job `job` (10.3). */
+private def ended(s: SessionState, job: EffectId): Boolean = s.jobs.get(job).exists(_.end.isDefined)
 
 /** True when a turn must wait for the person (8.7): `unattended` is at `SessionState.UnattendedTurns`, and no message
   * of the person waits.

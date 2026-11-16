@@ -466,6 +466,35 @@ class WorkLaws extends munit.FunSuite:
     }
   }
 
+  // The kernel now refuses a stop of a job that has ended (live run of 2026-11-16). A cell that stops a job that has
+  // just ended must not fail for that: the job is already where the cell wants it.
+  test("Work: stopJob in a cell of a job that has ended does nothing, and the cell goes on") {
+    sandboxed()
+    val model = sessionModel(
+      policy("start", Some("""val j = spawn("exit 0")""")),
+      policy("FAKE-STARTED", None),
+      policy("stop", Some("""stopJob(j); println("AFTER-STOP")""")),
+      policy("FAKE-STOPPED", None)
+    )
+    work(model) { (_, handle) =>
+      assertEquals(handle.send(message("m1")), Right(()))
+      assert(eventually(60)(outcomes(handle).size == 1), entries(handle).toString)
+      def ended =
+        entries(handle).exists {
+          case Entry.JobEnded(_, _) => true
+          case _                    => false
+        }
+      assert(eventually(30)(ended), entries(handle).toString)
+      assertEquals(handle.send(message("m2")), Right(()))
+      assert(eventually(60)(outcomes(handle).size == 2), entries(handle).toString)
+      val observed = entries(handle).collect { case Entry.Observed(output, outcome, _) => (output, outcome) }
+      assert(
+        observed.lastOption.exists((output, outcome) => outcome == CellOutcome.Ok && output.contains("AFTER-STOP")),
+        observed.toString
+      )
+    }
+  }
+
   test("Work: jobStatus gives Running for a job that runs after its turn, and Stopped after StopJobs") {
     sandboxed()
     val model = sessionModel(policy("start", Some("""spawn("sleep 333")""")), policy("FAKE-STARTED", None))

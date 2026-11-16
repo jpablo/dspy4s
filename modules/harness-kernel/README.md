@@ -84,7 +84,8 @@ decide(Command.Send(RequestId("r1"), "Fix the test", Map.empty), s0) match
 - **A stop is an entry.** `Abort` commits `StopRequested`, and then `next` ends the turn with `Aborted`.
 - **The end of a job is an entry.** The host sends `RecordJobEnd` at the end of each job, and `decide` gives one
   `JobEnded` for each job. The fold puts the end (`JobEnd`) in the `JobRecord`, so a later host gives the status of
-  the job and not `Lost`. The entry holds no output.
+  the job and not `Lost`. The entry holds no output. `StopJobs` of one job that has ended gives `Rejection.JobEnded`,
+  so the person learns that the job has ended.
 - **A grant changes only `Ask`.** A session with no person (the owner `Optimizer` or `Cell`) never gets
   `NeedsPerson`, and the call is refused. A `TurnStarted` empties the pending calls, so the model asks again if it
   still needs the call. A grant that answers a pending call also commits an `Input` with the text of `approvedText`.

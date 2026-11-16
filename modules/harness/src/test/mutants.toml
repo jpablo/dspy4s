@@ -175,6 +175,22 @@ file = "Window.scala"
 old = "\"observation\" -> observation, \"reasoning\" -> \"\", \"text\""
 new = "\"observation\" -> observation, \"text\""
 
+# ── The refused calls (5.5, 7, 2026-11-16) ──
+
+[[mutant]]
+name = "Mutant: a message that refused a waiting call gives the first step no note"
+[[mutant.edit]]
+file = "Window.scala"
+old = "++ RefusedCallNote.afterTurnStart(journal)"
+new = "++ Option.empty[String]"
+
+[[mutant]]
+name = "Mutant: each step of the turn gets the note of the refused calls"
+[[mutant.edit]]
+file = "Context.scala"
+old = "val first = turn >= 0 && !journal.iterator"
+new = "val first = turn >= 0 || !journal.iterator"
+
 # ── The times (7, 2026-11-15) ──
 
 [[mutant]]

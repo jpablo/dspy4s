@@ -567,6 +567,28 @@ class ScopesLaws extends munit.FunSuite:
     }
   }
 
+  // In a live run of 2026-11-16, /reopen of an abandoned Scratch session opened it on its old folder, which the release
+  // had moved to the archive. The first command failed, a write made a new empty folder, and the archived files stayed
+  // apart.
+  test("Host release: a reopen of a Scratch session whose release archived its folder brings the folder back") {
+    withRoot { root =>
+      withScriptHost(root) { (host, _) =>
+        val scope = host.make(Scope.Scratch(""), id(1)) match
+          case Right(made: Scope.Scratch) => made
+          case other                      => fail(other.toString)
+        Files.writeString(Path.of(scope.path).resolve("note.txt"), "kept")
+        opened(host, id(1), Some(config().copy(scope = scope))): Unit
+        host.release(id(1), SessionOutcome.Abandoned("fake"), "fake", _ => true).fold(
+          e => fail(e.toString),
+          identity
+        ): Unit
+        assert(!Files.exists(Path.of(scope.path)), "the release did not move the folder to the archive")
+        opened(host, id(1), None): Unit
+        assertEquals(Files.readString(Path.of(scope.path).resolve("note.txt")), "kept")
+      }
+    }
+  }
+
   test("Host release: a folder that another open session uses is shared, so it stays") {
     withWorktreeSession { (host, _, scope, _) =>
       opened(host, id(2), Some(config().copy(scope = scope))): Unit

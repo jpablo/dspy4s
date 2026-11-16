@@ -163,6 +163,18 @@ class EffectLaws extends ScalaCheckSuite:
     assertEquals(marked.jobs.get(job), Some(JobRecord(spawned.lastTurn, stopRequested = true, Some(JobEnd.Exited(3)))))
   }
 
+  // In a live run of 2026-11-16, /stopjob of a job that had ended with the exit code 0 was accepted: the client said
+  // that the job stops, and /jobs then showed it as stopped.
+  test("Job: a stop of one job that has ended is refused with words that say so, and a stop of a running job is not") {
+    val job     = EffectId(cell, 0)
+    val spawned = state(journal((cellEntries() :+ Entry.EffectStarted(job, "spawn", args))*))
+    val ended   = commit(spawned, Vector(Entry.JobEnded(job, JobEnd.Exited(0))))
+    decide(Command.StopJobs(JobSelector.One(job), "stop"), ended) match
+      case Left(rejection) => assert(rejection.words.contains("has ended"), rejection.words)
+      case Right(entries)  => fail(s"the stop of an ended job was accepted: $entries")
+    assert(decide(Command.StopJobs(JobSelector.One(job), "stop"), spawned).isRight)
+  }
+
   property("Job: a JobEnded changes only the end of its job, and nothing for a job that the state does not have") {
     val end = JobEnd.Exited(7)
     forAll(schedules) { run =>

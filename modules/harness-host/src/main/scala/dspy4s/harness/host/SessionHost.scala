@@ -13,7 +13,7 @@ import dspy4s.harness.kernel.{
 import dspy4s.harness.kernel.{repair, state as foldOf}
 
 import java.nio.channels.{FileChannel, FileLock, OverlappingFileLockException}
-import java.nio.file.{Files as JFiles, Path, StandardOpenOption}
+import java.nio.file.{Files as JFiles, LinkOption, Path, StandardOpenOption}
 import java.util.concurrent.atomic.AtomicReference
 import java.util.concurrent.{CountDownLatch, Executors, LinkedBlockingQueue, TimeUnit}
 import scala.concurrent.duration.*
@@ -252,7 +252,8 @@ trait Activation extends AutoCloseable:
   *     ordered thread for each session. A snapshot that a newer `TurnEnded` makes old does not commit. The controller,
   *     whose scope is `Home`, gets no snapshot.
   *   - The row of a session goes to the catalog when its status or its ledger changes.
-  *   - `release` ends a session with its release plan.
+  *   - `release` ends a session with its release plan. A later open of a session whose release moved its `Scratch`
+  *     folder to the archive moves the folder back before the `Activate` (7.9).
   */
 final class LocalHost private (
     root     : Path,
@@ -611,7 +612,7 @@ final class LocalHost private (
   private def refOf(id: SessionId): String = s"refs/archive/${id.value}"
 
   /** The folder that gets the scratch directory of the session `id` (7.9). */
-  private def archiveOf(id: SessionId): String = root.resolve("archive").resolve(id.value).toString
+  private def archiveOf(id: SessionId): String = OpenSession.archiveOf(root, id).toString
 
   /** The open session `id`. Only the laws use it. */
   private[host] def sessionOf(id: SessionId): Option[OpenSession] = synchronized(sessions.get(id))
@@ -1073,10 +1074,10 @@ private object OpenSession:
   /** The most characters of the output of a job in its message. */
   private val ReportOutput = 2_000
 
-  /** Opens the session `id`: the folder of the scope, the lock, the file, the journal, the configuration, the writer,
-    * the call of `SessionRuntime.opened` and the `Activate`. A folder that is not there refuses the open before the
-    * lock and the file, so it makes no journal. A failed step after the writer closes the session, and the close also
-    * closes the result of `opened`.
+  /** Opens the session `id`: the folder of the scope, the lock, the file, the journal, the configuration, the scratch
+    * folder that its release archived (`unarchive`), the writer, the call of `SessionRuntime.opened` and the
+    * `Activate`. A folder that is not there refuses the open before the lock and the file, so it makes no journal. A
+    * failed step after the writer closes the session, and the close also closes the result of `opened`.
     */
   def start(
       id    : SessionId,
@@ -1095,7 +1096,9 @@ private object OpenSession:
                 file    <- SessionFile.open(path, id).left.map(HostError.OpenFailed(_))
                 start   <- file.readFrom(0).left.map(e => failed(file, e))
                 setting <- chosen(config, start).left.map(e => failed(file, e))
-                session  = made(id, place, file, start, channel, lock)
+                // The lock of the session holds, so no other host moves the folder at the same time.
+                _       = unarchive(place.root, id, setting.scope, start)
+                session = made(id, place, file, start, channel, lock)
                 // `opened` comes before the `Activate` or the `Begin`, because each can start a turn at once, and the
                 // activation of that turn needs the result of `opened`.
                 _ <- session.keepOpened(setting).left.map { e =>
@@ -1112,6 +1115,39 @@ private object OpenSession:
               Try(channel.close()): Unit
             opened
           }
+
+  /** The folder that gets the scratch directory of the session `id` at its release (7.9): `<root>/archive/<id>`. */
+  def archiveOf(root: Path, id: SessionId): Path = root.resolve("archive").resolve(id.value)
+
+  /** Moves the archive of the session `id` back to the folder of its `Scratch` scope `scope` (7.9), before the
+    * activation of an open. The release of an abandoned session moves its scratch folder to `archiveOf`. In a live run
+    * of 2026-11-16, a reopen then opened the session on a folder that did not exist, a write made a new empty folder,
+    * and the archived files stayed apart.
+    *
+    * The move occurs only when the folder does not exist, the archive is a folder, and a `Released` step of `journal`
+    * moved that folder to that archive. Thus the host moves back only what its release moved. In each other case,
+    * nothing changes. A move that fails also changes nothing, so the open goes on, as an open with a folder that is
+    * gone does (`folderFault`).
+    */
+  private def unarchive(root: Path, id: SessionId, scope: Scope, journal: Vector[Logged]): Unit =
+    val archive = archiveOf(root, id)
+    scope match
+      case Scope.Scratch(text) if text.nonEmpty =>
+        val archived = journal.exists(_.entry match
+          case Entry.Released(ReleaseStep(ReleaseItem.ArchiveDirectory(from, to), ReleaseResult.Done)) =>
+            from == text && to == archive.toString
+          case _ => false)
+        val folder = Try(Path.of(text)).toOption.filter(_.isAbsolute)
+        folder.filter { f =>
+          archived && !JFiles.exists(f, LinkOption.NOFOLLOW_LINKS) &&
+          JFiles.isDirectory(archive, LinkOption.NOFOLLOW_LINKS)
+        }.foreach { f =>
+          Try {
+            Option(f.getParent).foreach(JFiles.createDirectories(_): Unit)
+            JFiles.move(archive, f): Unit
+          }: Unit
+        }
+      case _ => ()
 
   /** The fault of the folder of `scope`, or none (10.2). A `Home`, a `Directory` or a `Worktree` scope names a folder
     * of the user, and that folder must exist. The harness makes the folder of a `Scratch` or a `Fork` scope, so these

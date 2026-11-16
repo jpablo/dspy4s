@@ -47,10 +47,14 @@ object Controller:
     * go in the task. In the live session of 2026-11-15, the controller told the person to approve a call in a "host
     * UI", and the question of the person refused the call. The task is the same at each turn of an activation, so the
     * prompt cache stays valid.
+    *
+    * In the live session of 2026-11-16, the model told the person to type `/allow 1 turn` for the call 71. The model
+    * does not know the number of a call, and `/allow` with no number allows each call that waits, so the task asks for
+    * no number.
     */
   def task(home: Path): String =
     s"The home of the person: $home. When a call needs an approval, end the turn and tell the person to type " +
-      s"/allow. A message of the person instead of /allow refuses the call.\n\n$commands"
+      s"/allow, with no number. A message of the person instead of /allow refuses the call.\n\n$commands"
 
   /** The commands of the terminal client, in words for the model: what the person can type, and what each command does.
     * Only the person types a command, so the model tells the person which command to type. In the live session of

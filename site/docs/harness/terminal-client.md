@@ -151,7 +151,7 @@ A line that starts with `/` is a command. Each other line is a message to the se
 | `/stopall` | stop the turn and each job of the turn | With no open turn, it stops the jobs of the last turn. |
 | `/allow [N] [once|turn|session]` | allow each pending call, or only the call N of the prompt and of /status | The lifetime is `once` when you give none. |
 | `/jobs` | list the jobs of the session | One line for each job, for example `2.1 runs: "sbt ~test"`. |
-| `/stopjob ID` | stop the job ID of /jobs, for example 12.0 | |
+| `/stopjob ID` | stop the job ID of /jobs, for example 12.0 | A job that has ended keeps its end, and the client prints `The session refused the command: the job ID has ended`. |
 | `/status` | show the folder, the turn, the pending calls and the jobs | It also shows the effort and the context. |
 | `/reasoning off|line|short|full` | set how much of the reasoning of a step the client shows | The history keeps the rows that it printed. |
 | `/effort [LEVEL]` | show the reasoning effort and its levels, or set the effort of the next steps | The level must be one of the levels of the model. |

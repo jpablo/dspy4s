@@ -72,7 +72,14 @@ class ControllerLaws extends munit.FunSuite:
   // person refused the call.
   test("Controller: its prompt tells that the person approves a call with /allow, and that a message refuses it") {
     val prompt = s"${Controller.instructions}\n${Controller.task(home)}"
-    assert(prompt.contains("When a call needs an approval, end the turn and tell the person to type /allow."), prompt)
+    // In a live run of 2026-11-16, the model told the person to type "/allow 1 turn" for the call 71: it does not
+    // know the number of a call, and /allow with no number allows each waiting call.
+    assert(
+      prompt.contains(
+        "When a call needs an approval, end the turn and tell the person to type /allow, with no number."
+      ),
+      prompt
+    )
     assert(prompt.contains("A message of the person instead of /allow refuses the call."), prompt)
   }
 

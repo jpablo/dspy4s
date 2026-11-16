@@ -42,6 +42,12 @@ enum Rejection derives CanEqual:
   /** The session runs its release plan (8.7), so it takes no message and no grant. */
   case Releasing
 
+  /** `StopJobs` of this one job, whose end the journal has (10.3). A stop mark after the end changes nothing, so the
+    * person learns that the job has ended. In a live run of 2026-11-16, the client said that a job that had exited with
+    * the code 0 stops.
+    */
+  case JobEnded(job: EffectId)
+
   /** The refusal in words for a person and for a model, with no Scala value. The terminal, the error of a cell and the
     * error of a call of the controller give these words:
     *
@@ -51,6 +57,7 @@ enum Rejection derives CanEqual:
     *     entry. An entry can hold a long text, so the words give only its name.
     *   - `NotNew`: `the session has a journal already`.
     *   - `Releasing`: `the session runs its release, so it takes no message`.
+    *   - `JobEnded`: `the job 12.0 has ended`, with the cell and the number of the job, as `/jobs` names it.
     */
   def words: String =
     this match
@@ -60,5 +67,6 @@ enum Rejection derives CanEqual:
         val name    = entry.productPrefix
         val article = if "AEIOU".contains(name.head) then "an" else "a"
         s"$article $name entry cannot come at this place of the journal"
-      case NotNew    => "the session has a journal already"
-      case Releasing => "the session runs its release, so it takes no message"
+      case NotNew        => "the session has a journal already"
+      case Releasing     => "the session runs its release, so it takes no message"
+      case JobEnded(job) => s"the job ${job.cell}.${job.n} has ended"

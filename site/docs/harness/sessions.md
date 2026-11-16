@@ -166,6 +166,8 @@ controller.
   stays.
 - A clone with a change that git does not keep (also an ignored file) stays, and its branch stays.
 - Merge the branch into `base` before `/close merged`. Else the branch stays.
+- When you open again a `Scratch` session whose release moved its folder to the archive, the host moves the folder
+  back from `~/.dspy4s/harness/archive/<id>` before the session starts.
 - An item that cannot be undone needs your confirmation. The client prints
   `The step "<item>" cannot be undone. Type yes to run it.` Another answer skips the item.
 

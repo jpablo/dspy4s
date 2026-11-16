@@ -92,6 +92,18 @@ class JobLaws extends munit.FunSuite:
     finally jobs.close()
   }
 
+  // In a live run of 2026-11-16, /stopjob of a job that had exited with the code 0 changed its status to stopped.
+  test("Jobs: a stop mark after the end of a job keeps its exit code") {
+    val jobs = table()
+    try
+      assertEquals(jobs.start(job, launch("exit 0"), report = false), Right(()))
+      assertEquals(jobs.await(job, 10), Some(JobStatus.Exited(0)))
+      val marked = withJob(job, marked = true)
+      jobs.sync(marked)
+      assertEquals(jobs.status(job, marked), JobStatus.Exited(0))
+    finally jobs.close()
+  }
+
   test("Jobs: a start of a job with a stop mark does not start its process, and gives an error") {
     val jobs = table()
     try

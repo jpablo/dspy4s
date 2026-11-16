@@ -364,6 +364,24 @@ class ScreenLaws extends munit.FunSuite:
     assertEquals(Screen.of(turn), screen)
   }
 
+  // In a live run of 2026-11-16, a cell made 251,090 guest calls, and the client could not open the session: each
+  // EffectDone mapped all the calls of the cell, so the time grew with the square of the calls.
+  test("Screen: a cell with 150,000 calls draws in linear time") {
+    val calls = 150_000
+    val body  = (0 until calls).toVector.flatMap(n => Vector(call(3, n, "now"), done(3, n, "1")))
+    val log   =
+      (Vector(
+        Entry.TurnStarted,
+        Entry.StepStarted(0),
+        Entry.Acted("", "I loop.", Some("x"))
+      ) ++ body :+ Entry.Observed("", CellOutcome.Ok, Map.empty)).zipWithIndex.map((entry, i) => at(i + 1L, 0, entry))
+    val start = System.nanoTime()
+    val rows  = printed(log)
+    val spent = (System.nanoTime() - start) / 1_000_000
+    assert(rows.nonEmpty)
+    assert(spent < 5_000, s"the screen took $spent ms for $calls calls")
+  }
+
   test("Screen: the ASCII glyphs give rows with no character outside ASCII") {
     val ascii = look.copy(glyphs = Glyphs.ascii, detail = Detail.Full)
     val rows  = printed(turn, ascii) ++

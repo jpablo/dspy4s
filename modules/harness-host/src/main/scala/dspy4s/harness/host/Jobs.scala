@@ -3,7 +3,7 @@ package dspy4s.harness.host
 import dspy4s.harness.{Journal, suffixStart}
 import dspy4s.harness.guest.{Files, JobId, JobStatus, Shell}
 import dspy4s.harness.host.Interrupts.{uninterruptibly, uninterruptiblyWithin}
-import dspy4s.harness.kernel.{Command, EffectId, JobEnd, JobSelector, SessionState, Source}
+import dspy4s.harness.kernel.{Command, EffectId, JobEnd, JobSelector, Rejection, SessionState, Source}
 import dspy4s.harness.sandbox.SandboxedShell
 
 import java.io.{InputStream, InputStreamReader}
@@ -80,7 +80,7 @@ final class JobTable(
               row.drained.await(ReaderWait.toMillis, TimeUnit.MILLISECONDS): Unit
               row.ended.countDown()
               // The end goes to the journal first, so the message of the report comes after it.
-              val end = endOf(row)
+              val end = row.end
               Try(recordEnd(id, end)): Unit
               if report then Try(this.report(id, jobStatusOf(end))): Unit
             }
@@ -142,11 +142,7 @@ final class JobTable(
       uninterruptiblyWithin(ReaderWait)(left => helpers.awaitTermination(left, TimeUnit.NANOSECONDS): Unit)
 
   private def statusOf(row: Row): JobStatus =
-    if row.process.isAlive then JobStatus.Running else jobStatusOf(endOf(row))
-
-  /** The end of a job whose process ended: `Stopped` after a stop, and else its exit code. */
-  private def endOf(row: Row): JobEnd =
-    if row.stopped then JobEnd.Stopped else JobEnd.Exited(row.process.exitValue())
+    if row.process.isAlive then JobStatus.Running else jobStatusOf(row.end)
 
   /** The stop of one job, once: the end of the pipe of its wrapper, then TERM and KILL for a process with no wrapper.
     */
@@ -186,20 +182,25 @@ object JobTable:
 
   /** The row of one job: its process, its output, and its stop. */
   private final class Row(val process: Process):
-    val ended: CountDownLatch      = CountDownLatch(1)
-    val drained: CountDownLatch    = CountDownLatch(1)
-    private val output             = StringBuilder()
-    @volatile private var stopFlag = false
+    val ended: CountDownLatch   = CountDownLatch(1)
+    val drained: CountDownLatch = CountDownLatch(1)
+    private val output          = StringBuilder()
+    private var stopFlag        = false
 
-    def stopped: Boolean = stopFlag
-
-    /** True for the first stop only. */
+    /** True for the first stop of a process that runs. A stop after the end of the process changes nothing, so the job
+      * keeps its exit code (10.3). In a live run of 2026-11-16, `/stopjob` of a job that had exited with the code 0
+      * changed its status to stopped. The check and the mark hold the lock of the row, and so does `end`. Thus the end
+      * that the table gives before a stop mark is the end that it gives after it.
+      */
     def markStopped(): Boolean =
       synchronized {
-        val first = !stopFlag
-        stopFlag = true
+        val first = !stopFlag && process.isAlive
+        if first then stopFlag = true
         first
       }
+
+    /** The end of the process, which must have ended: `Stopped` after a stop, and else its exit code. */
+    def end: JobEnd = synchronized(if stopFlag then JobEnd.Stopped else JobEnd.Exited(process.exitValue()))
 
     def append(text: String): Unit =
       synchronized {
@@ -245,7 +246,9 @@ def jobStatusOf(ending: JobEnd): JobStatus =
   *     job with a stop mark, or else `Lost`. `jobOutput` of such a job gives an empty text, because the journal keeps
   *     no output.
   *   - `stopJob(job)` runs `StopJobs(One(job))` (10.3). A refusal throws an exception with the refusal in words
-  *     (`Rejection.words`), because the cell reads it.
+  *     (`Rejection.words`), because the cell reads it. The refusal `Rejection.JobEnded` of that job is not an error:
+  *     the job has ended, so `stopJob` does nothing, and the cell goes on. Else a cell that stops a job at the time of
+  *     its end fails, or does not fail, by chance.
   *   - `jobOutput`, `waitJob` and `stopJob` of a job that the session does not have throw an exception that names the
   *     job as `/jobs` does (`jobName`), for example `99.0`, because the cell reads it.
   */
@@ -270,9 +273,11 @@ final class JobShell(inner: SandboxedShell, table: JobTable, journal: Journal) e
     table.await(id, maxSeconds).getOrElse(table.status(id, journal.state))
 
   def stopJob(job: JobId): Unit =
-    val id = known(job, "stopJob")
-    journal.run(Command.StopJobs(JobSelector.One(id), "the cell stopped the job"), Source.Policy).left.foreach {
-      rejection => throw IllegalStateException(s"stopJob: the session refused the stop: ${rejection.words}")
+    val id   = known(job, "stopJob")
+    val done = journal.run(Command.StopJobs(JobSelector.One(id), "the cell stopped the job"), Source.Policy)
+    // The job has ended, so the stop has nothing to do.
+    done.swap.toOption.filterNot(_ == Rejection.JobEnded(id)).foreach { rejection =>
+      throw IllegalStateException(s"stopJob: the session refused the stop: ${rejection.words}")
     }
 
   /** The effect of `job`, when the journal knows the job. For another job it throws an exception that names the job as

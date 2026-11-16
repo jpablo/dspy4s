@@ -228,6 +228,66 @@ class WindowLaws extends ScalaCheckSuite:
     assertEquals(Window.openTurn(timed(twoCells(TurnKind.Chat, "out-0", "out-1")*), 40_000).status, chat.status)
   }
 
+  // In a live run of 2026-11-16, the person asked "What happens to the request now?" while a start waited for an
+  // approval. The message refused the call, but the model said that the call still waited, and told the person to type
+  // /allow, which then said that no call waits.
+  test("Window: the first step after a message that refused a waiting call names the call, and a grant gives no note") {
+    val rule  = GuardRule("start", ArgMatch.Exact(Json.Object(zio.blocks.chunk.Chunk(("kind", Json.String("Dir"))))))
+    val asked = Vector(
+      Source.Harness -> Entry.Activated(versions, config(TurnKind.Chat, steps = 5)),
+      Source.User    -> Entry.Input(RequestId("m1"), "start it", Map.empty),
+      Source.Harness -> Entry.TurnStarted,
+      Source.Harness -> Entry.StepStarted(0),
+      Source.Policy  -> Entry.Acted("", "I start it.", Some("start()")),
+      Source.Harness -> Entry.EffectStarted(EffectId(4, 0), "start", Json.Object(zio.blocks.chunk.Chunk.empty)),
+      Source.Harness -> Entry.EffectDone(EffectId(4, 0), EffectResult.NeedsApproval(rule)),
+      Source.Harness -> Entry.Observed("FAKE-NEEDS-APPROVAL", CellOutcome.Failed("NeedsApproval"), Map.empty),
+      Source.Harness -> Entry.StepStarted(1),
+      Source.Policy  -> Entry.Acted("", "Type /allow.", None),
+      Source.Harness -> Entry.TurnEnded(TurnOutcome.Replied("Type /allow."))
+    )
+    def logOf(entries: Vector[(Source, Entry)]): Vector[Logged] =
+      entries.zipWithIndex.map { case ((source, entry), i) =>
+        Logged(i.toLong, Meta(0L, source, Taint.Trusted, true), entry)
+      }
+    val refused = logOf(
+      asked ++ Vector(
+        Source.User    -> Entry.Input(RequestId("m2"), "What happens to the request now?", Map.empty),
+        Source.Harness -> Entry.TurnStarted,
+        Source.Harness -> Entry.StepStarted(0)
+      )
+    )
+    val note = Window.project(refused, (), 40_000).observation
+    assert(note.contains("refused") && note.contains("start"), note)
+    // The memory tree projects the open turn with `openTurn`, so it gets the note too.
+    val open = Window.openTurn(refused, 40_000).observation
+    assert(open.contains("refused") && open.contains("start"), open)
+    // Only the first step of the turn has the note.
+    val second = logOf(
+      asked ++ Vector(
+        Source.User    -> Entry.Input(RequestId("m2"), "What happens to the request now?", Map.empty),
+        Source.Harness -> Entry.TurnStarted,
+        Source.Harness -> Entry.StepStarted(0),
+        Source.Policy  -> Entry.Acted("", "I look.", Some("1")),
+        Source.Harness -> Entry.Observed("1", CellOutcome.Ok, Map.empty),
+        Source.Harness -> Entry.StepStarted(1)
+      )
+    )
+    val later = Window.project(second, (), 40_000)
+    assert(!later.observation.contains("refused"), later.observation)
+    assert(!later.history.messages.map(_.toString).exists(_.contains("refused")), later.history.toString)
+    val granted = logOf(
+      asked ++ Vector(
+        Source.User    -> Entry.Granted(RequestId("g1"), rule, GrantLifetime.Once),
+        Source.User    -> Entry.Input(RequestId("g1"), "The person approved a call of `start`.", Map.empty),
+        Source.Harness -> Entry.TurnStarted,
+        Source.Harness -> Entry.StepStarted(0)
+      )
+    )
+    val after = Window.project(granted, (), 40_000).observation
+    assert(!after.contains("refused"), after)
+  }
+
   test("Window: in a chat, the time note comes right after the output, before the messages that came during the cell") {
     val log = timed(
       0L     -> Entry.Activated(versions, config(TurnKind.Chat, steps = 5)),

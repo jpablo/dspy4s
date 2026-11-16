@@ -87,8 +87,9 @@ final class PlainConsole(in: BufferedReader, out: PrintStream) extends ClientCon
   *     person.
   *   - The live block (`watch`) and a rule are the prompt of the read, above `› `. JLine changes the line of a read
   *     only with its lock, so a timer redraws it every `FrameMillis` through the widget `BusyWidget`, when it changed.
-  *     A `%` of a row stays as it is. Before Enter accepts a line, the prompt is only `› `, so the history keeps no
-  *     live block.
+  *     A `%` of a row stays as it is. Before Enter accepts a line, and before a Ctrl-C on an empty line ends the read,
+  *     the prompt is only `› `, so the history keeps no live block (`finish`). In a live run of 2026-11-16, a Ctrl-C
+  *     during a turn left a frozen copy of the live block above the result of the stop.
   *   - The footer is one line of a JLine `Status` at the bottom of the terminal. The status gets this row when the
   *     console starts, and it keeps it with a blank row when there is no footer. So its height does not change during a
   *     read.
@@ -116,6 +117,7 @@ final class EditorConsole private (reader: LineReaderImpl, color: Boolean, overr
   @volatile private var shownPrompt                  = ""
   @volatile private var shownTitle                   = ""
   @volatile private var shownFooter                  = AttributedString.EMPTY
+  @volatile private var ending                       = false // from `finish` to the next read
   private val blinking                               = AtomicBoolean(false)
   private val status                                 = Try(Option(JlineStatus.getStatus(terminal))).toOption.flatten
   // The footer gets its row before the first read draws its prompt (`showFooter`).
@@ -141,12 +143,24 @@ final class EditorConsole private (reader: LineReaderImpl, color: Boolean, overr
     LineReader.ACCEPT_LINE,
     () =>
       goesOn(reader) || {
-        // The history keeps only the line of the person, with no live block.
-        reader.setPrompt(markText)
-        shownPrompt = markText
-        reader.callWidget(LineReader.REDISPLAY)
+        finish()
         accept.apply()
       }
+  ): Unit
+  // The Ctrl-C key: ISIG is off, so the key comes to the widget INTERRUPT, and not to a signal (`EditorConsole.on`).
+  private val interrupt = reader.getWidgets.get(LineReader.INTERRUPT)
+  reader.getWidgets.put(
+    LineReader.INTERRUPT,
+    () =>
+      val buffer = reader.getBuffer
+      if buffer.length > 0 then
+        // The read goes on with an empty line. No copy of the live block goes into the history.
+        buffer.clear(): Unit
+        reader.getHistory.moveToEnd()
+        true
+      else
+        finish()
+        interrupt.apply()
   ): Unit
   ticker.scheduleAtFixedRate(() => tick(), FrameMillis, FrameMillis, TimeUnit.MILLISECONDS): Unit
 
@@ -165,12 +179,15 @@ final class EditorConsole private (reader: LineReaderImpl, color: Boolean, overr
           lock.notifyAll()
         }
 
-  /** One line. A Ctrl-C on a line with text only clears the text, so the read goes on. */
+  /** One line. The Ctrl-C key on a line with text only clears the text, so the read goes on (the widget `INTERRUPT`). A
+    * signal INT during the read ends it: `close` then gives `End`, and else a line with text starts a new read.
+    */
   @tailrec private def typedLine(): Typed =
     val typed =
       val live   = current()
       val prompt = promptOf(live)
       shownPrompt = prompt
+      ending = false
       cursor(live.busy)
       title(live.title)
       try Some(Typed.Text(reader.readLine(prompt, "", null: Character, null: String)))
@@ -218,20 +235,32 @@ final class EditorConsole private (reader: LineReaderImpl, color: Boolean, overr
       catch case _: IllegalStateException => () // No read waits.
 
   /** The widget of `tick`: the live block and the rule as the prompt, the footer, the cursor and the title. It runs
-    * with the lock of the reader. It redraws the line only when the prompt changed, or with `force`.
+    * with the lock of the reader. It redraws the line only when the prompt changed, or with `force`. After `finish`, it
+    * does nothing until the next read.
     */
   private def redraw(force: Boolean): Boolean =
-    val live   = current()
-    val prompt = promptOf(live)
-    cursor(live.busy)
-    title(live.title)
-    footer()
-    if force || prompt != shownPrompt then
-      shownPrompt = prompt
-      reader.setPrompt(prompt)
-      reader.setRightPrompt("")
-      reader.callWidget(LineReader.REDISPLAY)
+    if !ending then
+      val live   = current()
+      val prompt = promptOf(live)
+      cursor(live.busy)
+      title(live.title)
+      footer()
+      if force || prompt != shownPrompt then
+        shownPrompt = prompt
+        reader.setPrompt(prompt)
+        reader.setRightPrompt("")
+        reader.callWidget(LineReader.REDISPLAY)
     true
+
+  /** Draws the line of a read that ends with only the prompt mark `› `, so the history keeps only the line of the
+    * person, with no live block. Enter and a Ctrl-C on an empty line call it. Until the next read, the timer draws no
+    * live block (`ending`), because JLine draws the line one more time at the end of the read.
+    */
+  private def finish(): Unit =
+    ending = true
+    reader.setPrompt(markText)
+    shownPrompt = markText
+    reader.callWidget(LineReader.REDISPLAY)
 
   /** The widget of a resize: it sets the prompt of the new width, and JLine then draws it (`Reader`). So no row of the
     * old width wraps on a smaller window.

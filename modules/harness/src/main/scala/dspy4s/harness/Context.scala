@@ -2,7 +2,7 @@ package dspy4s.harness
 
 import dspy4s.core.contracts.{DspyError, DynamicValues, History, Reasoning, RuntimeContext}
 import dspy4s.harness.guest.StrategyName
-import dspy4s.harness.kernel.{Entry, Logged, Position, SessionState, TurnKind}
+import dspy4s.harness.kernel.{Entry, GuardRule, Logged, Position, SessionState, TurnKind, state}
 import dspy4s.harness.repl.lostNames
 import zio.blocks.schema.{DynamicValue, PrimitiveValue, Schema}
 
@@ -204,7 +204,36 @@ object NewReplNote:
       case Entry.Activated(_, _) => true
       case _                     => false
 
-  private def acted(entry: Entry): Boolean =
+  private[harness] def acted(entry: Entry): Boolean =
     entry match
       case Entry.Acted(_, _, _) => true
       case _                    => false
+
+/** The note after a message that refused one or more pending calls (5.5). Each message starts a new turn, and the start
+  * of a turn clears the pending calls (`SessionState`). In a live run of 2026-11-16, the model got no sign of this: it
+  * said that a call still waited, and it told the person to type /allow, which then said that no call waits.
+  */
+object RefusedCallNote:
+
+  /** The note for the refused calls `calls`, one or more, for example: The message that started this turn refused the
+    * call of `start`, which waited for an approval. Make the call again if you still need it. Each operation comes one
+    * time, in the order of its name.
+    */
+  private def text(calls: Vector[GuardRule]): String =
+    val ops   = calls.map(rule => s"`${rule.op}`").distinct.sorted
+    val named = if ops.size == 1 then ops.head else s"${ops.init.mkString(", ")} and ${ops.last}"
+    val noun  = if calls.size == 1 then "the call" else "the calls"
+    s"The message that started this turn refused $noun of $named, which waited for an approval. " +
+      "Make the call again if you still need it."
+
+  /** The note for the first step of a turn whose start cleared one or more pending calls, or none. The refused calls
+    * are the pending calls of the state just before the last `TurnStarted`. A grant removes the pending call that it
+    * covers, so a turn that a grant starts gets no note for that call. No `Acted` comes after the last `TurnStarted`
+    * until the first step of the turn acts, so a later step gets no note. The note comes from the journal alone, so a
+    * projection that holds it stays a pure function of the journal (7).
+    */
+  def afterTurnStart(journal: Vector[Logged]): Option[String] =
+    val turn  = journal.lastIndexWhere(_.entry == Entry.TurnStarted)
+    val first = turn >= 0 && !journal.iterator.drop(turn + 1).exists(logged => NewReplNote.acted(logged.entry))
+    val calls = if first then state(journal.take(turn)).pending.toVector else Vector.empty
+    Option.when(calls.nonEmpty)(text(calls))
