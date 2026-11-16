@@ -4438,7 +4438,7 @@ ref = "8.7"
 spec = true
 uses = ["session-id", "mode", "access", "harness-limits", "session-config", "source", "data"]
 proof_uses = ["preamble"]
-text = "The fixed id controller, Mode.controller with no Children^, a ceiling that holds workMode, the instructions of its policy (WorkRuntime.policyOf), the task with the home and the rule that the person answers an approval with /allow, the configuration with the scope Home and the memory tree, and the source of a message of a session."
+text = "The fixed id controller, Mode.controller with no Children^, a ceiling that holds workMode, the instructions of its policy (WorkRuntime.policyOf), the task with the home, the rule that the person answers an approval with /allow and the commands of the terminal client, the configuration with the scope Home and the memory tree, and the source of a message of a session."
 
 [[group]]
 id = "host-sessions"

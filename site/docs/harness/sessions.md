@@ -19,6 +19,9 @@ A work session that you open has the scope `Directory(FOLDER)`, the owner `the p
 `Home`). It can read files, ask the model, use its store and use the other sessions. It has no shell, so `write`,
 `edit` and `exec` do not compile in its cells.
 
+The task of the controller lists the commands of the client. So you can ask the controller which command to type,
+for example to change the reasoning effort. Only you can type a command.
+
 One client process holds the controller and each session that it starts. The reports reach the controller while the
 client runs. When the client ends, the host closes each open session and stops its jobs. The journals stay.
 

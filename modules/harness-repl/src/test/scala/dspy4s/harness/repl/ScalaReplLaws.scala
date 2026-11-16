@@ -296,6 +296,19 @@ class ScalaReplLaws extends munit.FunSuite:
     finally r.close()
   }
 
+  // In a live session of 2026-11-16, a cell printed a line and then a guest call threw. The outcome of the cell named
+  // the printed line and not the exception, so the screen and the journal gave a false reason.
+  test("A cell that prints and then throws fails with the text of its exception, and keeps its output") {
+    val r = repl()
+    try
+      val run = r.run("""println("FAKE-LINE")
+                        |throw IllegalStateException("FAKE-FAIL")""".stripMargin)
+      assertEquals(run.outcome, CellOutcome.Failed("java.lang.IllegalStateException: FAKE-FAIL"))
+      assert(run.output.contains("FAKE-LINE"), run.output)
+      assert(run.text.contains("The cell failed: java.lang.IllegalStateException: FAKE-FAIL"), run.text)
+    finally r.close()
+  }
+
   // A live run found that a chain of Array operations did not compile in a cell: the result of `take` or `map` had
   // the type `Array[...]^{any.rd}`, and the next Array operation needs an Array with no capture set. A plain compile
   // with the same options compiles the same code.

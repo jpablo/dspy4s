@@ -2,13 +2,14 @@ package dspy4s.harness.cli
 
 import dspy4s.harness.Support
 import dspy4s.harness.guest.{JobStatus, Scope}
-import dspy4s.harness.host.{Behind, Feed, HostError, SessionHandle, jobName}
+import dspy4s.harness.host.{Behind, Controller, Feed, HostError, SessionHandle, jobName}
 import dspy4s.harness.kernel.*
 import zio.blocks.chunk.Chunk
 import zio.blocks.schema.json.Json
 
 import java.io.{BufferedReader, ByteArrayOutputStream, PipedReader, PipedWriter, PrintStream}
 import java.nio.charset.StandardCharsets.UTF_8
+import java.nio.file.Path
 import java.util.concurrent.ConcurrentLinkedQueue
 import scala.jdk.CollectionConverters.*
 
@@ -435,6 +436,19 @@ class ViewLaws extends munit.FunSuite:
     val console = FakeConsole(Typed.Text("/help"))
     assert(Cli.loop(handle, console, script = false))
     assert(console.printed.asScala.exists(_ == helpText), console.printed.toString)
+  }
+
+  // In a live session of 2026-11-16, the person asked the controller how to change the reasoning effort. The prompt of
+  // the controller named no command of the client, so the model described config files that do not exist.
+  test("CLI: the task of the controller names each command of /help, so the model can tell the person what to type") {
+    val task = Controller.task(Path.of("/tmp/fake-home"))
+    // A command counts only as a whole word, so `/reopen` does not count for `/open`, nor `/stopall` for `/stop`.
+    def named(command: String): Boolean =
+      s"(?<![A-Za-z])${java.util.regex.Pattern.quote(command)}(?![A-Za-z])".r
+        .findFirstIn(task)
+        .nonEmpty
+    val missing = commandHelp.map(_._1.takeWhile(_ != ' ')).distinct.filterNot(named)
+    assertEquals(missing, Vector.empty[String], task)
   }
 
 /** A console that gives `items` and then `End`, and keeps each text that the loop prints. `whenRead(n)` runs an action

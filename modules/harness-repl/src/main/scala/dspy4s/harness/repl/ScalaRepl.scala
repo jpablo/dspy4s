@@ -224,7 +224,7 @@ final class ScalaRepl(
         try
           Console.withOut(out):
             Console.withErr(out):
-              driver.resetEvaluationThrew()
+              driver.resetEvaluationError()
               Right(driver.runParsed(parsed)(using before))
         // The thread of a cell gives each failure to the host: a compiler crash, and the stop of the stop flag.
         catch case t: Throwable @nowarn("id=E235") => Left(t)
@@ -270,10 +270,13 @@ final class ScalaRepl(
                 CellRun(withoutSignal(capture.text), CellOutcome.Submitted(value))
               // The REPL hides the wrapper of a cell that does not compile (`afterFailedCompilation`).
               case None if parsed.reporter.hasErrors => compileError(capture.text.linesIterator.toVector)
-              case None if driver.evaluationThrew    =>
-                invalidate(newState.objectIndex)
-                CellRun(capture.text, CellOutcome.Failed(firstLine(capture.text)))
-              case None => CellRun(capture.text, CellOutcome.Ok)
+              // The error is the text of the exception, not the first line of the output: the cell can print before
+              // it throws. The output keeps the printed lines and the trace.
+              case None => driver.evaluationError match
+                  case Some(error) =>
+                    invalidate(newState.objectIndex)
+                    CellRun(capture.text, CellOutcome.Failed(error))
+                  case None => CellRun(capture.text, CellOutcome.Ok)
           case null => CellRun(capture.text, CellOutcome.Failed("the cell gave no result"))
     finally worker = null
 
@@ -390,8 +393,6 @@ object ScalaRepl:
   private def describe(d: Diagnostic): String =
     val pos = d.pos
     if pos.exists then s"Line ${pos.line + 1}: ${d.message}" else d.message
-
-  private def firstLine(text: String): String = text.linesIterator.find(_.trim.nonEmpty).getOrElse("an exception")
 
   /** Removes the trace that the REPL prints when a stop ends a cell: the trace of the stop flag, and the trace of an
     * `InterruptedException`, because the stop also interrupts the cell thread, for example in a guest call. The model
