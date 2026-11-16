@@ -51,6 +51,27 @@ class ApprovalLaws extends ScalaCheckSuite:
     forAll(states)(s => assert(commit(s, Vector(Entry.Ended(SessionOutcome.Parked, "done"))).grants.isEmpty))
   }
 
+  test("Grant: a Session grant stays after its turn and ends at the next activation") {
+    val inTheTurn = state(journal(granted(GrantLifetime.Session)*))
+    val idle      = commit(
+      inTheTurn,
+      Vector(Entry.Observed("", CellOutcome.Ok, Map.empty), Entry.TurnEnded(TurnOutcome.Replied("done")))
+    )
+    assertEquals(guardCheck(idle, "exec", args), GuardResult.Run)
+    val reopened = decide(Command.Activate(versions, asks), idle) match
+      case Right(entries)  => commit(idle, entries)
+      case Left(rejection) => fail(s"Activate is refused: $rejection")
+    assertEquals(guardCheck(reopened, "exec", args), asked)
+  }
+
+  property("Grant: an Activated ends each Session grant and keeps the other grants") {
+    forAll(states) { s =>
+      val all   = s.copy(grants = s.grants ++ GrantLifetime.values.map(lifetime => ActiveGrant(exec, lifetime)))
+      val after = commit(all, Vector(activated()))
+      assertEquals(after.grants, all.grants.filterNot(_.lifetime == GrantLifetime.Session))
+    }
+  }
+
   property("Grant: a journal fork starts with no grants") {
     forAll(schedules)(run => assert(forked(run.journal).grants.isEmpty))
   }

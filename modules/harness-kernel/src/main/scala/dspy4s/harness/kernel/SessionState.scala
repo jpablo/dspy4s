@@ -96,7 +96,9 @@ object SessionState:
 def evolve(s: SessionState, logged: Logged): SessionState =
   val base = s.copy(nextSeq = logged.seq + 1)
   logged.entry match
-    case Entry.Activated(_, config)      => base.copy(config = config, closed = false)
+    case Entry.Activated(_, config) =>
+      // A new activation ends the `Session` grants (5.5): a person gives them again after a quit or a restart.
+      base.copy(config = config, closed = false, grants = s.grants.filterNot(_.lifetime == GrantLifetime.Session))
     case Entry.Input(request, _, values) => base.copy(
         requests = s.requests + request,
         waiting = s.waiting + 1,

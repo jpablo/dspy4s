@@ -110,7 +110,8 @@ object Guard:
   val allowAll: Guard = Guard(Vector.empty)
 
 /** How long a grant lasts (5.5). `Once` ends at the outcome of the first call that the rule matches, `Turn` at the next
-  * `TurnEnded`, and `Session` at `Ended`.
+  * `TurnEnded`, and `Session` at the next `Activated` or at `Ended`. So a `Session` grant lasts while one host keeps
+  * the session open, and a quit or a restart ends it. The controller never ends, so this is the end of its grants.
   */
 enum GrantLifetime derives Schema, CanEqual:
   case Once, Turn, Session

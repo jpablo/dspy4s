@@ -411,7 +411,7 @@ TurnEnded(Aborted)
 | Input | Two `Send` commands with one request id give one `Input`. |
 | Report | After the report pass of 8.6, each `TurnEnded` or `Ended` that needs a report has exactly one `Input` in the journal of an open owner. |
 | Rest | With no open turn, no input waits. |
-| Grant | A `Once` grant covers one call. A `Turn` grant ends at the next `TurnEnded`. No grant stays after `Ended`, and a journal fork starts with no grants. A repeat of a `Grant` commits nothing. |
+| Grant | A `Once` grant covers one call. A `Turn` grant ends at the next `TurnEnded`. A `Session` grant stays after its turn, and an `Activated` ends it and keeps the other grants. No grant stays after `Ended`, and a journal fork starts with no grants. A repeat of a `Grant` commits nothing. |
 | Pending call | A pending call has no active grant that covers it. `TurnStarted` and `Ended` empty `pending`, and a journal fork starts with no pending calls. A session with no person never gets a pending call. |
 | Guard | `verdict` is a homomorphism from `Guard` to `Verdict`. A grant changes only `Ask`, and more grants never make a result stronger. |
 | Job | An `Abort` changes no job. A stop covers only the jobs with an intent before it. After `Abort` and then `StopJobs(OfLastTurn)`, no job of that turn starts or runs. `Ended` stops all jobs, and a journal fork starts with no jobs. A job has at most one `JobEnded`, after its `spawn`. A `JobEnded` changes only the end of its job, and a later stop mark keeps that end. |
@@ -1004,7 +1004,7 @@ Grant(request, GuardRule("exec", ArgMatch.Prefix("command", "git push")), GrantL
 |---|---|---|
 | `Once`, the default | One call | The `EffectDone` of the first call that the rule matches |
 | `Turn` | A loop of calls | The next `TurnEnded` |
-| `Session` | Work that the person trusts | `Ended` |
+| `Session` | Work that the person trusts | The next `Activated`, or `Ended` |
 
 **The normal form of `Prefix`.** A raw `startsWith` lets a cell dodge a rule with `//etc`, `/./etc` or two spaces, so
 `Prefix` compares a normal form:
@@ -1019,8 +1019,9 @@ Grant(request, GuardRule("exec", ArgMatch.Prefix("command", "git push")), GrantL
 `decide` also refuses an `EffectStarted` whose id is not above each id that its cell started, open or closed, so one
 id names one call. `SessionState.lastCall` holds the largest one.
 
-`Ended` removes all grants, so a reopened session asks again. The lifetime is in the grant, because only the person
-knows how much they trust that call.
+`Ended` removes all grants. The next `Activated` removes the `Session` grants, so after a quit or a restart of the
+host, the session asks again. The controller never ends, so `Activated` is the end of its `Session` grants. The
+lifetime is in the grant, because only the person knows how much they trust that call.
 
 **The answer.** A `Grant` that answers a pending call commits `Granted`, an `Input` and, with no open turn,
 `TurnStarted` in one commit. So the client sends one command. The harness writes the text of the `Input`, and
@@ -2626,7 +2627,7 @@ These choices are new in this document, and all of them are confirmed:
 | 11 | Confirmed on 2026-11-05. A secret never enters a cell: `secretHeaders`, unreadable secret paths, an allowlist of environment variables for a command, and a mask of the known values at each commit (5.6). `Classified` comes later. | Question 5 of 9.4 |
 | 12 | Confirmed on 2026-11-05. The words of section 3, with the rows Host, Input, Guard and Pending call. The protections of Phase 0, a machine, the input fields of a program call and the items of a release plan have their own words. | Section 4 of the concept inventory |
 | 13 | Confirmed on 2026-11-03. One commit writes to one journal (4.1). The journal has one SQLite file for each session, with a catalog that a fold can rebuild (10.2). The report pass sends again a report that a crash cut (8.6). | Open question 1 below |
-| 14 | Confirmed on 2026-11-03. Each `Grant` holds a lifetime: `Once` (the default), `Turn` or `Session`. `GuardRule` is data with a pure `matches`. A journal fork has no grants (5.5). | Open question 2 below |
+| 14 | Confirmed on 2026-11-03. Each `Grant` holds a lifetime: `Once` (the default), `Turn` or `Session`. `GuardRule` is data with a pure `matches`. A journal fork has no grants (5.5). Changed on 2026-11-16: the next `Activated` also ends a `Session` grant, so a grant of the controller does not stay forever. | Open question 2 below |
 | 15 | Confirmed on 2026-11-03. An `Abort` does not stop jobs. `StopJobs` does, also with no open turn, and a client can send both with one key. The list of jobs is a fold of the journal (10.3). After a crash, a job is lost in the first version. | Open question 3 below |
 | 16 | Confirmed on 2026-11-03. `Data` derives from `Mirror.Of`, and a guest does not write `derives Data` (5.1). A value in an entry is `Json` (4.1). The guest API has `now()`. After one capture error, the host compiles the type definitions of a cell first (6). | Open question 4 below |
 | 17 | Confirmed on 2026-11-03. A commit does a full flush for the intent of a call that can change something outside the session, for each `Input` and for each `Activated` (4.1, 10.2). A power loss can remove the other commits, and a process crash cannot. | Open question 5 below |
