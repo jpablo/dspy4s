@@ -180,7 +180,7 @@ with the number of the call:
   ▸ Ran 1 command · waits for your approval · 0.0 s  #3
   ⚠ The call 5 needs your approval
     exec "git push origin main"
-    /allow 5 once · /allow 5 turn · /allow 5 session · or type what to do instead
+    /allow 5 once · /allow 5 turn · /allow 5 session · a message refuses the call
 ```
 
 The number is the `seq` of the journal entry. `/status` also lists the pending calls with their numbers. To answer,
@@ -195,8 +195,12 @@ is `once`. A grant covers only the same operation with the same arguments.
 
 After the grant, the screen shows `✓ Allowed once: exec "git push origin main".` Then the harness sends the model
 the message `` The person approved a call of `exec`. Make the call again if you still need it. `` With no open turn,
-the grant starts a new turn, so the model can make the call again. To refuse, send a plain message. A new turn removes the
-pending calls, and the model asks again if it still needs the call.
+the grant starts a new turn, so the model can make the call again.
+
+!!! warning "A message refuses the call"
+    Each message that you send starts a new turn, and a new turn removes the pending calls. So a question such as
+    "how do I approve it?" also refuses the call. Type `/allow` first, and then ask your question. When the model
+    still needs a refused call, it asks again in a later turn.
 
 Two kinds of session have no person, so they cannot ask: a child of `rlm` and a run of an optimizer. There, a call
 with `Ask` fails with `no person can answer in this session`.

@@ -169,7 +169,7 @@ class ViewLaws extends munit.FunSuite:
     assert(commandsFor(Line.Unknown("/fake"), jobs, request).left.exists(_.contains("/help")))
   }
 
-  test("CLI: the end of a turn has the text of the report of the kernel, and a reply shows only in its step") {
+  test("CLI: the end of a turn has the first line of the report of the kernel, and a reply shows only in its step") {
     val outcomes = Vector(
       TurnOutcome.Submitted(Json.String("42 lines")),
       TurnOutcome.Submitted(Json.Object(("lines", Json.Number(42)))),
@@ -184,7 +184,8 @@ class ViewLaws extends munit.FunSuite:
       val ended  = Logged(2L, log.head.meta, Entry.TurnEnded(outcome))
       val report = reports(SessionId("s1"), Source.Controller, owned :+ ended).lastOption.map(_.text)
       assert(report.nonEmpty, outcome.toString)
-      assertEquals(entryText(ended), report, outcome.toString)
+      // The next line of the report is for the owner: it says that the session stays open.
+      assertEquals(entryText(ended), report.map(_.linesIterator.next()), outcome.toString)
     }
     assertEquals(entryText(Support.logOf(1000L, Entry.TurnEnded(TurnOutcome.Replied("done"))).head), None)
   }

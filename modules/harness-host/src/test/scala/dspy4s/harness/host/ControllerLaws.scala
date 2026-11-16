@@ -59,6 +59,23 @@ class ControllerLaws extends munit.FunSuite:
     assertEquals(Controller.messageSource(id(2)), Source.Child(id(2)))
   }
 
+  // In the live session of 2026-11-15, the controller started a new session for a change to the work of a session
+  // that was still open, because it thought that the session had ended.
+  test("Controller: the instructions say that a session stays open after its turn, so tell gives it more work") {
+    val text = Controller.instructions
+    assert(text.contains("A session stays open after its turn ends."), text)
+    assert(text.contains("To give a session more work or a change, use tell(session, message)."), text)
+    assert(text.contains("Start a new session only for new work."), text)
+  }
+
+  // In the same session, the controller told the person to approve a call in a "host UI", and the question of the
+  // person refused the call.
+  test("Controller: its prompt tells that the person approves a call with /allow, and that a message refuses it") {
+    val prompt = s"${Controller.instructions}\n${Controller.task(home)}"
+    assert(prompt.contains("When a call needs an approval, end the turn and tell the person to type /allow."), prompt)
+    assert(prompt.contains("A message of the person instead of /allow refuses the call."), prompt)
+  }
+
   test("Controller: the guard asks for a start in a folder of the person, and allows a start in a new folder") {
     def start(kind: String) = Json.Object(("goal", Json.String("g")), ("kind", Json.String(kind)))
     assertEquals(Controller.guard.verdict("start", start("Directory")), Verdict.Ask)

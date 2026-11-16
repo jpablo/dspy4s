@@ -10,7 +10,10 @@ package dspy4s.harness.kernel
   *
   * The owner reads the text with a model, so the text gives the outcome in words, and not as a Scala value:
   *
-  *   - `TurnEnded`: the text of `TurnOutcome.report`. The terminal shows the same text.
+  *   - `TurnEnded`: the text of `TurnOutcome.report`, then a line that says that the session stays open and that `tell`
+  *     gives it more work. The end line of the turn in the terminal of the session shows only the first line. The
+  *     second line tells the owner that the session did not end, so the owner sends a change to this session and starts
+  *     no new session.
   *   - `Ended`: the text of `SessionOutcome.report` with the reason. The terminal shows the same text.
   *
   * For the review: the design gives `reports(session, journal)`, with no owner. The function must know which sender is
@@ -24,13 +27,14 @@ def reports(session: SessionId, owner: Source, journal: Vector[Logged]): Vector[
       case _                                                                      => false
   def send(seq: Long, text: String): Command.Send =
     Command.Send(RequestId(s"report:${session.value}:$seq"), text, Map.empty)
+  val open = s"The session ${session.value} stays open. To give it more work, send it a message with tell."
   // `unseen`: an input of the owner that no step or stop saw yet. `owes`: the debt is open.
   val (_, _, sends) = journal.foldLeft((false, false, Vector.empty[Command.Send])) {
     case ((unseen, owes, out), Logged(_, meta, Entry.Input(_, _, _)))    => (unseen || meta.source == owner, owes, out)
     case ((unseen, owes, out), Logged(_, _, Entry.StepStarted(_)))       => (false, owes || unseen, out)
     case ((unseen, owes, out), Logged(_, _, Entry.StopRequested(_)))     => (false, owes || unseen, out)
     case ((unseen, true, out), Logged(seq, _, Entry.TurnEnded(outcome))) =>
-      (unseen, !ends(outcome), out :+ send(seq, outcome.report))
+      (unseen, !ends(outcome), out :+ send(seq, s"${outcome.report}\n$open"))
     case ((unseen, true, out), Logged(seq, _, Entry.Ended(outcome, reason))) =>
       (unseen, false, out :+ send(seq, outcome.report(reason)))
     case (other, _) => other

@@ -112,6 +112,10 @@ A session that the controller started sends reports to the controller. A report 
 turn or of the session, and it starts a turn of the controller. The client shows it in a line with
 `[the session <id>]`, for example `[the session <id>] The turn ended with submit: <value>`.
 
+A report of a turn has a second line: `The session <id> stays open. To give it more work, send it a message with
+tell.` A session stays open after each turn. So, for a change to the work of a session, ask the controller to `tell`
+that session. A new session starts again from an empty folder.
+
 - The goal of `start` is a message from the controller. After a message from the controller, each end of a turn
   gives one report, until the work ends. This rule also applies to a turn that your message starts.
 - The work ends at a turn that ends with `submit`, or at a turn that used all its steps. It also ends at a stop, and at

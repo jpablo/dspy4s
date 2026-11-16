@@ -798,7 +798,7 @@ name = "reports"
 ref = "8.6"
 uses = ["session-id", "source", "logged", "command"]
 proof_uses = ["session-outcome", "turn-outcome"]
-text = "A report is a pure function of the journal of the session. Its text gives the outcome in words: the end of a turn (TurnOutcome.report), or the end of the session (SessionOutcome.words) and its reason one time."
+text = "A report is a pure function of the journal of the session. Its text gives the outcome in words: the end of a turn (TurnOutcome.report) and a line that says that the session stays open and that tell gives it more work, or the end of the session (SessionOutcome.words) and its reason one time."
 
 [[node]]
 id = "missing"
@@ -4438,7 +4438,7 @@ ref = "8.7"
 spec = true
 uses = ["session-id", "mode", "access", "harness-limits", "session-config", "source", "data"]
 proof_uses = ["preamble"]
-text = "The fixed id controller, Mode.controller with no Children^, a ceiling that holds workMode, the instructions of its policy (WorkRuntime.policyOf), the task with only the home, the configuration with the scope Home and the memory tree, and the source of a message of a session."
+text = "The fixed id controller, Mode.controller with no Children^, a ceiling that holds workMode, the instructions of its policy (WorkRuntime.policyOf), the task with the home and the rule that the person answers an approval with /allow, the configuration with the scope Home and the memory tree, and the source of a message of a session."
 
 [[group]]
 id = "host-sessions"

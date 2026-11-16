@@ -40,6 +40,28 @@ class ReportLaws extends ScalaCheckSuite:
   private def received(sends: Vector[Command.Send]): SessionState =
     commit(state(journal(activated())), sends.map(send => Entry.Input(send.request, send.text, send.values)))
 
+  /** The text of the report of `entry`, after a message of the owner and a step. */
+  private def textOf(entry: Entry): String =
+    val log = journalFrom(
+      Source.Harness -> activated(),
+      input("m1", owner),
+      Source.Harness -> Entry.TurnStarted,
+      Source.Harness -> Entry.StepStarted(0),
+      Source.Harness -> entry
+    )
+    reports(session, owner, log).lastOption.fold(fail("no report"))(_.text)
+
+  /** The outcomes of a turn that a report can give. */
+  private val outcomes = Vector(
+    TurnOutcome.Submitted(Json.String("42 lines")),
+    TurnOutcome.Submitted(Json.Object(("lines", Json.Number(42)))),
+    TurnOutcome.Replied("done"),
+    TurnOutcome.Exhausted,
+    TurnOutcome.Aborted,
+    TurnOutcome.Crashed,
+    TurnOutcome.Failed("no model")
+  )
+
   test("Report: a debt opens at the first step that sees an Input of the owner, and only the work closes it") {
     assertEquals(ids(reports(session, owner, work)), Vector(RequestId("report:s1:5"), RequestId("report:s1:10")))
   }
@@ -71,17 +93,8 @@ class ReportLaws extends ScalaCheckSuite:
   }
 
   test("Report: the text gives the outcome in words, the value of submit as text, and the reason of an end once") {
-    // The text of the report of `entry`, after a message of the owner and a step.
-    def textOf(entry: Entry): String =
-      val log = journalFrom(
-        Source.Harness -> activated(),
-        input("m1", owner),
-        Source.Harness -> Entry.TurnStarted,
-        Source.Harness -> Entry.StepStarted(0),
-        Source.Harness -> entry
-      )
-      reports(session, owner, log).lastOption.fold(fail("no report"))(_.text)
-    def ended(outcome: TurnOutcome): String = textOf(Entry.TurnEnded(outcome))
+    // The first line of the report of a turn. The law below tells what comes after it.
+    def ended(outcome: TurnOutcome): String = textOf(Entry.TurnEnded(outcome)).linesIterator.next()
     assertEquals(ended(TurnOutcome.Submitted(Json.String("42 lines"))), "The turn ended with submit: 42 lines")
     val record = ended(TurnOutcome.Submitted(Json.Object(("lines", Json.Number(42)))))
     assert(record.startsWith("The turn ended with submit: {") && record.contains("lines"), record)
@@ -98,4 +111,14 @@ class ReportLaws extends ScalaCheckSuite:
     assertEquals(closed(SessionOutcome.Merged, "FAKE"), "The session ended: merged, FAKE.")
     assertEquals(closed(SessionOutcome.Parked, "FAKE"), "The session ended: parked, FAKE.")
     assertEquals(closed(SessionOutcome.Replaced(SessionId("s2")), "FAKE"), "The session ended: replaced by s2, FAKE.")
+  }
+
+  // In the live session of 2026-11-15, the controller read "The turn ended with submit: ..." as the end of the session.
+  // So it did not use tell for more work, and it started a new session for the same work.
+  test("Report: the report of a turn says that the session stays open and that tell gives it more work") {
+    val open = s"The session ${session.value} stays open. To give it more work, send it a message with tell."
+    outcomes.foreach(outcome => assertEquals(textOf(Entry.TurnEnded(outcome)), s"${outcome.report}\n$open"))
+    // The end of the session closes it, so its report has no such line.
+    val end = SessionOutcome.Abandoned("not needed")
+    assertEquals(textOf(Entry.Ended(end, "not needed")), end.report("not needed"))
   }

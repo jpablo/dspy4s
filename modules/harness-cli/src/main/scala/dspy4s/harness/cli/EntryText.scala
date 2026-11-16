@@ -36,8 +36,8 @@ private val CommandChars = 160
   *     of the cell, cut to a few lines with a note of the rest.
   *   - `EffectDone` with `NeedsApproval`: the call in quotes, and the commands that answer it with the number of the
   *     call, which is the `seq` of the entry (5.5).
-  *   - `TurnEnded`: the text of the report to the owner (`TurnOutcome.report`), apart from `Replied`, whose text the
-  *     `Acted` already showed.
+  *   - `TurnEnded`: the first line of the report to the owner (`TurnOutcome.report`), apart from `Replied`, whose text
+  *     the `Acted` already showed.
   *   - `StopRequested`, `JobsStopRequested`, `Granted` and `Ended`: one line each. A stopped job has its `jobName`.
   *     `Granted` gives the lifetime of the grant in words (`GrantLifetime.words`), for example `Allowed for this turn:
   *     `. `Ended` gives the text of `SessionOutcome.report`, as the report to the owner.

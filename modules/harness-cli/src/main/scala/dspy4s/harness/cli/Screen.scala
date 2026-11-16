@@ -356,7 +356,7 @@ object Screen:
       Row.of(s"  ${g.warn} The call $seq needs your approval", Tone.Warn),
       Row.of(s"    ${printable(callText(rule))}"),
       Row.of(
-        s"    /allow $seq once ${g.dot} /allow $seq turn ${g.dot} /allow $seq session ${g.dot} or type what to do instead",
+        s"    /allow $seq once ${g.dot} /allow $seq turn ${g.dot} /allow $seq session ${g.dot} a message refuses the call",
         Tone.Dim
       )
     )

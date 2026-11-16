@@ -166,7 +166,7 @@ class ScreenLaws extends munit.FunSuite:
         "  ▸ Ran 1 command · waits for your approval · 0.0 s  #3",
         "  ⚠ The call 5 needs your approval",
         "    exec \"git push origin main\"",
-        "    /allow 5 once · /allow 5 turn · /allow 5 session · or type what to do instead"
+        "    /allow 5 once · /allow 5 turn · /allow 5 session · a message refuses the call"
       )
     )
   }

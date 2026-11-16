@@ -33,14 +33,24 @@ object Controller:
       "do work in a folder, start a session with start(goal, scope, strategy), and tell the person its id. Use " +
       "sessions() to see the sessions, tell(session, message) to send a message to a session, observe(session, " +
       "question) to ask about a session, and zoom(session, ref) to read a part of its memory. A report of a session " +
-      "comes to you as a message. At each step, give a short text and the code of one cell, or only a text. A step " +
-      "with no code ends the turn, and its text is the reply to the person."
+      "comes to you as a message. A session stays open after its turn ends. To give a session more work or a " +
+      "change, use tell(session, message). Start a new session only for new work. At each step, give a short text " +
+      "and the code of one cell, or only a text. A step with no code ends the turn, and its text is the reply to the " +
+      "person."
 
-  /** The task of each turn of the controller of the person with the home `home`: the home. `instructions` are the
-    * instructions of the policy of the controller (`WorkRuntime.activate`), so they come one time, in the system
-    * message.
+  /** The task of each turn of the controller of the person with the home `home`: the home, then how the person answers
+    * a call that needs an approval. `instructions` are the instructions of the policy of the controller
+    * (`WorkRuntime.activate`), so they come one time, in the system message.
+    *
+    * The person answers an approval in the terminal client: `/allow` grants the call, and a message starts a new turn,
+    * which clears the pending calls. These are facts of the client, and an optimizer can change `instructions`, so they
+    * go in the task. In the live session of 2026-11-15, the controller told the person to approve a call in a "host
+    * UI", and the question of the person refused the call. The task is the same at each turn of an activation, so the
+    * prompt cache stays valid.
     */
-  def task(home: Path): String = s"The home of the person: $home."
+  def task(home: Path): String =
+    s"The home of the person: $home. When a call needs an approval, end the turn and tell the person to type " +
+      "/allow. A message of the person instead of /allow refuses the call."
 
   /** The configuration of the controller of the person with the home `home` (8.1, 8.7): a chat turn with `limits.steps`
     * steps, the owner `User`, `mode`, `ceiling`, the memory tree, the scope `Home`, the guard `guard`, the preamble of

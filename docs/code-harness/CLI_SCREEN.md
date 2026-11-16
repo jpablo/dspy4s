@@ -172,7 +172,7 @@ A call that needs an approval ends the turn. The history then shows the card, in
   ⚠ The call 23 needs your approval
     exec "git push origin main"
     the rule: exec with a command that starts with "git push"
-    /allow 23 once · /allow 23 turn · /allow 23 session · or type what to do instead
+    /allow 23 once · /allow 23 turn · /allow 23 session · a message refuses the call
 ```
 
 The command in the card keeps the quotes and the escapes of PR #10, because there the person decides. The footer shows
