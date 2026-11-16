@@ -76,6 +76,73 @@ class WorkLaws extends munit.FunSuite:
     assert(!task.contains("in one text"), task)
   }
 
+  test("Work: the task of an owned session that owes no report asks for a reply, and not for submit (8.6)") {
+    // Live session 8b418720 (2026-11-16): after a stop closed the debt, the task still asked for submit, and the model
+    // ended two typed turns with a value that nobody saw.
+    val scope = Path.of("/tmp/fake-scope")
+    val owned = WorkRuntime.config(scope, "fake-model", limits)
+      .copy(owner = Owner.Session(Controller.id), goal = Some("Fix the fake build"))
+    val open   = WorkRuntime.taskOf(id(2), owned, scope, "FAKE-SHELL", owes = true)
+    val closed = WorkRuntime.taskOf(id(2), owned, scope, "FAKE-SHELL", owes = false)
+    assert(open.contains("submit(") && open.contains("gets a report at the end of each turn"), open)
+    assert(closed.contains("Fix the fake build") && closed.contains("FAKE-SHELL"), closed)
+    assert(!closed.contains("submit"), closed)
+    assert(closed.contains("gives it no report") && closed.contains("the reply to the person"), closed)
+    // A session of the person has no text about an owner, whatever the debt.
+    val mine = WorkRuntime.config(scope, "fake-model", limits)
+    assertEquals(
+      WorkRuntime.taskOf(id(1), mine, scope, "FAKE-SHELL", owes = false),
+      WorkRuntime.chatTask(scope, "FAKE-SHELL")
+    )
+  }
+
+  test("Work: each call to the policy of an owned session gets the task of the debt after the journal so far (8.6)") {
+    val model = sessionModel(
+      policy("I'll give the result.", Some("submit(\"FAKE-RESULT\")")),
+      policy("FAKE-REPLY", None),
+      policy("FAKE-AGAIN", None)
+    )
+    val place = Place()
+    try withRoot { root =>
+        val env    = WorkEnv(place.home, HostList.empty, Backends.detect(), Secrets.none, root)
+        val parent = Controller.config(place.home, "fake-model", limits)
+        val owned  = WorkRuntime.ownedConfig(
+          "FAKE-GOAL",
+          Scope.Directory(place.root.toString),
+          StrategyName.MemoryTree,
+          Controller.id,
+          parent,
+          limits
+        )
+        withHost(root, Models.withModel(model)(WorkRuntime.forWork(env, limits))) { host =>
+          val handle = opened(host, id(1), Some(owned))
+          // The owner gives the work, and the turn ends with submit. That closes the debt.
+          assert(host.runAs(id(1), message("m1", "FAKE-WORK"), Source.Controller).isRight)
+          assert(eventually(60)(outcomes(handle).size == 1), entries(handle).toString)
+          // The person types, and the debt stays closed.
+          assertEquals(handle.send(message("m2", "FAKE-QUESTION")), Right(()))
+          assert(eventually(60)(outcomes(handle).size == 2), entries(handle).toString)
+          // A new message of the owner opens the debt again.
+          assert(host.runAs(id(1), message("m3", "FAKE-MORE"), Source.Controller).isRight)
+          assert(eventually(60)(outcomes(handle).size == 3), entries(handle).toString)
+          assertEquals(
+            outcomes(handle),
+            Vector(
+              TurnOutcome.Submitted(Json.String("FAKE-RESULT")),
+              TurnOutcome.Replied("FAKE-REPLY"),
+              TurnOutcome.Replied("FAKE-AGAIN")
+            )
+          )
+        }
+        val tasks = model.requests.asScala.toVector.map(_.messages.flatMap(_.text).mkString("\n"))
+          .filterNot(isSummary)
+        assertEquals(tasks.size, 3, tasks.mkString("\n=====\n"))
+        val asks = tasks.map(_.contains("write a cell that calls submit"))
+        assertEquals(asks, Vector(true, false, true), tasks.mkString("\n=====\n"))
+      }
+    finally place.close()
+  }
+
   test("Work: config gives a chat turn of the user in workMode, the memory tree and the default guard") {
     val scope  = Path.of("/tmp/fake-scope")
     val config = WorkRuntime.config(scope, "fake-model", limits)

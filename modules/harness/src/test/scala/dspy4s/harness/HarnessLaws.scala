@@ -595,7 +595,7 @@ class HarnessLaws extends FunSuite:
     val leaf   = Signature.derived[PolicyInput, PolicyStep]("policy", Harness.policyInstructions)
     withModel(ScriptLm(policy("FAKE-DONE", None))) {
       val effects = HarnessEffects(
-        "FAKE-TASK",
+        _ => "FAKE-TASK",
         Harness.apiReference(none),
         Predict(leaf, name = Some("policy")),
         Window,

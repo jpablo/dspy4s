@@ -1581,6 +1581,12 @@ replies keeps the debt open, and it keeps reporting. A child of `rlm` and a roll
 child is a cell, which gets the value through the effect. The owner of a rollout is an optimizer, which reads the
 journal.
 
+The task asks for `submit` only while the session owes a report. Each call to the policy reads the debt from the
+journal so far (`owes` in Reports.scala, and `WorkRuntime.taskOf`). After the work ends, the task says that the owner
+gets no report, and that a step with no code gives the reply to the person. The terminal of the session shows the
+value of `submit` as the reply of the turn (CLI_SCREEN.md, 7). In the live session 8b418720 (2026-11-16), a stop
+closed the debt. The task still asked for `submit`, so two typed turns ended with a value that reached nobody.
+
 **The report pass.** The host runs `missing`, in the order of `seq`, for each session that has a session as its owner.
 It does this at its own start, and again when an owner opens. A session with an open turn first gets `Activate`, so
 the repair commits `TurnEnded(Crashed)`, and the report says so. An owner that has ended rejects `Send` with
@@ -1632,8 +1638,8 @@ These points are proposals for the review:
   after a crash commits nothing (8.6).
 - `start` commits the `Activated` of the new session and its task in one commit (8.6): the command `Begin`, through
   `LocalHost.openWith`. The new session has the owner `Owner.Session(caller)`, the goal, the strategy of the call, the mode
-  `WorkRuntime.workMode` met with the ceiling of the caller, and the model of the caller. Its task tells it to end the
-  work with `submit` and its result (8.6).
+  `WorkRuntime.workMode` met with the ceiling of the caller, and the model of the caller. While it owes a report, its
+  task tells it to end the work with `submit` and its result (8.6).
 - `tell` to a session that has ended gives an error, and it does not open the session again. `tell` opens a session of
   the catalog that is not open in this host, with the configuration of its journal. The check reads the journal, not
   the row of the catalog, which can lag.

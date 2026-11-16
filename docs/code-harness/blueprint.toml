@@ -801,6 +801,16 @@ proof_uses = ["session-outcome", "turn-outcome"]
 text = "A report is a pure function of the journal of the session. Its text gives the outcome in words: the end of a turn (TurnOutcome.report) and a line that says that the session stays open and that tell gives it more work, or the end of the session (SessionOutcome.words) and its reason one time."
 
 [[node]]
+id = "owes"
+group = "reports"
+kind = "function"
+name = "owes"
+ref = "8.6"
+uses = ["source", "logged"]
+proof_uses = ["turn-outcome"]
+text = "True while the next step owes the owner a report: the debt of reports is open, or an input of the owner waits for the next step. The task of a work session asks for submit only then."
+
+[[node]]
 id = "missing"
 group = "reports"
 kind = "function"

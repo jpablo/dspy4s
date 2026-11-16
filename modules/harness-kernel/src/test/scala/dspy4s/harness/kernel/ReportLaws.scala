@@ -66,6 +66,50 @@ class ReportLaws extends ScalaCheckSuite:
     assertEquals(ids(reports(session, owner, work)), Vector(RequestId("report:s1:5"), RequestId("report:s1:10")))
   }
 
+  test("Report: owes is open from an Input of the owner until the work ends, and a typed turn does not open it") {
+    // `work`: seq 1 is the Input of the owner, seq 10 ends the turn with submit, and seq 11 is a typed Input.
+    // `at(seq)` is the debt after the entry `seq`.
+    def at(seq: Int): Boolean = owes(owner, work.take(seq + 1))
+    assertEquals(at(0), false)
+    assert((1 to 9).forall(at), (1 to 9).map(at).toString)
+    assert((10 to 15).forall(n => !at(n)), (10 to 15).map(at).toString)
+    // A new message of the owner opens the debt again, and a stop of a turn closes it.
+    val asked = journalFrom(
+      (Vector(Source.Harness -> activated()) ++
+        turn(TurnOutcome.Replied("A question?"), owner) ++
+        turn(TurnOutcome.Submitted(args), Source.User) :+
+        input("from-owner-again", owner))*
+    )
+    assertEquals(owes(owner, asked), true)
+    val stopped = journalFrom((Vector(Source.Harness -> activated()) ++ turn(TurnOutcome.Aborted, owner))*)
+    assertEquals(owes(owner, stopped), false)
+  }
+
+  property("Report: a TurnEnded gives a report exactly when the journal before it owes one, or a step saw no Input") {
+    // `owes` counts an Input of the owner that no step or stop saw yet, because the next step sees it. A TurnEnded
+    // that comes before such a step gives no report for that Input, so the law skips that case.
+    def seen(entry: Entry): Boolean =
+      entry match
+        case Entry.StepStarted(_) | Entry.StopRequested(_) => true
+        case _                                             => false
+    def unseen(log: Vector[Logged]): Boolean =
+      log.reverseIterator.takeWhile(l => !seen(l.entry)).exists { l =>
+        l.entry match
+          case Entry.Input(_, _, _) => l.meta.source == owner
+          case _                    => false
+      }
+    forAll(schedules) { run =>
+      run.journal.indices.forall { i =>
+        run.journal(i).entry match
+          case Entry.TurnEnded(_) =>
+            val before = run.journal.take(i)
+            val sent   = reports(session, owner, run.journal.take(i + 1)).size > reports(session, owner, before).size
+            unseen(before) || sent == owes(owner, before)
+          case _ => true
+      }
+    }
+  }
+
   test("Report: the end of a session that owes a report gives a report") {
     val open  = journalFrom((Vector(Source.Harness -> activated()) ++ turn(TurnOutcome.Replied("?"), owner))*)
     val ended = append(open, Vector(Entry.Ended(SessionOutcome.Parked, "done")))
