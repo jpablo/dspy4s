@@ -32,6 +32,10 @@ def hint(error: String): Option[String] =
     Some(
       "Safe mode refuses sys.error. To fail the cell with a message, use throw IllegalStateException(\"the reason\")."
     )
+  else if error.contains("value submit is not a member of object dspy4s.harness.guest.api") then
+    // A model writes api.read(...), so it also writes api.submit(...). But submit comes from the preamble of the
+    // session, not from the guest API.
+    Some("submit is a function of the cell, not a member of api. Write submit(...) with no api.")
   else if error.contains("empty quoted identifier") then
     // A Markdown fence starts with ``, an empty quoted identifier. The harness removes one outer fence of the code
     // field, so this error comes from a fence that the harness did not find, or from a cell of the MCP server.

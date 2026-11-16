@@ -11,18 +11,30 @@ import scala.jdk.CollectionConverters.*
 /** The gate of the guest API calls of one REPL (5.1, 6). After `submit`, it refuses each later call of the cell. During
   * a call, it stops the clock of the cell, so the timeout counts only the time of guest code. Each call has its own
   * limit, for example the `maxSeconds` of `waitJob`.
+  *
+  * The gate also counts the calls of the cell. After `callLimit` calls, it refuses each later call of the cell at once.
+  * The host writes journal entries for each call, so a cell with no limit can fill the journal. A refused call does not
+  * stop the clock of the cell, so the timeout also ends a loop that catches the error.
   */
-private final class CallGate(submitted: () => Boolean):
+private final class CallGate(submitted: () => Boolean, callLimit: Int):
   private val depth = AtomicInteger(0)
   private val since = AtomicLong(0L)
   private val spent = AtomicLong(0L)
+  private val calls = AtomicLong(0L)
 
-  /** Starts the clock of a new cell. */
-  def reset(): Unit = spent.set(0L)
+  /** Starts the clock and the count of the calls of a new cell. */
+  def reset(): Unit =
+    spent.set(0L)
+    calls.set(0L)
 
   def apply[A](op: String)(body: => A): A =
     if submitted() then throw IllegalStateException(s"$op: this cell has called submit, so it can make no more calls")
-    // A handler can call another capability, so only the outer call counts.
+    // A handler can call another capability, so only the outer call counts, for the limit and for the clock.
+    if depth.get() == 0 && calls.incrementAndGet() > callLimit then
+      throw IllegalStateException(
+        s"$op: the cell made more than $callLimit guest API calls, so the host refused this call. Do more work in " +
+          "each call, for example one exec for many files, or llmQueryBatched for many prompts."
+      )
     if depth.getAndIncrement() == 0 then since.set(System.nanoTime())
     try body
     finally if depth.decrementAndGet() == 0 then spent.addAndGet(System.nanoTime() - since.get()): Unit

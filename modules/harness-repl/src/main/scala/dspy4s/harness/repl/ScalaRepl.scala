@@ -63,11 +63,11 @@ final case class CellRun(output: String, outcome: CellOutcome):
   * new REPL. A compile error that shows the effect of the defect (`showsArrayDefect`) also sets it, but only after an
   * earlier cell of `run`.
   *
-  * Each guest API call goes through a gate: the clock of the cell stops during a call, and after `submit` the gate
-  * refuses each later call of the cell. An interrupt of the thread of `run` stops the cell with the stop flag and an
-  * interrupt of the cell thread, waits for the cell as at a timeout, and then goes on to the caller. A cell that the
-  * capture checker rejects for the capture set of the enclosing object gets a second try in two parts: the type
-  * definitions first, then the rest.
+  * Each guest API call goes through a gate: the clock of the cell stops during a call, and after `submit` or after
+  * `callLimit` calls the gate refuses each later call of the cell. An interrupt of the thread of `run` stops the cell
+  * with the stop flag and an interrupt of the cell thread, waits for the cell as at a timeout, and then goes on to the
+  * caller. A cell that the capture checker rejects for the capture set of the enclosing object gets a second try in two
+  * parts: the type definitions first, then the rest.
   *
   * @param preamble
   *   the preamble of the session (5.1): its types, `submit` and its inputs
@@ -75,6 +75,9 @@ final case class CellRun(output: String, outcome: CellOutcome):
   *   the time of the guest code of one cell, with its compile and with no guest API call
   * @param cellLimit
   *   the number of cells after which the REPL is full, and the host starts a new one (protection 5 of Phase 0)
+  * @param callLimit
+  *   the number of guest API calls of one cell. The gate refuses each later call of the cell at once. A call inside a
+  *   handler does not count. The default keeps the journal of a cell small, and real cells make far fewer calls.
   * @param secondTry
   *   false only for a check of the second try
   * @param stops
@@ -87,6 +90,7 @@ final class ScalaRepl(
     preamble   : String         = "",
     cellTimeout: FiniteDuration = 30.seconds,
     cellLimit  : Int            = 300,
+    callLimit  : Int            = 10000,
     secondTry  : Boolean        = true,
     stops      : () => Boolean  = () => false
 ) extends AutoCloseable:
@@ -99,7 +103,7 @@ final class ScalaRepl(
   private val capture                            = BoundedOutput(4 * 1024 * 1024)
   private val out                                = PrintStream(capture, true, UTF_8)
   private val driver                             = HarnessDriver(compilerArgs, out, SandboxLoader())
-  private val gate                               = CallGate(() => HostBindings.submitted(key).isDefined)
+  private val gate                               = CallGate(() => HostBindings.submitted(key).isDefined, callLimit)
   private var state: State                       = driver.initialState
   private var cells                              = 0
   @volatile private var worker: Thread | Null    = null
@@ -397,13 +401,24 @@ object ScalaRepl:
   /** Removes the trace that the REPL prints when a stop ends a cell: the trace of the stop flag, and the trace of an
     * `InterruptedException`, because the stop also interrupts the cell thread, for example in a guest call. The model
     * reads the output in the next turn, and the outcome of the cell already gives the reason of the stop.
+    *
+    * The trace of the stop flag starts with the line `java.lang.ThreadDeath`, and its first frame is in `StopRepl`. The
+    * cut starts at the first line of the trace, not at the frame, so no line of the trace stays.
     */
   private def withoutStopTrace(output: String): String =
     val lines = output.linesIterator.toVector
-    val start = lines.lastIndexWhere(l =>
+    val last  = lines.lastIndexWhere(l =>
       l.startsWith("java.lang.ThreadDeath") || l.contains("StopRepl") || l.startsWith("java.lang.InterruptedException")
     )
-    if start < 0 then output else lines.take(start).mkString("\n").stripTrailing()
+    if last < 0 then output
+    else
+      val start = lines.lastIndexWhere(l => !isFrame(l), last).max(0)
+      lines.take(start).mkString("\n").stripTrailing()
+
+  /** True for a frame line of a trace that the REPL prints: `at ...`, `... 35 elided`, or `... 3 more`. */
+  private def isFrame(line: String): Boolean =
+    val text = line.trim
+    text.startsWith("at ") || (text.startsWith("... ") && (text.endsWith(" elided") || text.endsWith(" more")))
 
   /** Removes the line of the signal of `submit`, and its trace (5.1). */
   private def withoutSignal(output: String): String =

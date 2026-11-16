@@ -256,6 +256,18 @@ class ScalaReplLaws extends munit.FunSuite:
     finally r.close()
   }
 
+  // In a live run of 2026-11-16, the model wrote api.submit(...), as it writes api.read(...). submit comes from the
+  // preamble, so the cell did not compile, and the error had no hint.
+  test("Hints: api.submit does not compile, and its hint names submit with no api") {
+    val r = repl(preamble = pointPreamble())
+    try r.run("""api.submit(5, None)""").outcome match
+        case CellOutcome.CompileError(lines) =>
+          val hints = lines.filter(_.startsWith("Hint:"))
+          assert(hints.exists(h => h.contains("submit(") && !h.contains("api.submit(")), lines.mkString("\n"))
+        case other => fail(s"api.submit compiled: $other")
+    finally r.close()
+  }
+
   test("Submit: after submit, the host refuses each later call of the cell and a second submit") {
     val files = FakeFiles()
     val r     = repl(files = files, preamble = pointPreamble())
@@ -473,6 +485,32 @@ class ScalaReplLaws extends munit.FunSuite:
       val loop = r.run("locally { var n = 0L; while true do n += 1 }")
       assertEquals(loop.outcome, CellOutcome.TimedOut(1000L))
       assert(!r.unclean, "the thread of the cell did not stop")
+      assertEquals(r.run("println(1 + 1)").output, "2")
+    finally r.close()
+  }
+
+  // In a live run of 2026-11-16, the output of a cell that timed out began with the line "java.lang.ThreadDeath".
+  test("Cell clock: a cell that times out shows no trace of the stop") {
+    val r = repl(cellTimeout = 1.second)
+    try
+      val loop = r.run("locally { var n = 0L; while true do n += 1 }")
+      assertEquals(loop.outcome, CellOutcome.TimedOut(1000L))
+      assert(!loop.output.contains("ThreadDeath"), loop.output)
+      assert(!loop.text.contains("ThreadDeath"), loop.text)
+    finally r.close()
+  }
+
+  // In a live run of 2026-11-16, a cell called now() in a loop for 40 s: 251,090 guest API calls and 502,180 journal
+  // entries in 158 MB. The clock of a cell stops during each guest call, so the timeout did not end the loop.
+  test("Cell clock: a cell that makes too many guest API calls fails, and its code after the limit does not run") {
+    val r = repl()
+    try
+      val run =
+        r.run("""locally { var i = 0; while i < 50000 do { val t = now(); i += 1 }; println("ALL-CALLS-RAN") }""")
+      run.outcome match
+        case CellOutcome.Failed(error) => assert(error.contains("guest API calls"), error)
+        case other                     => fail(s"the cell did not fail: $other, ${run.output.take(300)}")
+      assert(!run.output.contains("ALL-CALLS-RAN"), run.output.take(300))
       assertEquals(r.run("println(1 + 1)").output, "2")
     finally r.close()
   }

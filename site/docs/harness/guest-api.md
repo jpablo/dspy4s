@@ -168,6 +168,7 @@ cell that ends by `submit` defines no name.
 |---|---|---|
 | The time of a cell | 30 s | The clock counts the compile and the guest code. It stops during each guest API call. At the limit, the cell stops with `The cell stopped after 30000 ms.` |
 | The cells of one REPL | 300 | The harness starts a new REPL with the preamble, the store and the note of lost names. |
+| The guest API calls of one cell | 10,000 | Each later call of the cell fails at once, and the error tells the model to do more work in each call. A refused call does not stop the clock of the cell, so the timeout still applies. |
 | The echo of a `val` | 400 characters | The echo gets the note `[The echo of this value has N more characters. Print the value, or a part of it, to see them.]`. The text of `println` stays whole. |
 | The output of a cell | 4 MiB | The REPL keeps the first 4 MiB of the output. |
 | The text that the model sees of a cell | 4,000 characters | The text gets the note `[N more characters were cut. Print a smaller part of the value to see them.]`. |

@@ -19,6 +19,10 @@ compiler (`scala3-repl`). It is the only harness module that adds the compiler a
   name.
 - **The clock of a cell counts only guest code.** A gate stops the clock during each guest API call. The cell timeout
   applies to the rest of the time, with the compile.
+- **A cell makes at most 10,000 guest API calls.** The host writes journal entries for each call, so a loop of
+  calls can fill the journal. After the call limit, the gate refuses each later call of the cell at once, and the call
+  fails with an `IllegalStateException`. A refused call does not stop the clock, so the timeout also ends a loop that
+  catches the error. A call inside a handler does not count.
 - **The protections of Phase 0.** A REPL has these protections:
   - the stop flag at the timeout, with the interrupt instrumentation of the compiler
   - a catch around the run
@@ -44,14 +48,14 @@ finally repl.close()
 
 | Type | Description |
 |------|-------------|
-| `ScalaRepl` | One REPL. `run(code)` gives a `CellRun`. `unclean`, `outOfMemory`, `full`, and `needsRestart` tell the host to start a new REPL. The parameters are the mode, the bindings, the preamble, the cell timeout (default 30 s), the cell limit (default 300), and `secondTry`. |
+| `ScalaRepl` | One REPL. `run(code)` gives a `CellRun`. `unclean`, `outOfMemory`, `full`, and `needsRestart` tell the host to start a new REPL. The parameters are the mode, the bindings, the preamble, the cell timeout (default 30 s), the cell limit (default 300), the call limit (`callLimit`, default 10,000 guest API calls in one cell), and `secondTry`. |
 | `Bindings` | The handlers behind the givens: the `Turn`, and an optional handler for each capability. A new `ScalaRepl` fails when the mode gives a capability that has no handler. |
 | `CellRun` | The output of a cell, at most 4 MiB, and its `CellOutcome`. `text` is the text of the cell for an agent: the output, the lines and hints of a compile error, or a note of a failure, a timeout or a submit. The MCP server and the harness both show it. |
 | `HeapGuard` | A daemon thread that checks the heap each 100 ms. When a heap pool is above 85% after its last collection, the guard stops the cell that runs and that allocated the most memory, and that REPL closes. The other REPLs of the JVM go on. |
 | `HostBindings` | The registry of the bindings of each REPL, by a key. The first code of a REPL takes its bindings from it, and `submit` records its value in it. |
 | `SubmitSignal` | The signal of `submit`. It is a `ControlThrowable`, so `NonFatal` and `Try` do not catch it. |
 | `topLevelNames` / `lostNames` | The top-level names of a cell, from the parser only, and the note of lost names. |
-| `hint` | A hint after a compile error that is hard for a model to read, for example a top-level `var`, a top-level `val` that needs an explicit type, a capability in a place that must be pure, or a derivation of `Data` that goes too deep. |
+| `hint` | A hint after a compile error that is hard for a model to read, for example a top-level `var`, a top-level `val` that needs an explicit type, a capability in a place that must be pure, `api.submit` in place of `submit`, or a derivation of `Data` that goes too deep. |
 | `ApiReference` | The API reference of a mode: the parts of the source text of the guest API that compile in a cell of that mode. A trait whose capability the mode does not give goes, with its members and doc comments. `SessionTypes.scala` belongs to `Sessions`, so it stays only in a mode with `Sessions`. The harness and the MCP server give it. |
 | `Capability` | The table of the seven capabilities: the trait, the level in a mode, and the given of the preamble. The givens of a REPL and `ApiReference` both read it. |
 | `HarnessDriver` / `FlagRendering` | The `ReplDriver` of the harness. `FlagRendering` records the first line of the exception that an evaluation threw, and it cuts the echo of a value to 400 characters, with a note. |
