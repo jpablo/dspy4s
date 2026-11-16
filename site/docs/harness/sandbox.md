@@ -191,7 +191,7 @@ is `once`. A grant covers only the same operation with the same arguments.
 |---|---|
 | `once` (the default) | After the first call that it allows |
 | `turn` | At the end of the turn |
-| `session` | When the session ends. A session that opens again asks again. |
+| `session` | When the session ends with `/close`. A quit and a new start of the client keep the grant. The controller never ends, so its `session` grants stay. |
 
 After the grant, the screen shows `✓ Allowed once: exec "git push origin main".` Then the harness sends the model
 the message `` The person approved a call of `exec`. Make the call again if you still need it. `` With no open turn,

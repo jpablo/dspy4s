@@ -56,13 +56,17 @@ import caps.assumeSafe
   /** Sends `message` to that session. It returns after the session keeps the message. */
   update def tell(session: SessionRef, message: String): Unit
 
-  /** Starts a session in the background. Its report comes back as a message that starts a turn. */
+  /** Starts a session in the background. Its report comes back as a message that starts a turn. The scope is a
+    * `Scratch`, a `Worktree` or a `Directory`, as `api.start` tells. A `Home` or a `Fork` scope gives an error.
+    */
   update def start(goal: String, scope: Scope, strategy: StrategyName): SessionRef
 
   /** A read-only `rlm` with the journal of that session as an input. It changes nothing in that session. */
   def observe(session: SessionRef, question: String)(using Llm^): String
 
-  /** A part of the journal of a session. `ref` names the part, for example a cell. The form of `ref` is open. */
+  /** A part of the memory of a session, as `zoom(ref)` gives for this session. `ref` is level.index, for example `0.0`
+    * for the first message of that session.
+    */
   def zoom(session: SessionRef, ref: String): String
 
 /** A child inside the cell. A closed session has this capability, and it can only look at the other sessions. */
@@ -202,7 +206,10 @@ final case class NeedsApproval(op: String, argument: String)
     */
   def observe(session: SessionRef, question: String)(using s: Sessions, l: Llm^): String = s.observe(session, question)
 
-  /** A part of the journal of `session`. `ref` names the part, for example a cell. */
+  /** A part of the memory of `session`. `ref` is a reference of that memory, level.index, as for `zoom(ref)` of this
+    * session: for example `0.0` for its first message. A part of level 0 gives its message, and a summary part gives
+    * its two halves with their references. An error names the top parts of the memory, so zoom one of them.
+    */
   def zoom(session: SessionRef, ref: String)(using s: Sessions): String            = s.zoom(session, ref)
 
   /** A part of the memory of this session. `ref` is a reference of the memory, for example `3.5`: the message of
@@ -212,7 +219,14 @@ final case class NeedsApproval(op: String, argument: String)
   def zoom(ref: String)(using t: Turn): String = t.zoom(ref)
 
   /** Starts a session in the background with `goal` in `scope` and the context strategy `strategy`. The report of the
-    * session comes back as a message that starts a turn.
+    * session comes back as a message that starts a turn. `start` takes these scopes:
+    *   - `Scope.Scratch("")`: a new empty folder that the host makes.
+    *   - `Scope.Worktree("", branch, repo, base)`: a local clone of the repository `repo`, with the new branch
+    *     `branch` from `base`. After each turn, the host puts the branch back into `repo`.
+    *   - `Scope.Directory(path)`: a folder of the person at the absolute path `path`. The controller asks the person
+    *     first.
+    *
+    * `start` refuses a `Home` and a `Fork` scope.
     */
   def start(goal: String, scope: Scope, strategy: StrategyName)(using s: Sessions^): SessionRef =
     s.start(goal, scope, strategy)

@@ -355,6 +355,21 @@ class MemoryTreeLaws extends munit.FunSuite:
     }
   }
 
+  // In a live run of 2026-11-16, the controller passed a journal seq ("40") as a reference. The error said only what a
+  // reference looks like, so the model could not find a part that exists.
+  test("Memory tree: the zoom of a text that is not a reference names the form and the top parts") {
+    Models.withModel(summaries()) {
+      val tree  = MemoryTree.withLeaves(LineStore.inMemory(), high = 6)
+      val d     = updated(tree, chat(8, output = 700), tree.empty)
+      val roots = Memory.roots(d.memory.log.size.toLong).map(_.ref)
+      tree.zoom(d, "40") match
+        case Left(error) =>
+          assert(error.contains("level.index"), error)
+          roots.foreach(ref => assert(error.contains(ref), error))
+        case Right(text) => fail(text)
+    }
+  }
+
   test("Memory tree: the window has no memory, so its zoom gives an error") {
     assert(Window.zoom((), "0.0").isLeft)
   }

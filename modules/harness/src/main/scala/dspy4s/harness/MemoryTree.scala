@@ -153,12 +153,12 @@ final class MemoryTree(
     if view.isEmpty then open else open.copy(memory = s"${MemoryTree.Header}\n$view")
 
   /** The text of the part `ref` of the memory: the message of a part of level 0, or the lines of its two halves with
-    * their references. A part that the memory does not have gives an error with the top parts (`Memory.roots`), so the
-    * model can zoom one of them and go down, and does not guess a reference.
+    * their references. A part that the memory does not have, or a text that is not a reference, gives an error with the
+    * top parts (`Memory.roots`), so the model can zoom one of them and go down, and does not guess a reference.
     */
   override def zoom(d: MemoryState, ref: String): Either[String, String] =
     NodeId.parse(ref) match
-      case None     => Left(s"$ref is not a reference of the memory. A reference is level.index, for example 3.5.")
+      case None     => Left(MemoryTree.notReference(d.memory, ref))
       case Some(id) => (Memory.zoom(d.memory, id), id.halves) match
           case (Some(Left(message)), _)                    => Right(message.text)
           case (Some(Right((older, newer))), Some((a, b))) =>
@@ -352,14 +352,29 @@ object MemoryTree:
     * so the model can zoom one of them and go down. A memory with no message gives an error that says so.
     */
   private[harness] def noPart(m: Memory, ref: String): String =
+    topParts(m).fold(s"the memory has no part $ref, because the memory is empty")(tops =>
+      s"the memory has no part $ref yet. $tops"
+    )
+
+  /** The error of a zoom with `ref`, a text that is not a reference, for example a seq of the journal. It gives the
+    * form of a reference and the top parts of the memory `m`, so the model can zoom a part that exists.
+    */
+  private[harness] def notReference(m: Memory, ref: String): String =
+    val form = s"$ref is not a reference of the memory. A reference is level.index, for example 3.5."
+    topParts(m).fold(s"$form The memory is empty.")(tops => s"$form $tops")
+
+  /** The text that names the top parts of the memory `m` (`Memory.roots`) and tells how to go down from them, or none
+    * for a memory with no message.
+    */
+  private def topParts(m: Memory): Option[String] =
     val tops = Memory.roots(m.log.size.toLong).map(_.ref)
-    if tops.isEmpty then s"the memory has no part $ref, because the memory is empty"
-    else
+    Option.when(tops.nonEmpty) {
       val named =
         if tops.size == 1 then s"The top part of the memory is ${tops.head}"
         else s"The top parts of the memory are ${tops.mkString(", ")}"
-      s"the memory has no part $ref yet. $named. A zoom of a part shows its two halves with their references, or the " +
-        "message of a part of level 0. So zoom a top part, and then zoom a half of it."
+      s"$named. A zoom of a part shows its two halves with their references, or the message of a part of level 0. So " +
+        "zoom a top part, and then zoom a half of it."
+    }
 
   /** The characters that a view of `high` parts can take: each line of 512 bytes, and its reference. */
   def room(high: Int): Int = high * (MemoryLine.MaxBytes + 32) + Header.length

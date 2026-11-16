@@ -59,6 +59,23 @@ class ApiReferenceLaws extends munit.FunSuite:
     assert(bare.isEmpty, s"calls with no description:\n${bare.map(i => body(i).trim).mkString("\n")}")
   }
 
+  // In live runs of 2026-11-15 and 2026-11-16, the controller passed a journal seq to zoom(session, ref), because its
+  // doc said "a part of the journal ... for example a cell", and it offered a Fork scope, which start refuses.
+  test("ApiReference: the docs of zoom(session, ref) and start name a memory reference and the scopes of start") {
+    val reference                        = ApiReference(Mode.full)
+    def docOf(signature: String): String =
+      val lines = reference.linesIterator.toVector
+      val at    = lines.indexWhere(_.contains(signature))
+      assert(at > 0, s"no $signature in the reference")
+      lines.take(
+        at
+      ).reverse.takeWhile(line => !line.trim.startsWith("def ") && line.trim.nonEmpty).reverse.mkString(" ")
+    val zoom = docOf("def zoom(session: SessionRef, ref: String)")
+    assert(zoom.contains("memory") && zoom.contains("level.index") && !zoom.contains("journal"), zoom)
+    val start = docOf("def start(goal: String, scope: Scope, strategy: StrategyName)")
+    Vector("Scratch", "Worktree", "Directory", "Home", "Fork").foreach(word => assert(start.contains(word), start))
+  }
+
   test("ApiReference: the reference has no note for the review and no number of a section of the design") {
     // The model reads the reference. A note for the developers, as "A proposal for the review: section 5.1 names
     // edit", or a section number, as "(5.1)", means nothing to it.
