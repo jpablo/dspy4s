@@ -123,6 +123,15 @@ nav:
       - Saving workflow: tutorials/saving-workflow.md
       - Async execution: tutorials/async.md
       - Talk to your data: tutorials/talk-to-your-data.md
+  - Code harness:
+      - harness/index.md
+      - First run: harness/first-run.md
+      - The terminal client: harness/terminal-client.md
+      - The guest API: harness/guest-api.md
+      - The sandbox and approvals: harness/sandbox.md
+      - Sessions and the controller: harness/sessions.md
+      - Memory: harness/memory.md
+      - The inspector: harness/inspector.md
   - Coming from DSPy: coming-from-dspy.md
   - Reference:
       - Cheatsheet: reference/cheatsheet.md

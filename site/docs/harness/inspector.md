@@ -1,0 +1,174 @@
+# The inspector
+
+The host records each HTTP exchange with the model endpoint in a file next to the journal of the session. The
+inspector is a local web server that shows the journals and the exchanges of a root. It only reads the files, so it
+can run while a session runs.
+
+An exchange is one HTTP request to the model endpoint and its reply. A retry is a second exchange.
+
+## The exchange file
+
+Each session has its exchange file next to its journal:
+
+```text
+<root>/sessions/<id>.db            the journal
+<root>/sessions/<id>.http.jsonl    the exchange file
+```
+
+The default root is `~/.dspy4s/harness`, and `--root DIR` gives another root. The file holds each model call of each
+activation of the session. These are the calls of the policy, the summary calls `compress` and `merge`, the calls of
+`llmQuery` (the predictor `subQuery`), and the probes. Each exchange has two JSON lines with the same `id`:
+
+- The `request` line, which the host writes when the exchange starts. It holds `session`, `after` (the last `seq` of
+  the journal), `predictor`, `probe` (only for a probe), `at`, `url`, `headers`, `stream` and `body`. The `body` is a
+  JSON string with the exact text of the request body.
+- The `reply` line, which the host writes when the exchange ends. It holds `at`, `first` (the time of the first line of
+  a stream), `status`, `headers`, and `end`. A plain reply has `body`. A stream has `lines`: each raw line of the reply,
+  with the `data:` prefix and the empty lines. A failed exchange also has `error`.
+
+An example, with parts cut:
+
+```text
+{"kind":"request","id":"e3b0c442","session":"9c1f5d2a","after":41,"predictor":"policy","at":1762950000123,"url":"https://api.example.com/v1/chat/completions","headers":{"Authorization":"«secret:Authorization»"},"stream":true,"body":"{\"model\":\"my-model\",\"messages\":[...],\"stream\":true}"}
+{"kind":"reply","id":"e3b0c442","at":1762950003456,"first":1762950000610,"status":200,"headers":{"content-type":"text/event-stream"},"lines":["data: {...}","","data: [DONE]"],"end":"closed"}
+```
+
+- `end` is `done`, `closed` or `failed`. A complete stream of the OpenAI client ends `closed`, and its last line is
+  `data: [DONE]`.
+- An exchange with a `request` line and no `reply` line is open: the call still runs, or the process stopped during
+  the call.
+- Each text goes through the mask of the secrets of the host. The value of a header with a secret name shows the mark
+  of its name, for example `«secret:Authorization»`.
+
+This `jq` command prints the last message of the request body of each policy call:
+
+```bash
+jq -r 'select(.kind == "request" and .predictor == "policy") | .body | fromjson | .messages[-1].content' \
+  ~/.dspy4s/harness/sessions/<id>.http.jsonl
+```
+
+The exchange file is on by default. Set `DSPY_EXCHANGES=off` to turn it off, in the environment or in
+`~/.dspy4s/harness/.env`:
+
+```bash
+DSPY_EXCHANGES=off dspy4s-harness
+```
+
+## Start the inspector
+
+```bash
+dspy4s-harness --inspect
+dspy4s-harness --inspect --root ~/test-root --port 0
+```
+
+The client prints the address and waits:
+
+```text
+The inspector of <root> runs at http://127.0.0.1:7411/ . Ctrl-C ends it.
+```
+
+- The server listens on `127.0.0.1` only. The default port is 7411. `--port 0` takes a free port.
+- `--inspect` takes only `--root` and `--port`. `--port` needs `--inspect`.
+- The server answers only `GET`. A request with a `Host` header other than `127.0.0.1:PORT` or `localhost:PORT` gets
+  the status 403.
+- The server opens each journal read-only for one request. It changes no file of the root.
+
+## The pages
+
+**The sessions, at `/`.** A table of the sessions of the root, the newest first, with the columns `Last`, `Status`,
+`First message`, `Folder`, `Session` and `Parent`. The rows come from the catalog, and from each journal that the
+catalog does not have. The first message links to the page of the session. The probes of a session show under its
+first message, with a link to the journal of each probe.
+
+**One session, at `/s/<id>`.** The entries of the journal in the order of their `seq`. A step has an indent, and the
+parts of a step (`Acted`, the calls, `Observed`) have two indents. The bar at the top has these parts:
+
+- the facts: the id, the folder, the status, and the counts of the entries and of the exchanges;
+- `View:` with the buttons `Card`, `Scala` and `JSON`, for all the rows;
+- `Follow`, on by default: each second, the page asks for the new entries and adds them at the end;
+- `Filters`: a box for each kind of entry, and a box for each predictor of the exchanges;
+- `Raw:` and `Download:`, with the links `journal.jsonl` and `http.jsonl`.
+
+Each entry row has its `seq`, its kind, its time and its source, and the buttons `card`, `scala` and `json`:
+
+| View | What it shows |
+|---|---|
+| `card` | a formatted card: for example the reasoning (folded), the text, the code of a cell, the output and the outcome |
+| `scala` | the entry as a Scala value, with indents and colors |
+| `json` | the `entry` field of the row, as the file has it, with indents and colors |
+
+Each exchange row comes after the entry of its `after`. A policy exchange comes after the `StepStarted` entry of its
+step. An exchange row has these parts:
+
+- the link `exchange`, the predictor, and `stream` or `plain`
+- the status, and the end (or `open`)
+- the time to the first line, and the whole time
+- the bytes of the request and of the reply, and the tokens
+- the links `request` and `reply`
+
+**One exchange, at `/s/<id>/x/<xid>`.** The title is `Exchange N of M · <predictor>`. The bar has the facts of the
+exchange, the `seq` of its entry (`after #41`), the links `earlier` and `later`, and four buttons:
+
+| View | What it shows |
+|---|---|
+| `Chat` | the options of the request, the tools (folded), and the messages with their roles. The system message is folded. Then the reply: the reasoning (folded), the text, the tool calls, the finish reason and the tokens. |
+| `Request` | the URL, the headers, the size of the body, and the body as numbered lines with indents |
+| `Reply` | the status, the end, the error and the headers, then the body. A stream has two views: `Response` (the reply put together from the chunks) and `Stream` (each raw line). |
+| `Diff` | the lines of this request against the request of the last earlier exchange of the same predictor. `Against:` selects another exchange. |
+
+- Each step sends the whole prompt again, so the diff of a policy exchange shows what the step added.
+- The `Request` and `Reply` views each have a `Copy` button and a `Download` link for the exact text.
+- `?tab=chat`, `?tab=request`, `?tab=reply` or `?tab=diff` opens the page on that view. `?against=<xid>` opens the
+  diff against that exchange.
+
+**The raw paths.** `/raw/<id>/journal.jsonl` gives each row of the journal as one JSON line. `/raw/<id>/http.jsonl`
+gives the exchange file. `/raw/<id>/x/<xid>/request` gives the exact request body of one exchange, and
+`/raw/<id>/x/<xid>/reply` gives its reply: the body, or the lines of a stream. Add `?download=1` to save the file.
+
+```bash
+curl -s http://127.0.0.1:7411/raw/<id>/http.jsonl | jq -c '{kind, predictor, after}'
+```
+
+## A view in the shell
+
+Two scripts in `scripts/live` print a session in a terminal. Run them from the root of the repository. They need
+Python 3.12 and no other package.
+
+```bash
+python3 scripts/live/exchanges.py ~/.dspy4s/harness/sessions/<id>.http.jsonl
+python3 scripts/live/journal.py ~/.dspy4s/harness/sessions/<id>.db
+```
+
+- `exchanges.py` prints one line for each exchange. The line starts with the number, the last `seq` before it, the
+  time since the first exchange, and the predictor (or the probe). Then it gives the status, the end, the time of the
+  reply, the size of the request, the tokens, and the start of the reply text. `--width CHARS` sets the length of the
+  text (200 by default).
+- `journal.py` prints one line for each entry: the `seq`, the time since the first entry, the source, the kind, and
+  the body as JSON. `--width CHARS` sets the length of the body (1500 by default). Run it after the end of the
+  client, because the file of an open session can be locked.
+
+An example of `exchanges.py --width 60`, with values for this page:
+
+```text
+  1 after #3    +    0.0s policy       200 closed   2.41s 12119 B sent, in 3120 out 85 | [[ ## text ## ]] I count the lines of README.md. [[ ## code
+  2 after #9    +   30.0s compress     200 done     0.64s 1003 B sent, in 310 out 24 | [[ ## line ## ]] The person asked for the line count of READ
+  3 after #9    +   31.0s policy       open 12119 B sent
+```
+
+## Try it
+
+1. In a folder with a `README.md`, start `dspy4s-harness`, and type `How many lines does README.md have?`. Note the
+   id in the line `The session <id> is open.`. After the reply, type `/quit`.
+
+2. Run `dspy4s-harness --inspect`, and open `http://127.0.0.1:7411/`. You must see the session, with your message in
+   the column `First message`.
+
+3. Open the session. Find the first `StepStarted` row (its card says `Step 0`). Under it, the next exchange row has
+   the predictor `policy`. Click `request`. You must see the URL, the header `Authorization` with the value
+   `«secret:Authorization»`, and the body of the first policy call.
+
+4. Click `later` until the title says `policy` again, and click `Diff`. You must see the lines that the second step
+   added, for example the output of the cell. Then run `exchanges.py` on the exchange file of the session. You must see
+   one line for each exchange of the page.
+
+Next: [Code harness](index.md).

@@ -49,6 +49,104 @@ final class FakeTurn(inputs: Map[String, Json] = Map.empty) extends Turn:
   def input(name: String): Option[Json] = inputs.get(name)
   def zoom(ref  : String): String       = s"the part $ref of the memory"
 
+/** The files of a test in memory: a read sees each earlier write and edit. A read of a missing file fails, and an edit
+  * fails, and changes nothing, when the old text is not in the file one time.
+  */
+final class MemoryFiles(initial: Map[String, String] = Map.empty) extends Files:
+  @volatile var texts: Map[String, String] = initial
+
+  def read(path: String): String = texts.getOrElse(path, throw IllegalArgumentException(s"no file $path"))
+
+  def write(path: String, content: String): Unit = texts = texts.updated(path, content)
+
+  def edit(path: String, oldText: String, newText: String): Unit =
+    val text = read(path)
+    val at   = text.indexOf(oldText)
+    if at < 0 || text.indexOf(oldText, at + 1) >= 0 then
+      throw IllegalArgumentException(s"the old text is not in $path one time")
+    texts = texts.updated(path, text.substring(0, at) + newText + text.substring(at + oldText.length))
+
+/** The commands of a test: `exec` gives a fixed text, and each job ends at once with the exit code 0. The commands go
+  * to a list, and the `n` of a job is its place in the list.
+  */
+final class FakeShell extends Shell:
+  @volatile var commands: Vector[String]    = Vector.empty
+  @volatile private var stopped: Set[JobId] = Set.empty
+
+  def exec(command: String)(using Files): String =
+    commands = commands :+ command
+    s"the output of $command"
+
+  def spawn(command: String, report: Boolean)(using Files): JobId =
+    commands = commands :+ command
+    JobId(1L, commands.size)
+
+  def jobOutput(job: JobId): String                     = s"the output of ${commands.lift(job.n - 1).getOrElse("no job")}"
+  def waitJob(job  : JobId, maxSeconds: Int): JobStatus = if stopped(job) then JobStatus.Stopped else JobStatus.Exited(0)
+  def stopJob(job  : JobId): Unit                       = stopped = stopped + job
+
+/** The network of a test: each GET gives a fixed body. */
+final class FakeNetwork extends Network:
+  def get(url: String): String = s"the body of $url"
+
+/** The LM of a test: the answer names the first line of the prompt. */
+final class FakeLlm extends Llm:
+  def query(prompt        : String): String                 = s"the answer to ${prompt.linesIterator.nextOption().getOrElse("")}"
+  def queryBatched(prompts: Vector[String]): Vector[String] = prompts.map(query)
+
+/** The store of a test in memory, with the keys in the order of their first store. A value goes in at once. */
+final class FakeStore extends Store:
+  @volatile var values: Vector[(String, Json)] = Vector.empty
+
+  def keys: Vector[String] = values.map(_._1)
+
+  def load[A: Data](key: String): Option[A] =
+    values.collectFirst { case (k, v) if k == key => summon[Data[A]].decode(v, key).fold(e => throw e, identity) }
+
+  def store[A: Data](key: String, value: A): Unit =
+    val json = summon[Data[A]].encode(value)
+    values =
+      if keys.contains(key) then values.map((k, v) => if k == key then k -> json else k -> v)
+      else values :+ (key -> json)
+
+/** The other sessions of a test: one idle session `s-1`. Each message and each goal goes to a list. */
+final class FakeSessions extends Sessions:
+  @volatile var told: Vector[(SessionRef, String)] = Vector.empty
+  @volatile var goals: Vector[String]              = Vector.empty
+
+  val card: SessionCard = SessionCard(
+    session = SessionRef("s-1"),
+    goal = "fix the build",
+    scope = Some(Scope.Directory("/work/app")),
+    owner = "the person",
+    parent = None,
+    status = "idle",
+    lastSeq = 12L,
+    read = 3,
+    made = Vector("build.sbt"),
+    commands = 2,
+    head = Some("abc1234"),
+    clean = Some(true)
+  )
+
+  def list(): Vector[SessionCard]                      = Vector(card)
+  def tell(session: SessionRef, message: String): Unit = told = told :+ (session -> message)
+
+  def start(goal: String, scope: Scope, strategy: StrategyName): SessionRef =
+    goals = goals :+ goal
+    SessionRef(s"s-${goals.size + 1}")
+
+  def observe(session: SessionRef, question: String)(using Llm): String = s"the answer of ${session.id} to $question"
+  def zoom(session   : SessionRef, ref     : String): String            = s"the part $ref of ${session.id}"
+
+/** The children of a test: each child submits the JSON that `result` gives for its task, by default a text. */
+final class FakeChildren(result: String => Json = task => Json.String(s"the result of $task")) extends Children:
+  def rlm[A: Data](task: String, inputs: Map[String, String]): A =
+    summon[Data[A]].decode(result(task), "rlm").fold(e => throw e, identity)
+
+  def rlmBatched[A: Data](tasks: Vector[(String, Map[String, String])]): Vector[A] =
+    tasks.map((task, inputs) => rlm[A](task, inputs))
+
 /** The laws of the REPL: the givens of the modes, the preamble from a shape, submit, and the protections of Phase 0. */
 class ScalaReplLaws extends munit.FunSuite:
 

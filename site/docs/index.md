@@ -65,6 +65,15 @@ classify.apply((sentence = "it's a charming and often affecting journey.")).map(
     Bootstrap few-shot, COPRO, MIPROv2, and a self-contained GEPA implementation
     for optimizing prompts and few-shot demonstrations.
 
+-   :material-console:{ .lg .middle } __Code harness__
+
+    ---
+
+    A coding agent that acts only through Scala cells. A REPL runs each cell,
+    and an OS sandbox runs each command.
+
+    [:octicons-arrow-right-24: Code harness](harness/index.md)
+
 </div>
 
 !!! note "Early days"
