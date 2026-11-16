@@ -80,7 +80,8 @@ The inspector of <root> runs at http://127.0.0.1:7411/ . Ctrl-C ends it.
 catalog does not have. The first message links to the page of the session. The probes of a session show under its
 first message, with a link to the journal of each probe.
 
-**One session, at `/s/<id>`.** The entries of the journal in the order of their `seq`. A step has an indent, and the
+**One session, at `/s/<id>`.** The entries of the journal in the order of their `seq`. A session with more than 2,000
+entries shows only its last 2,000, with a note in the bar. The raw `journal.jsonl` has all of them. A step has an indent, and the
 parts of a step (`Acted`, the calls, `Observed`) have two indents. The bar at the top has these parts:
 
 - the facts: the id, the folder, the status, and the counts of the entries and of the exchanges;

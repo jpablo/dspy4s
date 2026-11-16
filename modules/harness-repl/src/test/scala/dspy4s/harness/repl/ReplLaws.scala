@@ -170,6 +170,28 @@ class ReplLaws extends munit.FunSuite:
     assert(!hint(error).exists(_.contains("case Array(x, y)")), hint(error).toString)
   }
 
+  // The texts come from the REPL of 2026-11-16: `store("k", 1)` with the bare `Store`, `tell(...)` with the bare
+  // `Sessions`, and `write(...)` in the live run, whose `Required:` type had no capture set after the `^`.
+  test("Hints: each capability that the mode gives only to read gets the hint, with its name from the error") {
+    def error(label: String, name: String, required: String) =
+      s"""-- [E007] Type Mismatch Error: -------------------------------------------------
+         |  |Found:    ($label : dspy4s.harness.guest.$name)
+         |  |Required: dspy4s.harness.guest.$required
+         |  |
+         |  |Note that {any} is an exclusive capture set of the stateful type dspy4s.harness.guest.$required,""".stripMargin
+    for (label, name) <- Vector("files" -> "Files", "state" -> "Store", "peers" -> "Sessions")
+    do
+      val text = hint(error(label, name, s"$name^{any}"))
+      assert(text.exists(h => h.contains(s"gives $name only to read")), text.toString)
+    val bare = hint("Found: (files : dspy4s.harness.guest.Files) Required: dspy4s.harness.guest.Files^")
+    assert(bare.exists(_.contains("gives Files only to read")), bare.toString)
+    val two = hint(error("files", "Files", "Files^{any}") + "\n" + error("state", "Store", "Store^{any}"))
+    assert(two.exists(_.contains("gives Files and Store only to read")), two.toString)
+    // A type that is not a capability with a read-only view, or a `Required:` type of another name, gets no such hint.
+    assertEquals(hint(error("shell", "Shell", "Shell^{any}")), None)
+    assertEquals(hint(error("files", "Files", "Store^{any}")), None)
+  }
+
   test("Hints: a code in a ``` fence, whose first line does not parse") {
     // The parse error of a live session of 2026-11-10 had no hint, and the model did the same thing for five steps.
     val error = "Line 1: empty quoted identifier"

@@ -83,6 +83,7 @@ overflow-wrap:anywhere}
 .controls{display:flex;flex-wrap:wrap;gap:6px 14px;align-items:center;margin-top:8px;font-size:12.5px}
 .controls .group{display:flex;flex-wrap:wrap;gap:4px 8px;align-items:center}
 .controls label{white-space:nowrap;color:var(--muted)}
+.controls .cut{color:var(--warn)}
 button{font:inherit;font-size:12px;border:1px solid var(--line);background:var(--card);color:var(--fg);
 border-radius:5px;padding:1px 8px;cursor:pointer}
 button.on{border-color:var(--accent);color:var(--accent)}
@@ -159,7 +160,8 @@ td.first{overflow-wrap:anywhere}
 
   /** The script of a page: the views, the filters, and the follow of a session that runs (5.2). The page of a session
     * asks for the rows after its last `seq` each second, adds the new entries at the end, and places each exchange
-    * after its entry again when the exchange file changed.
+    * after its entry again when the exchange file changed. A page that does not show the first entries (`skipped`)
+    * keeps out each exchange before its first entry, and its counts add the entries that it does not show.
     */
   private val Script: String = """(() => {
 const body = document.body, rows = document.getElementById('rows');
@@ -214,11 +216,13 @@ document.querySelectorAll('input[data-hide]').forEach(c =>
 if (!rows || !rows.dataset.session) return;
 const follow = document.getElementById('follow');
 let last = Number(rows.dataset.last), size = Number(rows.dataset.size), busy = false;
+const skipped = Number(rows.dataset.skipped || 0);
+const count = (id, n) => { const e = document.getElementById(id); if (e) e.textContent = String(n); };
 const place = x => {
   const after = Number(x.dataset.after);
   let anchor = null;
   for (const e of rows.querySelectorAll('.row.entry')) { if (Number(e.dataset.seq) <= after) anchor = e; else break; }
-  if (!anchor) { rows.prepend(x); return; }
+  if (!anchor) { if (!skipped) rows.prepend(x); return; }
   let at = anchor;
   while (at.nextElementSibling && at.nextElementSibling.classList.contains('exchange')) at = at.nextElementSibling;
   at.after(x);
@@ -241,15 +245,17 @@ const tick = async () => {
     const xs = t.content.getElementById('exchanges');
     if (xs) {
       rows.querySelectorAll('.row.exchange').forEach(x => x.remove());
+      count('count-exchanges', xs.children.length);
       for (const x of [...xs.children]) place(x);
       size = Number(xs.dataset.size);
       grew = true;
     }
     const status = document.getElementById('status');
     if (status && entries && entries.dataset.status) status.textContent = entries.dataset.status;
-    const count = (id, n) => { const e = document.getElementById(id); if (e) e.textContent = String(n); };
-    count('count-entries', rows.querySelectorAll('.row.entry').length);
-    count('count-exchanges', rows.querySelectorAll('.row.exchange').length);
+    const shown = rows.querySelectorAll('.row.entry').length;
+    count('count-entries', skipped + shown);
+    count('count-shown', shown);
+    count('count-all', skipped + shown);
     if (grew && end) window.scrollTo(0, document.body.scrollHeight);
   } finally { busy = false; }
 };

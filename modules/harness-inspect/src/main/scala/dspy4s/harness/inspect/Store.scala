@@ -47,6 +47,19 @@ final class Store(val root: Path):
   def rows(session: SessionId, from: Long): Either[String, Vector[SessionFile.Row]] =
     read(SessionFile.pathOf(root, session), session, from)
 
+  /** The last `count` rows of the journal of `session` at most, with the `seq` where the read starts: `count` before
+    * the end, or 0. The writer gives the entries the `seq` 0, 1, 2 and on, so the journal has that many rows before the
+    * read. The read finds the end with `SessionFile.lastSeq`, so it reads no row before its start.
+    */
+  def last(session: SessionId, count: Int): Either[String, (Long, Vector[SessionFile.Row])] =
+    opened(SessionFile.pathOf(root, session), session) { file =>
+      Try(file.lastSeq).toEither.left.map(e => s"the read of the journal ${file.path} failed: ${e.getMessage}")
+        .flatMap { end =>
+          val from = (end + 1 - count).max(0L)
+          file.rows(from).map(from -> _)
+        }
+    }
+
   /** The exchanges of `session` and the size of its exchange file. */
   def exchanges(session: SessionId): (Vector[Exchange], Long) = Exchanges.read(ExchangeFile.pathOf(root, session))
 
@@ -79,7 +92,11 @@ final class Store(val root: Path):
         .filterNot(_.contains("..")).sorted
 
   private def read(path: Path, session: SessionId, from: Long): Either[String, Vector[SessionFile.Row]] =
+    opened(path, session)(_.rows(from))
+
+  /** The result of `use` on the journal at `path`, open to read for this call only. */
+  private def opened[A](path: Path, session: SessionId)(use: SessionFile => Either[String, A]): Either[String, A] =
     SessionFile.readOnly(path, session).flatMap { file =>
-      try file.rows(from)
+      try use(file)
       finally file.close()
     }

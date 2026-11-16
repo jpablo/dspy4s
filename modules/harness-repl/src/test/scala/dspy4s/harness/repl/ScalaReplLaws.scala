@@ -268,6 +268,18 @@ class ScalaReplLaws extends munit.FunSuite:
     finally r.close()
   }
 
+  // In a live run of 2026-11-16, write in a mode that only reads files gave the raw error "Found: (files : Files)
+  // Required: Files^", with no hint. The controller and the MCP server have such a mode.
+  test("Hints: a call that the mode gives only to read does not compile, and its hint says that the mode only reads") {
+    val r = repl()
+    try r.run("""write("x.txt", "y")""").outcome match
+        case CellOutcome.CompileError(lines) =>
+          val hints = lines.filter(_.startsWith("Hint:"))
+          assert(hints.exists(h => h.contains("Files") && h.contains("only")), lines.mkString("\n"))
+        case other => fail(s"write compiled in a mode that only reads: $other")
+    finally r.close()
+  }
+
   test("Submit: after submit, the host refuses each later call of the cell and a second submit") {
     val files = FakeFiles()
     val r     = repl(files = files, preamble = pointPreamble())

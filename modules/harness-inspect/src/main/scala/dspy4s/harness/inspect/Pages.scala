@@ -35,24 +35,42 @@ object Pages:
         s"<main>$table</main>"
     )
 
-  /** The page of a session: its rows in a tree, with each exchange after its entry. The page follows the session. */
+  /** The most entries that the page of a session shows: the last ones. In a live run of 2026-11-16, the page of a
+    * session with 502,350 entries filled a heap of 12 GB. The raw journal has all the rows.
+    */
+  val LastEntries: Int = 2_000
+
+  /** The page of a session: its last `LastEntries` rows in a tree, with each exchange after its entry. The page follows
+    * the session. When the page does not show all the entries, a note in the bar gives the two counts and links to the
+    * raw journal.
+    */
   def session(store: Store, session: SessionId, nonce: String): Either[String, String] =
-    store.rows(session, 0L).map { rows =>
-      val (exchanges, size) = store.exchanges(session)
-      val row               = store.row(session)
-      val title             = row.map(_.firstMessage).filter(_.nonEmpty).getOrElse(session.value)
-      // The page updates the status and the two counts when it follows the session.
+    store.last(session, LastEntries).map { (skipped, rows) =>
+      val (all, size) = store.exchanges(session)
+      // An exchange after an entry that the page does not show stays out too.
+      val exchanges = if skipped == 0 then all else all.filter(_.after >= skipped)
+      val row       = store.row(session)
+      val title     = row.map(_.firstMessage).filter(_.nonEmpty).getOrElse(session.value)
+      val whole     = skipped + rows.size
+      // The page updates the status and the counts when it follows the session. The counts are of the whole session.
       val facts = Vector(
         Some(escape(session.value)),
         row.map(r => escape(r.folder)),
         Some(s"""<span id="status">${escape(row.fold("")(_.status.toString))}</span>"""),
-        Some(s"""<span id="count-entries">${rows.size}</span> entries"""),
-        Some(s"""<span id="count-exchanges">${exchanges.size}</span> exchanges""")
+        Some(s"""<span id="count-entries">$whole</span> entries"""),
+        Some(s"""<span id="count-exchanges">${all.size}</span> exchanges""")
       ).flatten.mkString(" · ")
-      val raw  = Html.rawLinks(s"/raw/${session.value}", Vector("journal.jsonl", "http.jsonl"))
-      val bar  = header(title, facts, controls(withPredictors = true) + raw)
-      val main = s"""<main id="rows" data-session="${session.value}" data-last="${lastOf(rows)}" data-size="$size">""" +
-        tree(session, rows, exchanges) + "</main>"
+      val base = s"/raw/${session.value}"
+      val note =
+        if skipped == 0 then ""
+        else
+          s"""<span class="cut">The page shows the last <span id="count-shown">${rows.size}</span> of """ +
+            s"""<span id="count-all">$whole</span> entries. <a href="$base/journal.jsonl">journal.jsonl</a> has all """ +
+            "of them.</span>"
+      val raw  = Html.rawLinks(base, Vector("journal.jsonl", "http.jsonl"))
+      val bar  = header(title, facts, controls(withPredictors = true) + note + raw)
+      val main = s"""<main id="rows" data-session="${session.value}" data-last="${lastOf(rows)}" data-size="$size" """ +
+        s"""data-skipped="$skipped">""" + tree(session, rows, exchanges) + "</main>"
       Html.page(s"Session ${session.value.take(8)}", nonce, bar + main)
     }
 

@@ -2,6 +2,7 @@ package dspy4s.harness.repl
 
 /** The hint for a compile error that models cannot read (6), or none. The host adds it after the error. */
 def hint(error: String): Option[String] =
+  lazy val readOnly = readOnlyCapabilities(error)
   if error.contains("Maximal number of successive inlines") then
     Some("The derivation of Data went too deep. Give the type a Data with one line: given Data[T] = Data.derived")
   else if error.contains("is defined in a class that does not extend `Stateful`") then
@@ -14,6 +15,13 @@ def hint(error: String): Option[String] =
       .filterNot(n => n.isEmpty || n.startsWith("any") || n.startsWith("cap")).distinct
     val which = if names.isEmpty then "a capability" else names.mkString("the capability ", ", ", "")
     Some(s"The cell uses $which in a place that must be pure. Pass the value that you need, not the capability.")
+  else if readOnly.nonEmpty then
+    // The controller and the MCP server have a mode that gives the bare `Files`, so a write gave only the raw error
+    // (2026-11-16).
+    val which = if readOnly.size == 1 then readOnly.head else s"${readOnly.init.mkString(", ")} and ${readOnly.last}"
+    val it    = if readOnly.size == 1 then "it" else "them"
+    Some(s"The mode of this session gives $which only to read, so a call that changes $it does not compile. " +
+      "Use a call that only reads, or ask for the change in another way.")
   else if error.contains("Vector[String]{val prefix") then
     Some("A Vector in a pair, for example in groupBy(f).map { case (k, v) => ... }. Use .view.mapValues, " +
       "groupMapReduce or .toList.")
@@ -66,6 +74,19 @@ private val arrayFound = """Found:\s*Array\[.*\]\^\{[^}]*\}""".r
 
 /** The `Required:` line of an Array type, for example `Required: Array[Int]`. */
 private val arrayRequired = """Required:\s*Array\[""".r
+
+/** The capabilities that the mode gives bare where a call needs `C^`, in their order in `error`. Only a capability with
+  * a read-only view (`Capability.reads`) counts, for example `Files`, `Store` or `Sessions`.
+  */
+private def readOnlyCapabilities(error: String): Vector[String] =
+  readOnlyGiven.findAllMatchIn(error).collect { case m if m.group(1) == m.group(2) => m.group(1) }
+    .filter(name => Capability.named(name).exists(_.reads)).toVector.distinct
+
+/** The type error of a given that the mode gives bare where a call needs `C^`. The `Found:` line names the given, for
+  * example `(files : dspy4s.harness.guest.Files)`, and the `Required:` line has the same type with `^`, for example
+  * `dspy4s.harness.guest.Files^{any}` or `dspy4s.harness.guest.Files^`.
+  */
+private val readOnlyGiven = """Found:\s*\(\w+\s*:\s*(?:\w+\.)*(\w+)\)\s*\|?\s*Required:\s*(?:\w+\.)*(\w+)\^""".r
 
 /** The capture set of a type in an error, for example `^{files}`. */
 private val capabilityName = """\^\{([A-Za-z_][\w.]*)\}""".r

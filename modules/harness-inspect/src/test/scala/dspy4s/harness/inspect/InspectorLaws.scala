@@ -310,6 +310,23 @@ class InspectorLaws extends ScalaCheckSuite:
 
   // ── The pages ──
 
+  // In a live run of 2026-11-16, the page of a session with 502,350 entries filled the heap of 12 GB, and the server
+  // closed the connection with no reply and no message.
+  test("Inspect: the page of a long session shows only its last 2000 entries, with a note and the raw journal") {
+    withRoot { root =>
+      val session = SessionId("fake-long-1")
+      journal(root, session, turn.take(3) ++ Vector.fill(2_497)(Entry.StepStarted(0))): Unit
+      serving(root) { inspector =>
+        val (status, body) = get(inspector, s"/s/${session.value}")
+        assertEquals(status, 200)
+        val seqs = seqsOf(body)
+        assertEquals((seqs.size, seqs.lastOption), (2_000, Some(2_499L)))
+        assert(body.contains("2000") && body.contains("2500"), body.take(800))
+        assert(body.contains(s"/raw/${session.value}/journal.jsonl"), body.take(800))
+      }
+    }
+  }
+
   test("Inspect: the page of a session shows each exchange after its entry, and an exchange with no reply as open") {
     withRoot { root =>
       val (session, xid) = fixture(root)

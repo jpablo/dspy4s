@@ -59,6 +59,13 @@ old = "store.rows(session, seq + 1).map { rows =>"
 new = "store.rows(session, seq).map { rows =>"
 
 [[mutant]]
+name = "Mutant: the page of a long session shows all its entries"
+[[mutant.edit]]
+file = "Pages.scala"
+old = "store.last(session, LastEntries).map { (skipped, rows) =>"
+new = "store.last(session, Int.MaxValue).map { (skipped, rows) =>"
+
+[[mutant]]
 name = "Mutant: an exchange goes after the entry before its after"
 [[mutant.edit]]
 file = "Pages.scala"

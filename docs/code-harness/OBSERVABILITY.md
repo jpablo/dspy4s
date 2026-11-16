@@ -244,6 +244,11 @@ token and a prompt of 20 to 80 KB.
   - The bar has the facts (the id, the folder, the status and the counts), a switch for the view of all the entries
     (card, Scala or JSON), the follow, the filters, and the raw paths. The filters of the kinds of entries and of the
     predictors are folded, so the bar stays short in a small window. Each entry also has its own switch.
+  - The page shows only the last 2,000 entries of a session (`Pages.LastEntries`), with their exchanges. In a live
+    run of 2026-11-16, the page of a session with 502,350 entries filled a heap of 12 GB, and the server closed the
+    connection with no reply. The store finds the last `seq` with one query, so it reads no earlier row. When the
+    page does not show all the entries, the bar has a note, for example `the last 2000 of 2500 entries`, with a link
+    to `journal.jsonl`, which has all the rows. The counts of the bar are of the whole session.
 - **`/p/{name}`: the journal of a probe,** as a tree with no exchanges. Its exchanges are in the file of its caller.
 - **`/s/{id}/x/{xid}`: one exchange** with the four views of 5.4.
 - **A session that runs.** Each second, the page asks for `/s/{id}/after/{seq}?size=N`. The fragment has each entry
