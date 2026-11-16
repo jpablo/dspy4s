@@ -1,7 +1,7 @@
 package dspy4s.harness.cli
 
 import dspy4s.harness.guest.{Mode, Scope}
-import dspy4s.harness.host.{Activity, ContextUse, MemoryUse, WorkRuntime, jobName}
+import dspy4s.harness.host.{Activity, ContextUse, Controller, MemoryUse, WorkRuntime, jobName}
 import dspy4s.harness.kernel.*
 import dspy4s.harness.{Draft, textPrefix, textSuffix}
 import zio.blocks.schema.json.Json
@@ -649,12 +649,15 @@ object Screen:
     val exact = part.toDouble * 100 / whole
     if exact < 1 then "<1%" else s"${math.round(exact)}%"
 
+  /** The name of `mode` in the footer. The controller runs `Controller.mode`, which is `Mode.controller` with no
+    * `Children`. Both modes get the name `controller mode`.
+    */
   private def modeName(mode: Mode): String =
     if mode == WorkRuntime.workMode then "work mode"
     else if mode == Mode.full then "full mode"
     else if mode == Mode.local then "local mode"
     else if mode == Mode.readOnly then "read-only mode"
-    else if mode == Mode.controller then "controller mode"
+    else if mode == Controller.mode || mode == Mode.controller then "controller mode"
     else "custom mode"
 
   private def folderOf(state: SessionState): String =

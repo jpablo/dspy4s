@@ -2,7 +2,7 @@ package dspy4s.harness.cli
 
 import dspy4s.harness.Support
 import dspy4s.harness.guest.{JobStatus, Scope}
-import dspy4s.harness.host.{Behind, ContextUse, Feed, HostError, MemoryUse, SessionHandle, WorkRuntime}
+import dspy4s.harness.host.{Behind, ContextUse, Controller, Feed, HostError, MemoryUse, SessionHandle, WorkRuntime}
 import dspy4s.harness.kernel.*
 import zio.blocks.schema.json.Json
 
@@ -291,6 +291,16 @@ class EffortLaws extends munit.FunSuite:
     assert(printed.contains("The effort is low."), printed)
     assertEquals(handle.ran.asScala.toVector, Vector(Command.ChangeModel(ModelChoice("example-model", effort("high")))))
     assert(printed.contains("The model has no effort turbo. Its levels are none, low, medium and high."), printed)
+  }
+
+  // In a live run of 2026-11-16, the footer of the controller said "custom mode": the names compare the mode with
+  // Mode.controller, and the controller runs Controller.mode, which has no Children.
+  test("Footer: the controller shows controller mode, and a work session shows work mode") {
+    val base       = work(Map.empty)
+    val controller = base.copy(config = base.config.copy(mode = Controller.mode, scope = Scope.Home("/home/a")))
+    val shown      = Screen.footer(controller, None, 0, "/home/a", Glyphs.unicode, None).plain
+    assert(shown.contains(" · controller mode · "), shown)
+    assert(Screen.footer(base, None, 0, "/home/a", Glyphs.unicode, None).plain.contains(" · work mode · "))
   }
 
 /** A session in the state `start` for the laws of `/effort`. Each command through `run` or `send` goes to `ran` and
