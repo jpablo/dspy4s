@@ -50,7 +50,9 @@ A scope tells where a session works. `start` takes three scopes:
 
 - Give an empty path to a `Worktree` and to a `Scratch`. The host makes the folder.
 - Give `repo` as an absolute path. `repo` must not have the branch `branch` yet, and `branch` must not be `base`.
-- `start` refuses `Home`, `Fork`, and a repository inside the folder of a session that has not ended.
+- `start` refuses `Home`, `Fork`, and a repository inside the folder of a session that is open in this host now. A
+  session that only has a row in the catalog, for example an idle session of an earlier run of the client, does not
+  block a worktree.
 - Before a `start` with a `Directory` scope, the controller asks you, because that session works in your folder.
   Type `/allow` to approve the call. [The sandbox and approvals](sandbox.md) tells more.
 

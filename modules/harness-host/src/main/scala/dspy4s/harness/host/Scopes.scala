@@ -69,8 +69,8 @@ trait Scopes:
   * and `dspy4s.published`, the last tip that the host put into the repository.
   *
   * A new clone does not copy the configuration of the repository, so a smudge filter of that configuration does not run
-  * when the clone checks out the files. The host still refuses a repository inside the scope of an open session
-  * (`LocalHost.make`).
+  * when the clone checks out the files. The host still refuses a repository inside the scope of a session that is open
+  * in this host (`LocalHost.make`).
   */
 final class GitScopes(timeout: FiniteDuration = 30.seconds) extends Scopes:
 

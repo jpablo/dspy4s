@@ -456,6 +456,23 @@ class ScopesLaws extends munit.FunSuite:
     }
   }
 
+  // In a live run of 2026-11-16, three idle work sessions of the person from earlier runs of the client blocked a
+  // worktree of their repository, and one of them could not even open to be closed. The clone copies no configuration
+  // of the repository (choice 19), so only a session that is open in this host now still blocks a worktree.
+  test("Host scopes: a session of the repository that is not open in this host does not block a worktree") {
+    withRoot { root =>
+      val r = repo(root)
+      withScriptHost(root) { (host, _) =>
+        opened(host, id(1), Some(config().copy(scope = Scope.Directory(root.toString)))): Unit
+      }
+      withScriptHost(root) { (host, work) =>
+        assert(host.list.exists(_.session == id(1)), host.list.toString)
+        val made = host.make(Scope.Worktree("", "feature", r.toString, "main"), id(2))
+        assertEquals(made, Right(Scope.Worktree(work.resolve(id(2).value).toString, "feature", r.toString, "main")))
+      }
+    }
+  }
+
   test("Host scopes: after a turn in a git folder, the journal has ScopeRecorded and the row of list has the head") {
     withRoot { root =>
       val r = repo(root)

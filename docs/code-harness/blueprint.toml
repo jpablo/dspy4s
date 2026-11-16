@@ -4723,7 +4723,7 @@ kind = "law"
 name = "Host scopes:"
 ref = "8.7"
 uses = ["local-host", "git-scopes"]
-text = "make of an empty Scratch or Worktree makes <work>/<id>, and the rules of start refuse the rest and a repository inside an open scope. After a turn in a git folder, the journal has ScopeRecorded. After a turn in a worktree, the branch of the repository has the commits of the clone, and a branch that the person moved gives the model one message, not one after each turn (choice 19). The close of a host during a slow snapshot stops git."
+text = "make of an empty Scratch or Worktree makes <work>/<id>, and the rules of start refuse the rest and a repository inside the scope of a session that is open in this host. A session that is not open in this host does not block a worktree (2026-11-16). After a turn in a git folder, the journal has ScopeRecorded. After a turn in a worktree, the branch of the repository has the commits of the clone, and a branch that the person moved gives the model one message, not one after each turn (choice 19). The close of a host during a slow snapshot stops git."
 
 [[node]]
 id = "law-host-release"

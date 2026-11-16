@@ -126,7 +126,8 @@ trait Peers:
     * have an empty path: the host makes `<work>/<session>`, a new folder for a scratch and a new worktree of a new
     * branch for a worktree. A `Directory` must be an absolute path of a folder that exists. A `Home`, a `Fork`, a path
     * that is not absolute or not empty as these rules say, a worktree whose branch is its base, and a repository inside
-    * the scope of a session that has not ended give an error.
+    * the scope of a session that is open in this host give an error. A session that is not open in this host does not
+    * block a worktree.
     */
   def make(scope: Scope, session: SessionId): Either[String, Scope]
 
@@ -390,7 +391,7 @@ final class LocalHost private (
         if branch == base then Left(s"the branch $branch is its own base")
         else if repository.isEmpty then Left(s"the repository $repo is not an absolute path")
         else if repository.exists(inWritableScope) then
-          Left(s"the repository $repo is inside the folder of a session that has not ended")
+          Left(s"the repository $repo is inside the folder of a session that is open in this host")
         else
           val made = Scope.Worktree(folder, branch, repo, base)
           scopes.make(made).map(_ => made)
@@ -415,14 +416,19 @@ final class LocalHost private (
       (child, owner) => due.offer((child, owner)): Unit
     )
 
-  /** True when `path` is inside the folder of a session that has not ended and can write there. The controller has the
-    * scope `Home` and no write access, so its scope does not count.
+  /** True when `path` is inside the folder of a session that is open in this host and can write there. The controller
+    * has the scope `Home` and no write access, so its scope does not count.
+    *
+    * A catalog row of a session that is not open in this host does not count. A work session of the person ends only at
+    * a `/close`, so in a live run of 2026-11-16 idle sessions of earlier runs of the client blocked a worktree of their
+    * repository. The clone of a `Worktree` copies no configuration of the repository (choice 19, 5.4), so a change that
+    * such a session made in the repository runs no code in the git of the host. Only a session that can write now still
+    * blocks.
     */
   private def inWritableScope(path: Path): Boolean =
-    val real   = Layout.real(path)
-    val opened = synchronized(sessions.values.filter(_.live).map(_.state.config.scope).toVector)
-    val listed = catalog.rows.filter(notEnded).flatMap(_.scope)
-    (opened ++ listed).exists {
+    val real = Layout.real(path)
+    val live = synchronized(sessions.values.filter(_.live).map(_.state.config.scope).toVector)
+    live.exists {
       case Scope.Home(_) => false
       case other         => folderOf(other).exists(p => real.startsWith(Layout.real(p)))
     }
