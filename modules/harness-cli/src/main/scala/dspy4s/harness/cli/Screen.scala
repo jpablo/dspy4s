@@ -597,7 +597,13 @@ object Screen:
       case TurnOutcome.Failed(error) =>
         (s"${g.fail} ", Tone.Bad, s"Failed: ${cut(firstLine(printable(error)), ArgChars, g)}")
       case TurnOutcome.Crashed => (s"${g.fail} ", Tone.Bad, "The turn crashed")
-    Vector(Row.of(""), Row(Vector(Span(s"  $mark", tone), Span(words + facts, Tone.Dim))))
+    // The value of submit is the result of the turn, so it prints as the reply. A reply prints in its step.
+    val result = outcome match
+      case TurnOutcome.Submitted(Json.String(value)) => marked(g.reply, Tone.Accent, value)
+      case TurnOutcome.Submitted(value)              => marked(g.reply, Tone.Accent, value.print)
+      case _                                         => Vector.empty
+    val before = if result.isEmpty then result else Row.of("") +: result
+    before ++ Vector(Row.of(""), Row(Vector(Span(s"  $mark", tone), Span(words + facts, Tone.Dim))))
 
   // ── Words, numbers and times ──
 

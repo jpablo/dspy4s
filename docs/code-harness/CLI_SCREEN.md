@@ -200,10 +200,13 @@ One dim line after the reply:
 | Outcome | Line |
 |---|---|
 | `Replied` | `Done · 4 steps · 3 cells · 12 s` |
+| `Submitted` | `Done · submitted · 2 steps · 1 cell · 9 s` |
 | `Aborted` | `■ Stopped · 2 steps · 14 s` |
 | `Exhausted` | `Step limit · 10 steps · 2 m 3 s` |
 | `Failed` | `✗ Failed: <error> · 3 steps · 63 s` |
 | `Crashed` | `✗ The turn crashed · 3 steps · 63 s` |
+
+The value of `submit` prints as the reply before the `Submitted` line, with the reply glyph `●`.
 
 ## 8. The input and the footer
 

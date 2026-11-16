@@ -210,6 +210,33 @@ class ScreenLaws extends munit.FunSuite:
     assertEquals(end(TurnOutcome.Crashed), "  ✗ The turn crashed · 0 steps · 0 cells · 1 m 3 s")
   }
 
+  test("Screen: a turn that ends by submit prints the value as the reply, then the end line") {
+    // Live session 8b418720 (2026-11-16): two turns ended by submit, and the screen showed no result.
+    val value = "Rust 1.97.1 gives the same error.\nNo fix works yet."
+    val log   = Vector(
+      at(1, 1_000, Entry.TurnStarted),
+      at(2, 1_100, Entry.StepStarted(0)),
+      at(3, 2_000, Entry.Acted("", "I'll try one more build.", Some("submit(\"...\")"))),
+      at(4, 2_500, Entry.Observed(s"The cell submitted \"$value\".", CellOutcome.Submitted(text(value)), Map.empty)),
+      at(5, 2_500, Entry.TurnEnded(TurnOutcome.Submitted(text(value))))
+    )
+    assertEquals(
+      printed(log).drop(2),
+      Vector(
+        "",
+        "● Rust 1.97.1 gives the same error.",
+        "  No fix works yet.",
+        "",
+        "  Done · submitted · 1 step · 1 cell · 1.5 s"
+      )
+    )
+    // A value that is not a text prints as JSON.
+    val record = Json.Object(("lines", Json.Number(42)))
+    val ended  =
+      printed(Vector(at(1, 0, Entry.TurnStarted), at(2, 1_000, Entry.TurnEnded(TurnOutcome.Submitted(record)))))
+    assert(ended.contains(s"● ${record.print}"), ended.mkString("\n"))
+  }
+
   test("Screen: a command shows each hidden character as an escape, on one line") {
     val log = turn.take(3) ++ Vector(
       at(4, 2_100, call(3, 0, "exec", "command" -> text("echo a‮b\nls"))),

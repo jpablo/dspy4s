@@ -61,7 +61,7 @@ class PolicyOptionsLaws extends munit.FunSuite:
     val zooms = ZoomSource()
     withModel(model) {
       val effects = HarnessEffects(
-        "FAKE-TASK",
+        _ => "FAKE-TASK",
         Harness.apiReference(none),
         Predict(leaf, name = Some("policy")),
         Window,

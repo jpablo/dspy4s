@@ -88,8 +88,9 @@ object WorkEnv:
   *   - Each activation has its `Drafts`, and the effects write the draft of each call to the policy there while the
   *     model writes it (CLI_SCREEN.md, 13). `draft` reads it with no wait for the call.
   *   - A mode with `Sessions` gets the handler `HostSessions` with `peers` and a `HarnessProbe` with the leaves of the
-  *     runtime (8.7). The task of a turn comes from `taskOf`: the controller, a session with a session as its owner, or
-  *     a session of the person.
+  *     runtime (8.7). The task of a step comes from `taskOf`: the controller, a session with a session as its owner, or
+  *     a session of the person. Each call to the policy reads the debt of 8.6 from the journal so far (`owes`), so the
+  *     task of an owned session asks for `submit` only while the owner waits for a report.
   *
   * The policy calls run on the thread of the worker, so the activation installs the context of the runtime there. The
   * context gives the LM, so the key never goes into the journal (5.6).
@@ -196,8 +197,21 @@ final class WorkRuntime(
             limits.cellLimit,
             stops = () => journal.state.stopping
           )
+        // The task changes with the debt of 8.6, so each call to the policy reads the debt from the journal so far.
+        val words = WorkRuntime.shellWords(profile, scope, made)
+        val owner = config.owner match
+          case Owner.Session(o) => Some(Controller.messageSource(o))
+          case _                => None
         val effects = HarnessEffects(
-          WorkRuntime.taskOf(session, config, scope, WorkRuntime.shellWords(profile, scope, made), project),
+          log =>
+            WorkRuntime.taskOf(
+              session,
+              config,
+              scope,
+              words,
+              project,
+              owes = owner.exists(source => dspy4s.harness.kernel.owes(source, log))
+            ),
           Harness.apiReference(config.mode),
           WorkRuntime.policyOf(session, policy),
           strategy,
@@ -398,25 +412,43 @@ object WorkRuntime:
     val words = Profiles.words(profile, scope, layout)
     if profile.canRun then s"$words $Refused" else words
 
-  /** The task of each turn of the session `session` with `config` in the folder `scope` (8.6, 8.7): `Controller.task`
-    * for the controller (`Controller.id`), the goal of a session whose owner is a session with the rule to end the work
-    * with a cell that calls `submit(...)`, and `chatTask` for a session of the person. `shell` is the text of the shell
-    * of the session (`shellWords`), and `project` the section of its files (`ProjectFiles.section`), for each task
-    * apart from the task of the controller. The files come after the shell rules and before the goal.
+  /** The task of a step of the session `session` with `config` in the folder `scope` (8.6, 8.7): `Controller.task` for
+    * the controller (`Controller.id`), the goal of a session whose owner is a session, and `chatTask` for a session of
+    * the person. `shell` is the text of the shell of the session (`shellWords`), and `project` the section of its files
+    * (`ProjectFiles.section`), for each task apart from the task of the controller. The files come after the shell
+    * rules and before the goal.
+    *
+    * `owes` is true when the step owes the owner a report (`owes` of the kernel, after the journal so far). Then the
+    * task of a session with a goal has the rule to end the work with a cell that calls `submit(...)`. After the debt
+    * closes, for example after a submit or a stop, the owner does not wait for a result. Then the task has no text
+    * about `submit` and tells the model that its text is the reply to the person. In the live session 8b418720, the
+    * person typed two requests after a stop, and the model ended both turns with a submit that reached nobody.
     *
     * The preamble of such a session has `submit(value: String)`, and the task does not show the preamble. So the rule
     * names the String and gives an example call that compiles. In two live runs, a rule with no call made the model
     * write `submit: 42` as the text of its reply. Then each turn ended in `Replied`, and the work never ended.
     */
-  def taskOf(session: SessionId, config: SessionConfig, scope: Path, shell: String, project: String = ""): String =
+  def taskOf(
+      session: SessionId,
+      config : SessionConfig,
+      scope  : Path,
+      shell  : String,
+      project: String  = "",
+      owes   : Boolean = true
+  ): String =
     if session == Controller.id then Controller.task(scope)
     else
       (config.owner, config.goal) match
         case (Owner.Session(_), Some(goal)) =>
-          s"${chatTask(scope, shell, project)}\n\nThe goal of the session: $goal\n\nAnother session started this session, and it " +
-            "gets a report at the end of each turn. When you complete the work, write a cell that calls submit with " +
-            "the result as one String, for example submit(\"The file has 42 lines.\"). A reply with no cell does " +
-            "not give the result to the other session."
+          val owner =
+            if owes then
+              "Another session started this session, and it gets a report at the end of each turn. When you complete " +
+                "the work, write a cell that calls submit with the result as one String, for example " +
+                "submit(\"The file has 42 lines.\"). A reply with no cell does not give the result to the other session."
+            else
+              "Another session started this session. It does not wait for a result now, so this turn gives it no " +
+                "report. A step with no code ends the turn, and its text is the reply to the person."
+          s"${chatTask(scope, shell, project)}\n\nThe goal of the session: $goal\n\n$owner"
         case _ => chatTask(scope, shell, project)
 
   /** The configuration of a session that `caller`, with the configuration `parent`, starts with `goal` in `scope` (8.2,

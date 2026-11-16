@@ -2,7 +2,7 @@ package dspy4s.harness
 
 import dspy4s.core.contracts.{DspyError, DynamicValues, LmUsage, ParseError, RuntimeContext}
 import dspy4s.core.runtime.{UsageScope, UsageTracker}
-import dspy4s.harness.kernel.{CellOutcome, Command, Position, Source}
+import dspy4s.harness.kernel.{CellOutcome, Command, Logged, Position, Source}
 import dspy4s.harness.repl.{CellRun, ScalaRepl, lostNames, topLevelNames}
 import dspy4s.programs.strategies.Predict
 import zio.blocks.schema.DynamicValue
@@ -12,21 +12,22 @@ import zio.blocks.schema.json.Json
   *
   *   - `callPolicy` updates the derived data of `strategy`, projects the log of `journal` into the budget of `limits`,
   *     spends one call of the budget that `budget` gives (the budget of the program call, or of the turn of a work
-  *     session), and calls `policy` with the task and the API reference. A spent budget fails the call with a plain
+  *     session), and calls `policy` with the task and the API reference. The task is `task` of the same log, so the
+  *     task of a work session can change with the debt of a report (8.6). A spent budget fails the call with a plain
   *     error, so the turn ends `Failed` (8.2). The status says when a step is the last one, and the code of a step that
-  *     must answer does not run. The call has the adapter of the context in a `PolicyAdapter`, so a reply with no
-  *     text field gets a step from the rules of `PolicyAdapter.values`, with no second model call. A code in one outer
-  *     ``` fence is the code in the fence (`unfenced`), so `Acted` and the history hold no fence. A code that is
-  *     empty, `null` or `None` is no code, because the chat adapter keeps the text of an empty field (9). The error of
-  *     a reply that did not parse has the start of the reply (`failure`). The trace of the call goes to the
-  *     `RuntimeContext`, so an optimizer sees it. The call of `policy` runs through `runner`, so a work session can
-  *     cut it (10.3). After the update, `zooms` gets the reader `strategy.zoom` of the new derived data, so `zoom` of a
-  *     cell reads it (7.1). After the projection, `progress` gets its size and the budget, so a client shows them
-  *     (10.6). With `drafts`, the call streams: each model call of the policy writes its draft there while it runs,
-  *     and the draft goes away at the end of the call (CLI_SCREEN.md, 13). The stream is a preview, so the step is the
-  *     same as with no `drafts`. Each call has the options of the model of the session in the state of the journal, so
-  *     a `ModelChanged` of this activation applies to the next call (CLI_SCREEN.md, 14.4). At the end of the call,
-  *     `progress` gets the prompt and completion tokens of its last model call, when the reply had a usage.
+  *     must answer does not run. The call has the adapter of the context in a `PolicyAdapter`, so a reply with no text
+  *     field gets a step from the rules of `PolicyAdapter.values`, with no second model call. A code in one outer ```
+  *     fence is the code in the fence (`unfenced`), so `Acted` and the history hold no fence. A code that is empty,
+  *     `null` or `None` is no code, because the chat adapter keeps the text of an empty field (9). The error of a reply
+  *     that did not parse has the start of the reply (`failure`). The trace of the call goes to the `RuntimeContext`,
+  *     so an optimizer sees it. The call of `policy` runs through `runner`, so a work session can cut it (10.3). After
+  *     the update, `zooms` gets the reader `strategy.zoom` of the new derived data, so `zoom` of a cell reads it (7.1).
+  *     After the projection, `progress` gets its size and the budget, so a client shows them (10.6). With `drafts`, the
+  *     call streams: each model call of the policy writes its draft there while it runs, and the draft goes away at the
+  *     end of the call (CLI_SCREEN.md, 13). The stream is a preview, so the step is the same as with no `drafts`. Each
+  *     call has the options of the model of the session in the state of the journal, so a `ModelChanged` of this
+  *     activation applies to the next call (CLI_SCREEN.md, 14.4). At the end of the call, `progress` gets the prompt
+  *     and completion tokens of its last model call, when the reply had a usage.
   *   - `runCell` starts the calls of the cell in `recorder`, takes the snapshot of the store, and runs the code in the
   *     current REPL. The writes of the store go into the result only when the cell completes. The output in the journal
   *     is `CellRun.text`, the text that the MCP server also shows (6): the hints of a compile error, and a note of a
@@ -47,7 +48,7 @@ import zio.blocks.schema.json.Json
   * new REPL cannot start, its exception goes on to the caller.
   */
 final class HarnessEffects(
-    task     : String,
+    task     : Vector[Logged] => String,
     reference: String,
     policy   : Predict[PolicyInput, PolicyStep],
     strategy : ContextStrategy,
@@ -78,7 +79,7 @@ final class HarnessEffects(
       zooms.setReader(ref => strategy.zoom(data, ref))
       val view = strategy.project(log, data, limits.budget)
       progress.projected(view.size, limits.budget)
-      val input   = PolicyInput(task, reference, view.memory, view.status, view.observation, view.history)
+      val input   = PolicyInput(task(log), reference, view.memory, view.status, view.observation, view.history)
       val number  = drafts.map(d => d -> d.begin())
       val context = number.fold(policyContext)((d, n) => PolicyStream.around(policyContext, d, n))
       // The model of the session now: a `ModelChanged` of this activation changes the next call (CLI_SCREEN.md, 14).

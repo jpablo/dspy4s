@@ -92,7 +92,8 @@ A cell of the controller that starts a scratch session:
 
 The new session gets a random UUID as its id, and the owner `the session controller`. Its mode gives `Files^`,
 `Shell^`, `Llm^` and `Store^`, with no network and no `Sessions`, so it cannot start sessions. It uses the model of
-the controller. Its task tells it to end the work with a cell that calls `submit("...")` with the result as a text.
+the controller. While the controller waits for a result, its task tells it to end the work with a cell that calls
+`submit("...")` with the result as a text. After the work ends, its task asks for a reply to the person.
 
 A list of the other sessions, a message, and a probe:
 
@@ -125,6 +126,8 @@ that session. A new session starts again from an empty folder.
   gives one report, until the work ends. This rule also applies to a turn that your message starts.
 - The work ends at a turn that ends with `submit`, or at a turn that used all its steps. It also ends at a stop, and at
   the end of the session. A turn that ends with a reply does not end the work, because the reply can hold a question.
+- The task of the session uses the same rule. While the controller waits for a report, the task asks for
+  `submit`. After the work ends, the task asks for a reply to the person, and the turn gives no report.
 - A report that the controller did not get comes when the controller opens again. The controller gets each report one
   time.
 - After 8 turns in a row that no message of the person started, a message from another sender waits in the journal.
