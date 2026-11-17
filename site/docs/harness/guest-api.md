@@ -166,7 +166,8 @@ cell that ends by `submit` defines no name.
 
 | Limit | Value | What happens |
 |---|---|---|
-| The time of a cell | 30 s | The clock counts the compile and the guest code. It stops during each guest API call. At the limit, the cell stops with `The cell stopped after 30000 ms.` |
+| The time of the guest code of a cell | 30 s | The clock counts the compile and the guest code. It stops during each guest API call. At the limit, the cell stops with `The cell stopped after 30000 ms.` |
+| The wall time of a cell | 15 min | The clock counts all the time of the cell, also each guest API call. At the limit, the cell stops, and a command that runs stops too. The output tells the model to start long work as a job with `spawn`, and to wait for it with `waitJob` in later cells. `--cell-wall-minutes N` sets the limit, and `0` turns it off. |
 | The cells of one REPL | 300 | The harness starts a new REPL with the preamble, the store and the note of lost names. |
 | The guest API calls of one cell | 10,000 | Each later call of the cell fails at once, and the error tells the model to do more work in each call. A refused call does not stop the clock of the cell, so the timeout still applies. |
 | The echo of a `val` | 400 characters | The echo gets the note `[The echo of this value has N more characters. Print the value, or a part of it, to see them.]`. The text of `println` stays whole. |

@@ -83,8 +83,19 @@ class StateLaws extends ScalaCheckSuite:
     assertEquals(codec.decode(codec.encode(now)), Right(now))
     // A fact with the same value as a default would go out of the text, and a later default would then change it.
     val text = codec.encodeToString(now)
-    Vector("cellMillis", "callsPerCell", "summaryCalls", "backend", "secretNames", "env")
+    Vector("cellMillis", "cellWallMillis", "callsPerCell", "summaryCalls", "backend", "secretNames", "env")
       .foreach(field => assert(text.contains(s"\"$field\""), s"$field is not in $text"))
+  }
+
+  test("Journal codec: the facts that 2af446a0 wrote, with no wall limit of a cell, decode with none") {
+    // The text of the facts of an activation before the wall limit (D1): the user's journals hold such entries.
+    val before = """{"limits":{"cellMillis":30000,"callsPerCell":10000,"cellsPerRepl":300,"commandSeconds":600,""" +
+      """"observationChars":4000,"memoryChars":40000,"modelCalls":60,"summaryCalls":0,"batch":4,"depth":2},""" +
+      """"sandbox":{"backend":"seatbelt","secretPaths":["/home/u/.ssh"],"secretNames":[".env"],"env":["PATH"]}}"""
+    val facts = Schema[HostFacts].jsonCodec.decode(before)
+    assertEquals(facts.map(_.limits.cellWallMillis), Right(None))
+    assertEquals(facts.map(_.sandbox.hosts), Right(Vector.empty[String]))
+    assertEquals(facts.map(_.limits.summaryCalls), Right(0))
   }
 
   test("Settings: the mode, the limits and the sandbox in words") {
@@ -105,7 +116,12 @@ class StateLaws extends ScalaCheckSuite:
       "no capability"
     )
     val limits = limitLines(Fixtures.hostFacts.limits).toMap
-    assertEquals(limits("time of a cell"), "30 s")
+    assertEquals(limits("time of the guest code of a cell"), "30 s")
+    assertEquals(limits("wall time of a cell"), "15 min")
+    val wall = (millis: Option[Long]) =>
+      limitLines(Fixtures.hostFacts.limits.copy(cellWallMillis = millis)).toMap.apply("wall time of a cell")
+    assertEquals(wall(Some(90_000L)), "90 s")
+    assertEquals(wall(None), "none")
     assertEquals(limits("guest API calls of a cell"), "10,000")
     assertEquals(limits("summary calls of a turn"), "64")
     assertEquals(

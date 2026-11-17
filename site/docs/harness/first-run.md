@@ -108,7 +108,7 @@ secret variable (for example a name with `KEY` or `TOKEN`) in the journal and th
 ## The arguments
 
 ```text
-dspy4s-harness [--root DIR] [--session ID | --controller] [--script] [--no-memory-calls] [FOLDER]
+dspy4s-harness [--root DIR] [--session ID | --controller] [--script] [--no-memory-calls] [--cell-wall-minutes N] [FOLDER]
 dspy4s-harness [--root DIR] --list
 dspy4s-harness [--root DIR] --inspect [--port N]
 ```
@@ -124,6 +124,7 @@ dspy4s-harness [--root DIR] --inspect [--port N]
 | `--port N` | The port of the inspector. `0` takes a free port. | `7411` |
 | `--script` | Reads plain lines from the standard input. Each line waits for the end of the turn before it. | off |
 | `--no-memory-calls` | The memory makes no `compress` or `merge` call. Each message of the memory shows its first 512 bytes. | the calls run |
+| `--cell-wall-minutes N` | The wall time of one cell in minutes, with its guest API calls. `0` gives no limit. Long work goes in a job (`spawn` and `waitJob`). | `15` |
 
 `--session` and `--controller` do not go together. `--port` needs `--inspect`, and `--inspect` takes only `--root`
 and `--port`. An unknown flag, for example `--help`, prints the usage, and the client ends with the exit code 2.

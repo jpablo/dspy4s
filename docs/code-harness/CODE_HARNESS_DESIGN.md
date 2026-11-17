@@ -1099,6 +1099,15 @@ the journal does not hold it. A function that `Classified.map` runs can leak a b
 - **The clock of a cell.** The timeout counts only the time of guest code, as in atc. It stops during a guest API
   call, and each call has its own limit: `timeoutSeconds` for `exec`, `maxSeconds` for `waitJob`, and the budget and
   the depth limit for `rlm`.
+- **The wall time of a cell** (D1, decided on 2026-11-16). The limits of the calls have no sum, so a loop of slow
+  calls ran for hours, for example 20 calls of `exec("sleep 590")`. A second clock counts all the time of the cell,
+  also its guest API calls: `HarnessLimits.cellWallTime`, 15 minutes by default. At the limit, the cell stops as at
+  the timeout, with `TimedOut`, and the interrupt also stops a command that runs. The output tells the model to start
+  long work as a job with `spawn` and to wait for it with `waitJob` in later cells. The client flag
+  `--cell-wall-minutes N` sets it, and `0` gives no wall limit. The facts of each activation hold it
+  (`Limits.cellWallMillis`), so `/config` shows it. Long tasks of hours or days use many short cells, jobs and the
+  sessions of `start`, so this limit does not stop them. A cell that waits for `rlm` children longer than the limit
+  stops.
 - **A second try in two parts.** The capture checker can reject a cell that defines a type and uses a capability. The
   error says "is not included in the allowed capture set of the enclosing object". The same code compiles when the
   type definitions come first. So after this error, the host parses the cell, and it compiles the type definitions and

@@ -207,7 +207,7 @@ the last 1000 lines, and the client masks each known secret in a line before it 
 | `Mode` | the capabilities of the session. The controller also shows the most that a session that it starts can get. |
 | `Guard` | each rule with its verdict, for example `Ask: start with kind starting with "Directory"` |
 | `Grants` | each grant of `/allow` that is active, with its lifetime |
-| `Limits` | the steps of a turn, the model calls of a turn, the time of a cell, the guest API calls of a cell, the memory, and more |
+| `Limits` | the steps of a turn, the model calls of a turn, the two time limits of a cell, the guest API calls of a cell, the memory, and more |
 | `Sandbox` | the network, the backend, the closed paths, the closed names, and the variables that a command gets |
 | `Files` | the root, the journal and the exchange file of the session |
 
@@ -218,7 +218,8 @@ Limits
   steps of a turn: 10
   turns with no person: 8
   model calls of a turn: 60
-  time of a cell: 30 s
+  time of the guest code of a cell: 30 s
+  wall time of a cell: 15 min
   guest API calls of a cell: 10,000
   characters of the memory: 40,000
   summary calls of a turn: 64

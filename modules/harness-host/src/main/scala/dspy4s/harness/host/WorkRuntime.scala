@@ -198,6 +198,7 @@ final class WorkRuntime(
             handlers,
             config.preamble,
             limits.cellTimeout,
+            limits.cellWallTime,
             limits.cellLimit,
             limits.callsPerCell,
             stops = () => journal.state.stopping

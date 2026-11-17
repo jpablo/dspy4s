@@ -55,9 +55,10 @@ import scala.util.control.NonFatal
   * (`WorkEnv.summaryOptions`), and `{}` sends no option. Each HTTP exchange with the model endpoint goes to the
   * exchange file of the session (`ExchangeFile`), with the mask of the client, and `DSPY_EXCHANGES=off` turns the file
   * off. `--no-memory-calls` gives the host the limits `cli.limits`, with no summary call of the memory tree, so a
-  * person can compare the cost of a session with and without the memory calls. `--script` runs the loop in the script
-  * mode, so a script or an agent can drive the session. `--list` prints `listText` and starts no session. `--session`
-  * takes an id or the start of an id (`resolveSession`).
+  * person can compare the cost of a session with and without the memory calls. `--cell-wall-minutes` sets the wall
+  * limit of a cell in the same limits. `--script` runs the loop in the script mode, so a script or an agent can drive
+  * the session. `--list` prints `listText` and starts no session. `--session` takes an id or the start of an id
+  * (`resolveSession`).
   *
   * The file `<home>/.dspy4s/harness/.env` can give each of these variables (`EnvFile`). A variable of the process wins
   * over the file, apart from the base URL and the key, which come both from the file or both from the process. A line

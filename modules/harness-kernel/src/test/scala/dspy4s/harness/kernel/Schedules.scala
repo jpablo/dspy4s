@@ -439,6 +439,7 @@ object Fixtures:
   val hostFacts: HostFacts = HostFacts(
     Limits(
       cellMillis = 30_000L,
+      cellWallMillis = Some(900_000L),
       callsPerCell = 10_000,
       cellsPerRepl = 300,
       commandSeconds = 600,

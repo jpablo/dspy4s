@@ -18,6 +18,7 @@ class ConfigLaws extends munit.FunSuite:
   private val facts = HostFacts(
     Limits(
       cellMillis = 30_000L,
+      cellWallMillis = Some(900_000L),
       callsPerCell = 10_000,
       cellsPerRepl = 300,
       commandSeconds = 600,
@@ -83,7 +84,8 @@ class ConfigLaws extends munit.FunSuite:
       s"  for this session: ${callText(start)}",
       "  steps of a turn: 10",
       "  turns with no person: 8",
-      "  time of a cell: 30 s",
+      "  time of the guest code of a cell: 30 s",
+      "  wall time of a cell: 15 min",
       "  guest API calls of a cell: 10,000",
       "  summary calls of a turn: 64",
       "  backend: Seatbelt",

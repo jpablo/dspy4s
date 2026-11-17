@@ -6,7 +6,7 @@ import dotty.tools.dotc.reporting.Diagnostic
 import dotty.tools.dotc.util.SourceFile
 import dotty.tools.repl.{HarnessDriver, Newline, ParseResult, Parsed, State, SyntaxErrors}
 import dspy4s.harness.guest.*
-import dspy4s.harness.kernel.CellOutcome
+import dspy4s.harness.kernel.{CellOutcome, timeWords}
 import zio.blocks.chunk.Chunk
 import zio.blocks.schema.json.Json
 
@@ -63,16 +63,20 @@ final case class CellRun(output: String, outcome: CellOutcome):
   * new REPL. A compile error that shows the effect of the defect (`showsArrayDefect`) also sets it, but only after an
   * earlier cell of `run`.
   *
-  * Each guest API call goes through a gate: the clock of the cell stops during a call, and after `submit` or after
-  * `callLimit` calls the gate refuses each later call of the cell. An interrupt of the thread of `run` stops the cell
-  * with the stop flag and an interrupt of the cell thread, waits for the cell as at a timeout, and then goes on to the
-  * caller. A cell that the capture checker rejects for the capture set of the enclosing object gets a second try in two
-  * parts: the type definitions first, then the rest.
+  * Each guest API call goes through a gate: the clock of the guest code stops during a call, and after `submit` or
+  * after `callLimit` calls the gate refuses each later call of the cell. A second clock, the wall clock, counts the
+  * whole cell with its calls, so a loop of slow calls also stops (`cellWallTimeout`). An interrupt of the thread of
+  * `run` stops the cell with the stop flag and an interrupt of the cell thread, waits for the cell as at a timeout, and
+  * then goes on to the caller. A cell that the capture checker rejects for the capture set of the enclosing object gets
+  * a second try in two parts: the type definitions first, then the rest.
   *
   * @param preamble
   *   the preamble of the session (5.1): its types, `submit` and its inputs
   * @param cellTimeout
   *   the time of the guest code of one cell, with its compile and with no guest API call
+  * @param cellWallTimeout
+  *   the wall time of one cell, with its compile and its guest API calls. At the limit, the REPL stops the cell as at
+  *   `cellTimeout`, and the output gets a hint about jobs. None gives no wall limit.
   * @param cellLimit
   *   the number of cells after which the REPL is full, and the host starts a new one (protection 5 of Phase 0)
   * @param callLimit
@@ -85,14 +89,15 @@ final case class CellRun(output: String, outcome: CellOutcome):
   *   cell, which `stopCell` does not see, also ends the cell. A REPL with no host gives false.
   */
 final class ScalaRepl(
-    mode       : Mode,
-    bindings   : Bindings,
-    preamble   : String         = "",
-    cellTimeout: FiniteDuration = 30.seconds,
-    cellLimit  : Int            = 300,
-    callLimit  : Int            = 10000,
-    secondTry  : Boolean        = true,
-    stops      : () => Boolean  = () => false
+    mode           : Mode,
+    bindings       : Bindings,
+    preamble       : String                 = "",
+    cellTimeout    : FiniteDuration         = 30.seconds,
+    cellWallTimeout: Option[FiniteDuration] = Some(15.minutes),
+    cellLimit      : Int                    = 300,
+    callLimit      : Int                    = 10000,
+    secondTry      : Boolean                = true,
+    stops          : () => Boolean          = () => false
 ) extends AutoCloseable:
   import ScalaRepl.*
 
@@ -246,10 +251,13 @@ final class ScalaRepl(
     val started = System.nanoTime()
     // The clock of the cell counts only the guest code: the gate takes out the time of the guest API calls.
     def guestNanos = System.nanoTime() - started - gate.callNanos
+    // The wall clock counts the guest API calls too, so a loop of slow calls also stops (D1).
+    def wallSpent = cellWallTimeout.exists(limit => System.nanoTime() - started >= limit.toNanos)
     try
       try
-        while thread.isAlive && guestNanos < cellTimeout.toNanos && !memoryStop && !hostStop && !stops() do
-          thread.join(10)
+        while
+          thread.isAlive && guestNanos < cellTimeout.toNanos && !wallSpent && !memoryStop && !hostStop && !stops()
+        do thread.join(10)
       catch
         case interrupt: InterruptedException =>
           // The caller of `run` stops, for example at the end of a program call (9). The stop flag does not reach host
@@ -259,7 +267,11 @@ final class ScalaRepl(
       if memoryStop then stoppedForMemory(thread, before)
       else if hostStop || stops() then
         CellRun(stop(thread, before), CellOutcome.Failed("the host stopped the cell, because the turn stops"))
-      else if thread.isAlive then timedOut(thread, before)
+      else if thread.isAlive then
+        // The guest limit comes first, so the wall limit applies only to a cell with guest time left.
+        cellWallTimeout match
+          case Some(wall) if guestNanos < cellTimeout.toNanos => wallTimedOut(thread, before, wall)
+          case _                                              => timedOut(thread, before)
       else
         result.get() match
           case Left(t) =>
@@ -294,6 +306,11 @@ final class ScalaRepl(
 
   private def timedOut(thread: Thread, before: State): CellRun =
     CellRun(stop(thread, before), CellOutcome.TimedOut(cellTimeout.toMillis))
+
+  /** Stops a cell at its wall limit `wall`, as `timedOut` does, and adds the hint of `wallHint` to the output. */
+  private def wallTimedOut(thread: Thread, before: State, wall: FiniteDuration): CellRun =
+    val output = Vector(stop(thread, before), wallHint(wall.toMillis)).filter(_.nonEmpty).mkString("\n")
+    CellRun(output, CellOutcome.TimedOut(wall.toMillis))
 
   private def stoppedForMemory(thread: Thread, before: State): CellRun =
     CellRun(
@@ -414,6 +431,11 @@ object ScalaRepl:
     else
       val start = lines.lastIndexWhere(l => !isFrame(l), last).max(0)
       lines.take(start).mkString("\n").stripTrailing()
+
+  /** The hint of a cell that the wall limit stopped (D1). The wall time counts the guest API calls too. */
+  private def wallHint(millis: Long): String =
+    s"Hint: The cell used its wall time of ${timeWords(millis)}, with its guest API calls, so the host stopped it. " +
+      "Long work needs a job: start it with spawn, and wait for it with waitJob in later cells."
 
   /** True for a frame line of a trace that the REPL prints: `at ...`, `... 35 elided`, or `... 3 more`. */
   private def isFrame(line: String): Boolean =

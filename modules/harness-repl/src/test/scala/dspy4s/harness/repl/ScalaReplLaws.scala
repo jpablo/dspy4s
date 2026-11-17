@@ -535,6 +535,42 @@ class ScalaReplLaws extends munit.FunSuite:
     finally r.close()
   }
 
+  test("Cell clock: the wall limit counts the guest API calls too, so a loop of slow calls stops (D1)") {
+    // The clock of the guest code stops during each call, so a loop of slow calls had no end (D1, 2026-11-16).
+    val files = FakeFiles(delayMillis = 300L)
+    val r     = ScalaRepl(
+      readFiles,
+      Bindings(FakeTurn(), files = Some(files)),
+      cellTimeout = 30.seconds,
+      cellWallTimeout = Some(1.second)
+    )
+    try
+      val started = System.nanoTime()
+      val loop    = r.run("""(1 to 40).foreach(i => read(s"$i.txt")); println("FAKE-END")""")
+      val seconds = (System.nanoTime() - started) / 1e9
+      assertEquals(loop.outcome, CellOutcome.TimedOut(1000L), loop.toString)
+      assert(!loop.output.contains("FAKE-END"), loop.output)
+      // The model gets the cause and the way to do long work.
+      Vector("wall time", "spawn", "waitJob").foreach(word => assert(loop.output.contains(word), loop.output))
+      assert(seconds < 8, s"the cell took $seconds s")
+      assert(files.reads.size < 40, files.reads.size.toString)
+      assertEquals(r.run("println(1 + 1)").output, "2")
+    finally r.close()
+  }
+
+  test("Cell clock: with no wall limit, a loop of slow calls runs to its end, as before") {
+    val r = ScalaRepl(
+      readFiles,
+      Bindings(FakeTurn(), files = Some(FakeFiles(delayMillis = 100L))),
+      cellTimeout = 2.seconds,
+      cellWallTimeout = None
+    )
+    try
+      val loop = r.run("""(1 to 30).foreach(i => read(s"$i.txt")); println("FAKE-END")""")
+      assertEquals((loop.outcome, loop.output), (CellOutcome.Ok, "FAKE-END"), loop.toString)
+    finally r.close()
+  }
+
   // The parallel executor interrupts the thread of a program call, and that thread waits in `run` (9).
   test(
     "Cell clock: an interrupt of the thread that runs a cell stops the cell, so the cell does not outlive the caller"

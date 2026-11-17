@@ -54,19 +54,23 @@ object HarnessEnv:
   *   After them, a node gets the line of its source, and a later turn builds it again.
   * @param callsPerCell
   *   the guest API calls of one cell. After them, each later call of the cell fails at once (`ScalaRepl`).
+  * @param cellWallTime
+  *   the wall-clock limit of one cell, with its guest API calls (`ScalaRepl`). `cellTimeout` counts only the guest
+  *   code, so a loop of slow calls has no other end. None gives no wall limit.
   */
 final case class HarnessLimits(
-    steps         : Int            = 10,
-    budget        : Int            = 40_000,
-    cellTimeout   : FiniteDuration = 30.seconds,
-    execTimeout   : Int            = 600,
-    maxObservation: Int            = 4_000,
-    cellLimit     : Int            = 300,
-    modelCalls    : Int            = 60,
-    depth         : Int            = 2,
-    batch         : Int            = 4,
-    summaryCalls  : Int            = 64,
-    callsPerCell  : Int            = 10_000
+    steps         : Int                    = 10,
+    budget        : Int                    = 40_000,
+    cellTimeout   : FiniteDuration         = 30.seconds,
+    execTimeout   : Int                    = 600,
+    maxObservation: Int                    = 4_000,
+    cellLimit     : Int                    = 300,
+    modelCalls    : Int                    = 60,
+    depth         : Int                    = 2,
+    batch         : Int                    = 4,
+    summaryCalls  : Int                    = 64,
+    callsPerCell  : Int                    = 10_000,
+    cellWallTime  : Option[FiniteDuration] = Some(15.minutes)
 ) derives CanEqual:
 
   /** These limits, the backend `backend`, the hosts `hosts` and the secrets of the home folder `home` as the facts of
@@ -77,6 +81,7 @@ final case class HarnessLimits(
     HostFacts(
       Limits(
         cellMillis = cellTimeout.toMillis,
+        cellWallMillis = cellWallTime.map(_.toMillis),
         callsPerCell = callsPerCell,
         cellsPerRepl = cellLimit,
         commandSeconds = execTimeout,

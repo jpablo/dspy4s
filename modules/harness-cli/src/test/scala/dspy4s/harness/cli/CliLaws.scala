@@ -13,6 +13,7 @@ import java.nio.charset.StandardCharsets.UTF_8
 import java.nio.file.{Files, Path}
 import java.util.concurrent.atomic.AtomicReference
 import java.util.concurrent.{ConcurrentLinkedQueue, CountDownLatch, TimeUnit}
+import scala.concurrent.duration.*
 import scala.jdk.CollectionConverters.*
 import scala.jdk.OptionConverters.*
 
@@ -79,6 +80,24 @@ class CliLaws extends munit.FunSuite:
     assertEquals(CliArgs.parse(Vector("--script", "/fake/other"), home, cwd).map(_.script), Right(true))
     assertEquals(CliArgs.parse(Vector.empty, home, cwd).map(_.script), Right(false))
     assert(CliArgs.usage.contains("--script"), CliArgs.usage)
+  }
+
+  test("CLI: parse reads --cell-wall-minutes, 15 by default, and 0 gives no wall limit of a cell (D1)") {
+    def wall(args: String*) = CliArgs.parse(args.toVector, home, cwd).map(_.limits.cellWallTime)
+    assertEquals(wall(), Right(Some(15.minutes)))
+    assertEquals(wall("--cell-wall-minutes", "120"), Right(Some(120.minutes)))
+    assertEquals(wall("--cell-wall-minutes", "0"), Right(None))
+    assertEquals(
+      CliArgs.parse(Vector("--no-memory-calls", "--cell-wall-minutes", "30"), home, cwd).map(_.limits),
+      Right(HarnessLimits(summaryCalls = 0, cellWallTime = Some(30.minutes)))
+    )
+    Vector(
+      Vector("--cell-wall-minutes"),
+      Vector("--cell-wall-minutes", "-1"),
+      Vector("--cell-wall-minutes", "fake"),
+      Vector("--inspect", "--cell-wall-minutes", "5")
+    ).foreach(args => assert(CliArgs.parse(args, home, cwd).isLeft, args.toString))
+    assert(CliArgs.usage.contains("--cell-wall-minutes"), CliArgs.usage)
   }
 
   test("CLI: parse reads --no-memory-calls, which is off by default, and its limits give no summary call") {

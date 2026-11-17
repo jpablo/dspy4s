@@ -70,7 +70,10 @@ final case class HostFacts(limits: Limits, sandbox: SandboxFacts) derives Schema
 /** The limits of the harness for an activation (`HarnessLimits`).
   *
   * @param cellMillis
-  *   the time limit of a cell. The clock stops during each guest API call.
+  *   the time limit of the guest code of a cell. The clock stops during each guest API call.
+  * @param cellWallMillis
+  *   the wall-clock limit of a cell, with its guest API calls. None means no wall limit. An activation of an older host
+  *   has none, because that host had no wall limit.
   * @param callsPerCell
   *   the guest API calls of one cell. Each later call of the cell fails.
   * @param cellsPerRepl
@@ -92,6 +95,7 @@ final case class HostFacts(limits: Limits, sandbox: SandboxFacts) derives Schema
   */
 final case class Limits(
     cellMillis      : Long,
+    cellWallMillis  : Option[Long],
     callsPerCell    : Int,
     cellsPerRepl    : Int,
     commandSeconds  : Int,

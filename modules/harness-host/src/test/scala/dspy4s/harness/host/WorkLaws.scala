@@ -14,6 +14,7 @@ import zio.blocks.schema.json.Json
 
 import java.nio.file.{Files, Path}
 import java.util.concurrent.{ConcurrentLinkedQueue, CountDownLatch, TimeUnit}
+import scala.concurrent.duration.*
 import scala.jdk.CollectionConverters.*
 
 /** The laws of a work session (CODE_HARNESS_DESIGN.md, 8.1, 5.5 and 10.3): a host with a `WorkRuntime`, a real REPL,
@@ -432,6 +433,7 @@ class WorkLaws extends munit.FunSuite:
         withHost(root, Models.withModel(model)(WorkRuntime.forWork(env, limits))) { host =>
           val first = facts(opened(host, id(1), Some(config)))
           assertEquals(first.limits.cellMillis, limits.cellTimeout.toMillis)
+          assertEquals(first.limits.cellWallMillis, limits.cellWallTime.map(_.toMillis))
           assertEquals(first.limits.callsPerCell, limits.callsPerCell)
           assertEquals(first.limits.summaryCalls, limits.summaryCalls)
           assertEquals(first.limits.memoryChars, limits.budget)
@@ -448,6 +450,24 @@ class WorkLaws extends munit.FunSuite:
         }
       }
     finally place.close()
+  }
+
+  test("Work: the wall limit of a cell comes from the limits of the host, and it stops a command that runs (D1)") {
+    sandboxed()
+    val model = sessionModel(
+      policy("sleep", Some("""println(exec("sleep 30; echo FAKE-LATE"))""")),
+      policy("FAKE-DONE", None)
+    )
+    work(model, settings = limits.copy(cellWallTime = Some(2.seconds))) { (_, handle) =>
+      val started = System.nanoTime()
+      assertEquals(handle.send(message("m1")), Right(()))
+      assert(eventually(60)(outcomes(handle).size == 1), entries(handle).toString)
+      val seconds  = (System.nanoTime() - started) / 1e9
+      val observed = entries(handle).collect { case Entry.Observed(output, outcome, _) => (outcome, output) }
+      assert(observed.exists(_._1 == CellOutcome.TimedOut(2000L)), observed.toString)
+      assert(!outputs(handle).exists(_.contains("FAKE-LATE")), outputs(handle).toString)
+      assert(seconds < 20, s"the turn took $seconds s")
+    }
   }
 
   test("Work: the limit of the guest API calls of a cell comes from the limits of the host") {
