@@ -842,6 +842,11 @@ private final class OpenSession private (
     * the jobs stop, the writer ends, the lock goes, and a reopen in this host can go on. After it, a commit starts no
     * worker.
     *
+    * The end is a crash for the open turn (4.4). Before the activation closes, the end fences its ticket, and also the
+    * ticket of an activation that starts now. So the worker commits nothing after the end starts, also when the close
+    * makes a call of the worker fail. The turn stays open, and the next `Activate` repairs it with
+    * `TurnEnded(Crashed)`. The end of a job has no ticket, so it reaches the journal before the writer ends (10.3).
+    *
     * Each step runs, also on a thread with an interrupt: a step starts with no interrupt flag, and an error or an
     * interrupt of a step does not stop the steps after it. After the last step, the thread gets its interrupt again.
     */
@@ -850,6 +855,8 @@ private final class OpenSession private (
       if endedFlag then None
       else
         endedFlag = true
+        // The fence comes before each close, so no commit that a close causes reaches the journal.
+        (activation.map(_._1) ++ pendingTicket).foreach(writer.fence)
         val live = activation.map(_._2)
         val part = openPart
         activation = None
@@ -968,28 +975,31 @@ private final class OpenSession private (
   private def runWorker(n: Long, fresh: Boolean): Unit =
     var clean = false
     try
-      val (ticket, live) = if fresh then newActivation() else guard.synchronized(activation.get)
-      try
-        drive(WriterJournal(writer, ticket), live.effects): Unit
-        clean = true
-      catch
-        case NonFatal(e) if !writer.isFenced(ticket) && !writer.ended =>
-          // The turn stays open after an exception of the effects. The repair closes it as after a crash (4.4).
-          guard.synchronized { activation = activation.filterNot(_._1 == ticket) }
-          Try(live.close()): Unit
-          writer.run(Command.Abort(s"the turn failed: $e"), Source.Harness): Unit
-          writer.run(Command.Commit(repair(writer.state)), Source.Harness): Unit
-          clean = true
-        case NonFatal(_) => clean = true
+      // After the end starts, the worker gets no activation, and it commits nothing (`shutdown`).
+      val taken = if fresh then newActivation() else guard.synchronized(activation)
+      taken.foreach { (ticket, live) =>
+        try drive(WriterJournal(writer, ticket), live.effects): Unit
+        catch
+          case NonFatal(e) if !writer.isFenced(ticket) && !writer.ended =>
+            // The turn stays open after an exception of the effects. The repair closes it as after a crash (4.4).
+            guard.synchronized { activation = activation.filterNot(_._1 == ticket) }
+            Try(live.close()): Unit
+            writer.run(Command.Abort(s"the turn failed: $e"), Source.Harness): Unit
+            writer.run(Command.Commit(repair(writer.state)), Source.Harness): Unit
+          case NonFatal(_) => ()
+      }
+      clean = true
     catch
       case NonFatal(e) =>
-        // No activation: the open turn ends with the failure, so the session does not wait for ever.
-        val reason = s"the activation failed: $e"
-        writer.run(Command.Abort(reason), Source.Harness): Unit
-        writer.run(
-          Command.Commit(closing(writer.state) :+ Entry.TurnEnded(TurnOutcome.Failed(reason))),
-          Source.Harness
-        ): Unit
+        // No activation: the open turn ends with the failure, so the session does not wait for ever. After the end
+        // starts, the worker commits nothing, because the end can be the cause of the failure (`shutdown`).
+        if !endedFlag then
+          val reason = s"the activation failed: $e"
+          writer.run(Command.Abort(reason), Source.Harness): Unit
+          writer.run(
+            Command.Commit(closing(writer.state) :+ Entry.TurnEnded(TurnOutcome.Failed(reason))),
+            Source.Harness
+          ): Unit
         clean = true
     finally
       guard.synchronized {
@@ -999,32 +1009,39 @@ private final class OpenSession private (
           if clean && live && next(writer.state) != Next.Wait then ensureWorker()
       }
 
-  /** A new activation with a new ticket. The last activation closes. */
-  private def newActivation(): (WorkerTicket, Activation) =
-    val (ticket, old) = guard.synchronized {
-      tickets += 1
-      val made = WorkerTicket(tickets)
-      pendingTicket = Some(made)
-      val old = activation.map(_._2)
-      activation = None
-      (made, old)
+  /** A new activation with a new ticket, or none after the end starts (`shutdown`). The last activation closes. */
+  private def newActivation(): Option[(WorkerTicket, Activation)] =
+    val start = guard.synchronized {
+      // After the end starts, no ticket and no REPL start, so `shutdown` sees each ticket that it must fence.
+      if endedFlag then None
+      else
+        tickets += 1
+        val made = WorkerTicket(tickets)
+        pendingTicket = Some(made)
+        val old = activation.map(_._2)
+        activation = None
+        Some((made, old))
     }
-    old.foreach(o => Try(o.close()): Unit)
-    var started = false
-    try
-      val made  = place.runtime.activate(id, writer.state.config, WriterJournal(writer, ticket), jobs)
-      val taken = guard.synchronized {
-        pendingTicket = None
-        // A shutdown while the REPL started: this activation closes at once.
-        if endedFlag then false
+    start.flatMap { (ticket, old) =>
+      old.foreach(o => Try(o.close()): Unit)
+      var started = false
+      try
+        val made  = place.runtime.activate(id, writer.state.config, WriterJournal(writer, ticket), jobs)
+        val taken = guard.synchronized {
+          pendingTicket = None
+          // An end while the REPL started fenced the ticket: this activation closes at once, and it runs no turn.
+          if endedFlag then false
+          else
+            activation = Some((ticket, made))
+            true
+        }
+        started = true
+        if taken then Some((ticket, made))
         else
-          activation = Some((ticket, made))
-          true
-      }
-      started = true
-      if !taken then Try(made.close()): Unit
-      (ticket, made)
-    finally if !started then guard.synchronized { pendingTicket = None }
+          Try(made.close()): Unit
+          None
+      finally if !started then guard.synchronized { pendingTicket = None }
+    }
 
   /** Puts the row of the session into the catalog when its status, its ledger or its loop changes, and at the first
     * commit of this open (8.7). It gives the entries that the row did not have.

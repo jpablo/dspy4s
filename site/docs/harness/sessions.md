@@ -174,9 +174,9 @@ The loop ends in one of these ways. The client shows the end, for example
 | `restarted` | The host started again. The permission to go on is live, so type `/goal on` again after a restart. |
 
 After the end, the limit of the host applies again: 8 turns, or the value of `--unattended-turns`. The end of a loop
-starts no turn by itself. When a message waits at the end, for example the goal message after a restart, it waits for
-you. The client prints `A message waits for you.` with the end of the loop, and `/status` shows the same notice. Your
-next message, a grant, or `/goal on` starts the turn that reads it.
+starts no turn by itself. When a message waits at the end, for example a message that came during the last turn, it
+waits for you. `/status` shows the notice `A message waits for you.` with the end of the loop. Your next message, a
+grant, or `/goal on` starts the turn that reads it.
 
 **A loop in the controller.** The controller has no goal, so `/goal on N` in the controller only changes its limit
 of turns. Then the reports of many sessions can start turns of the controller. The controller can also give turns of

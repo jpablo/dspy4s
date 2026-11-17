@@ -1631,7 +1631,9 @@ the end holds nothing, and the limit of the activation applies to the next messa
 
 The live runs and the random runs of 2026-11-17 gave these rules. A `/quit` during a turn of a loop ended the turn as
 failed, and the check that came after it failed at once and sent a goal message. Without the hold of `afterLoop`, the
-restart started a turn for that message, with no permission. A loop of N below 8 held a message, and `/goal off` then
+restart started a turn for that message, with no permission. Now the host fences the worker before it closes the
+activation (10.2), so a `/quit` leaves the turn open, and the reopen ends it `Crashed` with no goal message. The hold
+of `afterLoop` stays for each other message that waits at the end of a loop. A loop of N below 8 held a message, and `/goal off` then
 freed it with no turn. A message that waits with no hold starts no check, so `StartLoop` with no open turn starts the
 turn of each message that the new limit frees. And a `Grant` of the person with no pending call frees a held message,
 because `held` reads `personWaits`, so that grant starts the turn of the message too.
@@ -1669,6 +1671,10 @@ of an owned session says that the owner gets its report at the end of the loop.
   committed `TurnEnded(Crashed)`, `GoalLoopEnded(Restarted)` and `Activated`, and no turn started in 45 s. `/status`
   showed the notice of the message that waited. `/goal on 3` started the turn of that message, and the loop ended
   with `Limit` after 3 turns.
+- After the fence of 10.2, a goal of 40 numbers with `/goal on 30`, then `/quit` during the policy call of step 2 of
+  the third turn. The journal ends with that `StepStarted`, with no entry of the worker after the close. The reopen
+  committed `TurnEnded(Crashed)`, `GoalLoopEnded(Restarted)` and `Activated`, and no turn started in 20 s. `/status`
+  gave the end of the loop, and no message waited.
 
 ### 8.6 Messages between sessions
 
@@ -2135,6 +2141,13 @@ Pekko host stays possible.
   flag after its put, so a message after the last drain also fails. So a call after the end gets an error, and it does
   not wait for ever.
 - **A failed write.** It ends this session only. Each caller that waits gets the error, and the other sessions go on.
+- **The close of a session by the host.** `LocalHost.close` and `/quit` are a crash for the open turn. Before the
+  activation closes, the host fences its ticket, and also the ticket of an activation that starts. An activation that
+  starts after that runs no turn, and a start that fails after it commits nothing. So the worker commits nothing after
+  the close starts, also when the close makes a call of the policy fail. The turn stays open, and the next `Activate`
+  ends it `Crashed` (4.4). The end of a job has no ticket, so it still reaches the journal before the writer ends
+  (10.3). A live run of 2026-11-17 gave this rule: a `/quit` during a turn of a goal loop ended the turn as failed,
+  and the loop went on during the close.
 - **The folder of the scope.** `open` with a configuration refuses a `Home`, `Directory` or `Worktree` scope whose
   path is not an existing folder. `OpenFailed` names the path. The check comes before the lock and the file, so a
   refused open makes no journal. The harness makes the folder of a `Scratch` or a `Fork` scope, so these have no

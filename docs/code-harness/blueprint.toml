@@ -3235,7 +3235,7 @@ ref = "10.2"
 spec = true
 uses = ["session-host", "session-runtime", "secrets", "host-limits", "catalog", "timers", "session-handle", "catalog-row", "host-error", "session-config", "session-id", "peers", "git-scopes", "scopes", "host-hooks", "release-item", "release-step", "scope-state", "release-plans", "session-outcome", "scope", "command", "source", "session-state", "logged", "layout"]
 proof_uses = ["writer", "writer-journal", "session-file", "feeds", "drive", "next", "job-table", "catalog-row-fold", "rebuilt", "catalog", "report-pass", "release-plan", "irreversible", "ledger-fold", "memory-tree", "file-lines", "controller", "state", "job-status-words", "job-name"]
-text = "One writer and one file for each session, with an exclusive lock for a second host. open repairs an open turn, keeps the configuration of the journal with None, and refuses a mode above the ceiling. Each activation gets a new ticket and its WriterJournal. After StopRequested, Activation.stop, and a timer calls Writer.expire with the turn of the stop. The catalog gets the row after a turn ends. An open of a session whose release moved its Scratch folder to the archive moves the folder back before the Activate (7.9, 2026-11-16)."
+text = "One writer and one file for each session, with an exclusive lock for a second host. open repairs an open turn, keeps the configuration of the journal with None, and refuses a mode above the ceiling. Each activation gets a new ticket and its WriterJournal. After StopRequested, Activation.stop, and a timer calls Writer.expire with the turn of the stop. The catalog gets the row after a turn ends. An open of a session whose release moved its Scratch folder to the archive moves the folder back before the Activate (7.9, 2026-11-16). The close of a session fences the ticket of its activation, and of an activation that starts, before the activation closes. So the worker commits nothing after the close starts, and the reopen ends the open turn Crashed (2026-11-17)."
 
 [[node]]
 id = "job-status-words"
@@ -5183,7 +5183,24 @@ kind = "law"
 name = "Goal host:"
 ref = "8.5"
 uses = ["local-host", "host-sessions", "catalog-row"]
-text = "A session with a loop and a goal goes on for more than 8 turns with no message of the person, and its loop ends as met. A restart of the host ends the loop. start refuses a loop above the turns left, and /goal off in the controller ends the loop of each session that got turns from it. The card gives the loop."
+text = "A session with a loop and a goal goes on for more than 8 turns with no message of the person, and its loop ends as met. A restart of the host ends the loop. start refuses a loop above the turns left, and /goal off in the controller ends the loop of each session that got turns from it. The card gives the loop. A close of the host during a loop turn commits no goal check and no goal message."
+
+[[group]]
+id = "close-laws"
+phase = "p9"
+module = "harness-host"
+file = "CloseLaws.scala"
+where = "tests"
+title = "The laws of the close of a session by the host"
+
+[[node]]
+id = "law-host-close"
+group = "close-laws"
+kind = "law"
+name = "Host close:"
+ref = "10.2"
+uses = ["local-host"]
+text = "A close of the host while the activation of a turn starts runs no step on that activation, and a start that fails after the close starts does not end the turn Failed. The reopen ends the turn Crashed."
 
 [[group]]
 id = "goal-cli-laws"

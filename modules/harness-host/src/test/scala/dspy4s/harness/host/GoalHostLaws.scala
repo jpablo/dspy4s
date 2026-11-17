@@ -1,7 +1,8 @@
 package dspy4s.harness.host
 
 import dspy4s.core.runtime.RuntimeEnvironment
-import dspy4s.harness.{GoalLeaf, HarnessLimits, Place, RequestLm, Secrets, Support}
+import dspy4s.harness.{CellResult, GoalLeaf, HarnessLimits, Journal, Place, PolicyReply, RequestLm, Secrets, Support}
+import dspy4s.harness.TurnEffects
 import dspy4s.harness.Models.policy
 import dspy4s.harness.kernel.*
 import dspy4s.harness.host.HostSupport.*
@@ -147,6 +148,58 @@ class GoalHostLaws extends munit.FunSuite:
     finally
       release.countDown()
       place.close()
+  }
+
+  test("Goal host: a close of the host during a loop turn commits no goal check and no goal message") {
+    // The close of a REPL takes time, and it makes the call of the policy fail. During that time, the worker of the
+    // closing activation must commit nothing. Else the failed call ends the turn, the check fails at once, and a goal
+    // message comes before the writer ends. The reopen then repairs the turn of that message.
+    def isCheck(entry: Entry): Boolean =
+      entry match
+        case Entry.GoalChecked(_) => true
+        case _                    => false
+    def isGoalMessage(entry: Entry): Boolean =
+      entry match
+        case Entry.Input(request, _, _) => request.value.startsWith("goal:")
+        case _                          => false
+    def slowClose(closing: CountDownLatch): SessionRuntime =
+      new SessionRuntime:
+        def activate(session: SessionId, config: SessionConfig, journal: Journal, jobs: JobTable): Activation =
+          val _ = (session, config, jobs)
+          new Activation:
+            val effects: TurnEffects = new TurnEffects:
+              def callPolicy(mustAnswer: Boolean): Either[String, PolicyReply] =
+                val _ = mustAnswer
+                closing.await(60, TimeUnit.SECONDS): Unit
+                Left("FAKE-CLOSED")
+              def runCell(cell: Long, code: String): CellResult =
+                val _ = (cell, code)
+                Support.done
+            def stop(): Unit     = ()
+            def unclean: Boolean = false
+            def close(): Unit    =
+              closing.countDown()
+              // A worker that commits during the close commits a second check in this time.
+              eventually(3)(journal.log.count(l => isCheck(l.entry)) > 1): Unit
+    withRoot { root =>
+      val goal = config().copy(goal = Some("FAKE-GOAL"))
+      withHost(root, slowClose(CountDownLatch(1))) { host =>
+        val session = opened(host, id(1), Some(goal))
+        session.run(Command.StartLoop(5)).left.foreach(e => fail(e.toString))
+        // The first check fails (this runtime has no goal leaf), so a goal message starts a turn, and its call waits.
+        assert(eventually()(entries(session).contains(Entry.StepStarted(0))), entries(session).toString)
+      }
+      val open = CountDownLatch(0)
+      withHost(root, slowClose(open)) { host =>
+        val session = opened(host, id(1), None)
+        val log     = entries(session)
+        assertEquals(log.count(isCheck), 1, log.toString)
+        assertEquals(log.count(isGoalMessage), 1, log.toString)
+        // The close of the host is a crash for the turn: the reopen ends it, and no turn starts.
+        assertEquals(outcomes(session), Vector(TurnOutcome.Crashed), log.toString)
+        assertEquals(session.state.loopEnd, Some(LoopEnd.Restarted))
+      }
+    }
   }
 
   test("Goal host: loopFault refuses a negative loop and a loop above the turns left") {
