@@ -141,9 +141,17 @@ private def rawText(logged: Logged, reasoning: ReasoningView): Option[String] =
     case Entry.Granted(_, rule, lifetime)                             => Some(s"Allowed ${lifetime.words}: ${callText(rule)}.")
     case Entry.Ended(outcome, reason)                                 => Some(outcome.report(reason))
     case Entry.ModelChanged(model)                                    => Some(changedText(model))
+    case Entry.GoalChanged(goal)                                      => Some(s"The goal of the session: $goal")
+    case Entry.GoalLoopStarted(limit)                                 => Some(loopStartText(limit))
+    case Entry.GoalLoopEnded(why)                                     => Some(why.report)
     case Entry.Input(_, text, _) if logged.meta.source != Source.User =>
       Some(s"[${sourceWords(logged.meta.source)}] $text")
     case _ => None
+
+/** The line of the start of a goal loop with the limit `limit` (8.5). The terminal shows no line for each check. */
+private[cli] def loopStartText(limit: Int): String =
+  s"The goal loop starts: the session goes on by itself until its goal is met, at most $limit turns with no person. " +
+    "/goal off ends it."
 
 /** The sender of a message in words, for example `the session s9` for `Child(s9)`. */
 private[cli] def sourceWords(source: Source): String =

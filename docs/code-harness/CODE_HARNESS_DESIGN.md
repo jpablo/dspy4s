@@ -410,7 +410,7 @@ TurnEnded(Aborted)
 | One journal | One commit writes to one journal. |
 | Input | Two `Send` commands with one request id give one `Input`. |
 | Report | After the report pass of 8.6, each `TurnEnded` or `Ended` that needs a report has exactly one `Input` in the journal of an open owner. |
-| Rest | With no open turn, no input waits. |
+| Rest | With no open turn, no input waits, apart from a message that the limit of the unattended turns holds (8.7, 8.5). |
 | Grant | A `Once` grant covers one call. A `Turn` grant ends at the next `TurnEnded`. A `Session` grant stays after its turn, and an `Activated` ends it and keeps the other grants. No grant stays after `Ended`, and a journal fork starts with no grants. A repeat of a `Grant` commits nothing. |
 | Pending call | A pending call has no active grant that covers it. `TurnStarted` and `Ended` empty `pending`, and a journal fork starts with no pending calls. A session with no person never gets a pending call. |
 | Guard | `verdict` is a homomorphism from `Guard` to `Verdict`. A grant changes only `Ask`, and more grants never make a result stronger. |
@@ -425,6 +425,11 @@ TurnEnded(Aborted)
 | Form | Only `Data` reads the form of `Data`. The host reads the value of `submit` with `Data[O]`. |
 | Shape | A type that a preamble defines from `shape` reads each value of the first type, and it writes the same `Json`. |
 | Inputs | `inputs` is the fold of the `values` of the `Input` entries. A repeat adds nothing, a fork keeps them, and the store does not hold them. |
+| Loop | Only `StartLoop` from the person and `Begin` with a loop start a loop, and N is 1 or more. While a loop is on, its N is the limit of the unattended turns, and the turns that the session gave count. `Activate` ends a loop with `Restarted`. The end of a loop starts no turn: a message that waits then waits for the person. `StartLoop` starts the turn of a message that it frees. A stop of the person ends a loop with `Stopped`, a stop of the harness keeps it, and no loop stays after `Ended`. A journal fork starts with no loop. |
+| Goal check | `next` gives `CheckGoal` only with a loop, a goal, no open turn, no pending call and no turn that can start, and once after each `TurnEnded`. A check with "not met" gives one goal message, which starts a turn, or one end. A check after the end of its loop commits nothing. |
+| Blocked | The count of the blocker is the number of checks in a row with a blocker, from the first new one. At 3 the loop ends with `Blocked`. |
+| Loop report | While a loop is on, a `TurnEnded` gives no report, and each `GoalLoopEnded` of a session with an owner session gives exactly one. |
+| Pool | A loop that a session gives has at most the turns that its own loop has left. `loopChildren` gives each session that got turns from the current loop. |
 | Log | No part of the harness changes or removes an entry. |
 
 ## 5. Authority
@@ -1561,6 +1566,110 @@ after a restart. After a turn, the `goal` leaf answers "is the goal met now?". O
 with `Source.Harness`, and this starts a turn. A goal is "blocked" after three turns with the same blocker. The check
 does not run while `pending` has a pending call, so a session that waits for a person uses no LM calls.
 
+The user made the choices below on 2026-11-17. A long task, for example a code review of two hours with many
+sessions or a proof in Lean of some days, uses short cells, jobs and sessions. The loop lets such a session go on
+with no message of the person.
+
+**The loop.** `/goal on [N]` of a client sends `StartLoop(N)`, and the kernel commits `GoalLoopStarted(N)`. Only the
+person (`Source.User`) starts a loop, apart from `start` with a loop (below). N must be 1 or more, and it has no
+maximum. With no number, N is `SessionState.LoopTurns` (50). A new `/goal on` starts the loop again with its N. The
+loop does two things:
+
+- It changes the limit of the unattended turns of 8.7 from the limit of the activation (`SessionConfig.unattendedLimit`:
+  8, or the value of `--unattended-turns`) to N for this session. The count starts at 0 with the loop. A message or a
+  grant of the person sets it to 0 again, as before.
+- On a session with a goal, it turns on the goal check. A session with no goal, for example the controller, gets
+  only the new limit. So the reports of its sessions and the messages of its jobs go on to start turns.
+
+`/goal set TEXT` sends `ChangeGoal(TEXT)`, and the kernel commits `GoalChanged(TEXT)`. The fold puts the goal in the
+configuration, as it does with `ModelChanged`, so a reopen keeps the goal. It works on each open session. `/goal off`
+sends `StopLoop`, and a bare `/goal` shows the state of the loop.
+
+**The check.** While the loop is on, `next` gives `Next.CheckGoal` after each `TurnEnded`, also after a failed turn,
+and once at the start of a loop with no open turn. It needs a goal, no open turn, no pending call, and no turn that
+can start. So a session that waits for a person uses no LM calls. The worker asks the `goal` leaf, one `Predict`
+call:
+
+```scala
+final case class GoalQuestion(goal: String, turn: String, lastBlocker: String)
+final case class GoalAnswer(met: Boolean, reason: String, blocker: String, same: Boolean)
+```
+
+`turn` is the text of the last turn (`turnText`): its first message, the text and the code of each step, the output
+of each cell, and the outcome. A long text keeps its end, up to a budget. `lastBlocker` is the blocker of the last
+check, or an empty text. The worker sends the answer as `RecordGoalCheck(GoalCheck(...))`, and the kernel commits
+`GoalChecked`. A check that fails gives the answer "not met", with the error as the reason and as the blocker. The
+blocker of the last failed check gives `same`. A check that comes after the end of its loop commits nothing.
+
+**The goal message.** After a `GoalChecked` with `met = false`, the kernel commits an `Input` from `Source.Harness`,
+and it starts a turn. The kernel writes the text (`goalText`): the goal, the reason of the leaf, the blocker if any,
+and "Go on with the work." The request id holds the `seq` of the `GoalChecked`. The goal message opens no debt of
+8.6.
+
+**The same blocker.** The leaf answers `same` against the last blocker. The fold counts the checks in a row with a
+blocker: a new blocker sets the count to 1, `same = true` adds 1, and no blocker sets it to 0. At 3 the loop ends.
+
+**The end.** The loop ends with the entry `GoalLoopEnded(end)`. After the end, the limit of the activation applies
+again.
+
+| End | When |
+|---|---|
+| `Met(reason)` | A check says that the goal is met. |
+| `Blocked(blocker)` | Three checks in a row have the same blocker. |
+| `Limit` | The count of the unattended turns is at N after a turn, and the goal is not met. A session with no goal ends the loop with the `TurnEnded` of that turn. |
+| `Off` | `/goal off`, or the end of the loop of the owner (below). |
+| `Stopped` | A stop of the person: `/stop`, `/stopall` or Ctrl-C. It ends the loop also with no open turn. |
+| `Restarted` | An `Activate`. A restart takes the permission back, as it does with a `Session` grant. |
+
+`Ended` also ends a loop, with no `GoalLoopEnded`. A stop or a failure of the harness does not end the loop. The
+leaf sees the failure, and three failures with the same blocker end the loop as blocked.
+
+The end of a loop starts no turn by itself. When a message waits at a `GoalLoopEnded`, `held` holds it and each later
+message, apart from a message of the person, until a turn or a new loop starts (`afterLoop`). So a goal message or a
+message of a job that waits starts its turn when the person writes or types `/goal on`. With no message that waits,
+the end holds nothing, and the limit of the activation applies to the next messages.
+
+The live runs and the random runs of 2026-11-17 gave these rules. A `/quit` during a turn of a loop ended the turn as
+failed, and the check that came after it failed at once and sent a goal message. Without the hold of `afterLoop`, the
+restart started a turn for that message, with no permission. A loop of N below 8 held a message, and `/goal off` then
+freed it with no turn. A message that waits with no hold starts no check, so `StartLoop` with no open turn starts the
+turn of each message that the new limit frees. And a `Grant` of the person with no pending call frees a held message,
+because `held` reads `personWaits`, so that grant starts the turn of the message too.
+
+**The owner.** While the loop is on, a `TurnEnded` gives no report to an owner session. Each `GoalLoopEnded` gives
+one report with the end and the outcome of the last turn, also when no debt is open. An `Ended` while the loop is on
+gives its report too. Outside the loop, the rules of 8.6 hold. The controller reads the progress of a loop with
+`list`, `zoom` or `observe`.
+
+**A loop from a pool.** The controller can give a loop to a session that it starts:
+`start(goal, scope, strategy, loop = k)`. The k turns come from the turns that the loop of the controller has left:
+N, minus the count of its unattended turns, minus the turns that it gave (`loopLeft`). The `start` effect holds k in
+its arguments, and the fold of the controller adds k after the outcome of the effect. The handler refuses a k above
+the turns left. A k of 0 starts no loop. A message of the person to the controller sets the turns that it gave to 0,
+so the pool is full again. `Begin` with k commits `GoalLoopStarted(k)` after `Activated`, in the same commit.
+
+`/goal off` and a stop of the person in the controller also end the loop of each session that got turns from that
+loop (`loopChildren`). The host sends `StopLoop` to each one, one commit for each journal. A limit or a met goal of
+the controller does not end those loops. Each sender can end a loop, because the end only takes authority away.
+
+**What the person sees.** `/status` and a bare `/goal` give the goal, on or off, the turns used of N, the last
+check, and the count of the blocker of 3. `/config` gives the goal and the limit N, or `off`. The card of a session
+(`SessionCard.loop`, from `loopWords`) gives `on 12/50` while the loop is on. Else it gives the last end (`met`,
+`blocked`, `limit`, `off`, `stopped` or `restarted`), or `off` for a session with no loop. The terminal shows the
+start and the end of a loop, and no line for each check. The goal message shows as a message of the harness.
+
+The task of a session with a goal gives the goal, also on a session of the person. While the loop is on, the task
+of an owned session says that the owner gets its report at the end of the loop.
+
+**The live runs of 2026-11-17** (model `gpt-6.1-terra`, a work session of the person):
+
+- A goal that needs one number in each of 12 turns, with `/goal on 20`. The first check ran at once, and the loop ran
+  12 turns with no message of the person: 12 goal messages, 13 checks, and the end `Met`.
+- A goal of 40 turns with `/goal on 30`, then `/quit` during the fifth turn and `--session` again. The new host
+  committed `TurnEnded(Crashed)`, `GoalLoopEnded(Restarted)` and `Activated`, and no turn started in 45 s. `/status`
+  showed the notice of the message that waited. `/goal on 3` started the turn of that message, and the loop ended
+  with `Limit` after 3 turns.
+
 ### 8.6 Messages between sessions
 
 One commit writes to one journal (4.1). So a message between two sessions is two commits, and a crash can occur
@@ -1715,12 +1824,15 @@ problems. Each one held against the code. These choices were made with the user:
   that waits. `waitsForPerson` is true while the limit holds a message with no open turn. Then the client prints
   a notice after the message, and `/status` shows the notice and the count of the turns. `/config` and the
   inspector show the limit. The client prints the notice one time for each wait: after the first message that
-  waits after the last turn, also in the replay of `/open`.
+  waits after the last turn, also in the replay of `/open`. The goal loop of 8.5 changes the limit to its N for one
+  session, until the loop ends.
 - `tell` gives the controller the same fact (decided on 2026-11-17). It returns a `Delivery`, which the handler
   reads from the state that the commit of the receiver gives (`HostSessions.deliveryOf`):
   `WaitsForPerson(turns, limit)` when `waitsForPerson` holds, else `InTurn`. Before, `tell` returned `Unit`, so
   the model of the controller did not know that its message waited. The turn of the goal of `start` counts as a
-  turn with no person, so a session at the limit 1 holds the next message of the controller.
+  turn with no person, so a session at the limit 1 holds the next message of the controller. While a goal loop is
+  on, `turns` and `limit` are the turns of the loop and its N. After the end of a loop, a message can wait below
+  the limit (`afterLoop`), and with no limit, `limit` is `turns`.
 - The authority of the controller stays narrow in phase 9. The person ends a session in a client, so
   [CODE_HARNESS.md](CODE_HARNESS.md), 7.9 changes. The person makes the commits of a worktree, because its `.git`
   stays read-only in the sandbox (F7). So the rows of 7.9 for a merged branch apply to the commits of the person.

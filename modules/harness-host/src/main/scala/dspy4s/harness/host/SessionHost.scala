@@ -5,7 +5,7 @@ import dspy4s.harness.{Budget, Draft, Harness, Journal, MemoryTree, Secrets, Tur
 import dspy4s.harness.guest.{JobStatus, Mode, Scope}
 import dspy4s.harness.kernel.{Command, EffectId, Entry, Logged, Next, Position, ReleaseItem, ReleaseStep, RequestId}
 import dspy4s.harness.kernel.{JobEnd, JobSelector, Owner, Rejection, ReleasePlans, ReleaseResult, ScopeState}
-import dspy4s.harness.kernel.{HostFacts, irreversible, releasePlan}
+import dspy4s.harness.kernel.{HostFacts, LoopEnd, irreversible, loopChildren, releasePlan}
 import dspy4s.harness.sandbox.Layout
 import dspy4s.harness.kernel.{
   SessionConfig, SessionId, SessionOutcome, SessionState, Source, TurnOutcome, closing, next
@@ -93,14 +93,16 @@ trait Peers:
   def open(id: SessionId, config: Option[SessionConfig]): Either[HostError, SessionHandle]
 
   /** Opens the new session `id` with `config`, and commits `Begin` with its task `task` with the source `source`: its
-    * `Activated` and its task in one commit (8.6). It gives the state after that commit. An id with a journal gives
-    * `Rejected(NotNew)`, so a second `start` never activates a session again.
+    * `Activated` and its task in one commit (8.6). With `loop` above 0, the commit also starts a goal loop of `loop`
+    * turns (8.5). It gives the state after that commit. An id with a journal gives `Rejected(NotNew)`, so a second
+    * `start` never activates a session again.
     */
   def openWith(
       id    : SessionId,
       config: SessionConfig,
       task  : Command.Send,
-      source: Source
+      source: Source,
+      loop  : Int
   ): Either[HostError, SessionState]
 
   /** Runs `command` in the session `id` with the source `source`, and waits for its commit. A session of the catalog
@@ -135,10 +137,10 @@ object Peers:
 
   /** A host with no other session: each call gives an error. A runtime with no host, as in phase 7, uses it. */
   val none: Peers = new Peers:
-    private val error                                                                      = "this runtime has no host of sessions"
-    def rows: Vector[CatalogRow]                                                           = Vector.empty
-    def open(id: SessionId, config: Option[SessionConfig])                                 = Left(HostError.OpenFailed(error))
-    def openWith(id: SessionId, config: SessionConfig, task: Command.Send, source: Source) =
+    private val error                                                                                 = "this runtime has no host of sessions"
+    def rows: Vector[CatalogRow]                                                                      = Vector.empty
+    def open(id: SessionId, config: Option[SessionConfig])                                            = Left(HostError.OpenFailed(error))
+    def openWith(id: SessionId, config: SessionConfig, task: Command.Send, source: Source, loop: Int) =
       Left(HostError.OpenFailed(error))
     def runAs(id    : SessionId, command: Command, source: Source)          = Left(HostError.OpenFailed(error))
     def journalOf(id: SessionId): Either[String, Vector[Logged]]            = Left(error)
@@ -260,7 +262,10 @@ trait Activation extends AutoCloseable:
   *   - After each `TurnEnded` in a git folder, the host commits `ScopeRecorded` with the snapshot of `scopes`, on one
   *     ordered thread for each session. A snapshot that a newer `TurnEnded` makes old does not commit. The controller,
   *     whose scope is `Home`, gets no snapshot.
-  *   - The row of a session goes to the catalog when its status or its ledger changes.
+  *   - The row of a session goes to the catalog when its status, its ledger or its goal loop changes.
+  *   - After a `GoalLoopEnded(Off)` or `GoalLoopEnded(Stopped)` of a session, the reporter thread sends `StopLoop` to
+  *     each session that got turns from that loop and is open in this host (`loopChildren`, 8.5), one commit for each
+  *     journal, with the source of the owner. A session that is not open has no loop: a restart ended it.
   *   - `release` ends a session with its release plan. A later open of a session whose release moved its `Scratch`
   *     folder to the archive moves the folder back before the `Activate` (7.9).
   */
@@ -285,11 +290,12 @@ final class LocalHost private (
   // The runtime gets the host, and the host gets the runtime, so the runtime comes at its first use.
   private lazy val runtime: SessionRuntime = runtimeOf(this)
 
-  // The live reports (8.7): each session whose turn or session ended, with its owner. The writers put them here, and
-  // the reporter thread takes them. A put never waits, so the thread of a writer never waits for a report. The reporter
+  // The live reports (8.7): for each session whose turn or session ended, the report to its owner. The writers put them
+  // here, and the reporter thread takes them. The end of the loops of the sessions of a loop that ended (8.5) comes here
+  // too. A put never waits, so the thread of a writer never waits for a report. The reporter
   // takes the lock of the host for a short time, so it is a platform thread: on Java 21, a virtual thread that waits
   // for a lock holds its carrier thread.
-  private val due                   = LinkedBlockingQueue[(SessionId, SessionId)]()
+  private val due                   = LinkedBlockingQueue[() => Unit]()
   @volatile private var stopReports = false
   private val reporter              = Thread.ofPlatform().name("harness-reporter").daemon(true).start(() => reportLoop())
 
@@ -323,7 +329,7 @@ final class LocalHost private (
 
   def rows: Vector[CatalogRow] = list
 
-  def openWith(id: SessionId, config: SessionConfig, task: Command.Send, source: Source)
+  def openWith(id: SessionId, config: SessionConfig, task: Command.Send, source: Source, loop: Int)
       : Either[HostError, SessionState] =
     if !SessionId.valid(id.value) then Left(HostError.Refused(s"${id.value} is not the id of a session"))
     else
@@ -331,7 +337,7 @@ final class LocalHost private (
         if sessions.contains(id) || JFiles.exists(SessionFile.pathOf(root, id)) then
           Left(HostError.Rejected(Rejection.NotNew))
         else
-          OpenSession.start(id, Some(config), place, Some((task, source))).map { session =>
+          OpenSession.start(id, Some(config), place, Some((task, source, loop))).map { session =>
             sessions.update(id, session)
             session.state
           }
@@ -421,7 +427,8 @@ final class LocalHost private (
       catalog,
       timers,
       scopes,
-      (child, owner) => due.offer((child, owner)): Unit
+      (child, owner) => due.offer(() => liveReport(child, owner)): Unit,
+      (owner, children) => due.offer(() => endLoops(owner, children)): Unit
     )
 
   /** True when `path` is inside the folder of a session that is open in this host and can write there. The controller
@@ -490,8 +497,8 @@ final class LocalHost private (
   private def reportLoop(): Unit =
     try
       while !stopReports do
-        val (child, owner) = due.take()
-        try liveReport(child, owner)
+        val task = due.take()
+        try task()
         catch case NonFatal(_) => ()
     catch case _: InterruptedException => ()
 
@@ -505,6 +512,16 @@ final class LocalHost private (
         hooks.beforeReport(from, report)
         target.tryPost(report, Source.Child(from))
       }: Unit
+    }
+
+  /** Sends `StopLoop` to each session of `children` that is open in this host, with the source of `owner`, and waits
+    * for each commit (8.5). A session that is not open has no loop. A failure of one session does not stop the others.
+    */
+  private def endLoops(owner: SessionId, children: Vector[SessionId]): Unit =
+    children.foreach { child =>
+      synchronized(sessions.get(child)).filter(_.live).foreach { session =>
+        Try(session.runAs(Command.StopLoop, Controller.messageSource(owner))): Unit
+      }
     }
 
   /** The release plan of `plans` for the session `id` and `outcome`, with the state of its scope, and with no effect:
@@ -867,9 +884,11 @@ private final class OpenSession private (
     val _ = error
     shutdown()
 
-  /** Commits the `Begin` of a new session with its task `task` from `source` (8.7): one commit. */
-  private def begin(config: SessionConfig, task: Command.Send, source: Source): Either[HostError, Unit] =
-    writer.run(Command.Begin(Harness.versions, withFacts(config), task.request, task.text), source).map(_ => ())
+  /** Commits the `Begin` of a new session with its task `task` from `source` (8.7): one commit, with a goal loop of
+    * `loop` turns when `loop` is above 0 (8.5).
+    */
+  private def begin(config: SessionConfig, task: Command.Send, source: Source, loop: Int): Either[HostError, Unit] =
+    writer.run(Command.Begin(Harness.versions, withFacts(config), task.request, task.text, loop), source).map(_ => ())
 
   /** Commits the `Activate` of this open. */
   private def activate(config: SessionConfig): Either[HostError, Unit] =
@@ -906,6 +925,11 @@ private final class OpenSession private (
         val ends = added.exists(_.entry match
           case Entry.Ended(_, _) => true
           case _                 => false)
+        // The end of a loop by the person also ends the loops that it gave (8.5).
+        val loopOff = added.exists(_.entry match
+          case Entry.GoalLoopEnded(LoopEnd.Off | LoopEnd.Stopped) => true
+          case _                                                  => false)
+        if loopOff then place.endLoops(id, loopChildren(writer.log))
         // A report is due after a `TurnEnded` or an `Ended` of a session whose owner is a session (8.6).
         if turnEnds || ends then
           s.config.owner match
@@ -1002,13 +1026,14 @@ private final class OpenSession private (
       (ticket, made)
     finally if !started then guard.synchronized { pendingTicket = None }
 
-  /** Puts the row of the session into the catalog when its status or its ledger changes, and at the first commit of
-    * this open (8.7). It gives the entries that the row did not have.
+  /** Puts the row of the session into the catalog when its status, its ledger or its loop changes, and at the first
+    * commit of this open (8.7). It gives the entries that the row did not have.
     */
   private def putRow(): Vector[Logged] =
     val fresh = writer.log.reverseIterator.takeWhile(_.seq > row._1.lastSeq).toVector.reverse
     val next  = fresh.foldLeft(row)(catalogRow(id).step)
-    if !putOnce || next._1.status != row._1.status || next._1.ledger != row._1.ledger then
+    if !putOnce || next._1.status != row._1.status || next._1.ledger != row._1.ledger || next._1.loop != row._1.loop
+    then
       putOnce = true
       // A failed write of the catalog never ends a session: the next rebuild corrects the row.
       place.catalog.put(next._1): Unit
@@ -1077,15 +1102,16 @@ private object OpenSession:
 
   /** What each open session of a host shares. */
   final case class Place(
-      root   : Path,
-      runtime: SessionRuntime,
-      secrets: Secrets,
-      limits : HostLimits,
-      clock  : () => Long,
-      catalog: Catalog,
-      timers : Timers,
-      scopes : Scopes,
-      report : (SessionId, SessionId) => Unit // the put of a live report: the session and its owner (8.7)
+      root    : Path,
+      runtime : SessionRuntime,
+      secrets : Secrets,
+      limits  : HostLimits,
+      clock   : () => Long,
+      catalog : Catalog,
+      timers  : Timers,
+      scopes  : Scopes,
+      report  : (SessionId, SessionId) => Unit,        // the put of a live report: the session and its owner (8.7)
+      endLoops: (SessionId, Vector[SessionId]) => Unit // the end of the loops that a session gave (8.5)
   )
 
   /** The most characters of the output of a job in its message. */
@@ -1100,7 +1126,7 @@ private object OpenSession:
       id    : SessionId,
       config: Option[SessionConfig],
       place : Place,
-      first : Option[(Command.Send, Source)] = None
+      first : Option[(Command.Send, Source, Int)] = None
   ): Either[HostError, OpenSession] =
     val path = SessionFile.pathOf(place.root, id)
     if config.isEmpty && !JFiles.exists(path) then Left(HostError.OpenFailed("a new session needs a configuration"))
@@ -1122,7 +1148,7 @@ private object OpenSession:
                        session.close()
                        e
                      }
-                _ <- first.fold(session.activate(setting))(session.begin(setting, _, _)).left.map { e =>
+                _ <- first.fold(session.activate(setting))(session.begin(setting, _, _, _)).left.map { e =>
                        session.close()
                        e
                      }

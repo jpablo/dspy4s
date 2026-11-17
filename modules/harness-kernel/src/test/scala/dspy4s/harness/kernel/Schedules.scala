@@ -205,12 +205,13 @@ object Schedules:
       ended
 
   private def simulate(random: Random, losses: Boolean): Run =
+    // Half of the sessions have a goal, so a goal loop can check it (8.5).
     val config = Fixtures.config(
       kind = if random.nextBoolean() then TurnKind.Chat else TurnKind.Program,
       steps = 1 + random.nextInt(3),
       owner = owners(random.nextInt(owners.size)),
       guard = overlapping
-    )
+    ).copy(goal = Option.when(random.nextBoolean())("the goal"))
     var host = Host(Vector.empty, 0, Vector.empty)
     host.send(Command.Activate(versions, config))
     var table         = JobTableModel()
@@ -305,7 +306,12 @@ object Schedules:
             if pendingStarts.nonEmpty then () // the `spawn` of this cell has not returned yet
             else if effectsLeft > 0 then call(cell, spawn = random.nextInt(4) == 0)
             else endCell(cell)
-          case Next.End(outcome) => host.send(Command.Commit(closing(host.live) :+ Entry.TurnEnded(outcome)))
+          case Next.End(outcome)          => host.send(Command.Commit(closing(host.live) :+ Entry.TurnEnded(outcome)))
+          case Next.CheckGoal(_, blocker) =>
+            // The answer of the goal leaf: met at times, with a blocker that is at times the last one (8.5).
+            val now = Vector("", "a", "a", "a", "b")(random.nextInt(5))
+            val met = random.nextInt(4) == 0
+            host.send(Command.RecordGoalCheck(GoalCheck(met, "why", now, same = now.nonEmpty && now == blocker)))
 
     def grant(): Unit =
       val before                                = host.live
@@ -341,7 +347,9 @@ object Schedules:
             // A repeat holds other values. If the first send got a refusal, this send is the first input.
             val values: Map[String, Json] = if request > 0 then Map("input-doc" -> Json.String("repeat")) else Map.empty
             host.send(Command.Send(RequestId(s"r${math.max(1, request)}"), "repeat", values), ownerSource)
-          case n if n < 14 => host.send(Command.Abort("stop"))
+          case n if n < 14 =>
+            // A stop of the person ends a goal loop, and a stop of the harness keeps it (8.5).
+            host.send(Command.Abort("stop"), if random.nextBoolean() then Source.User else Source.Harness)
           case n if n < 16 =>
             // A crash of the process loses no commit, and it flushes nothing.
             restart(host.entries, host.durable)
@@ -375,6 +383,12 @@ object Schedules:
             val id = table.running.head
             table.running = table.running - id
             host.send(Command.RecordJobEnd(id, JobEnd.Exited(random.nextInt(3))))
+          case 84 =>
+            // The person starts a goal loop. A loop from another sender gives a refusal (8.5).
+            val sender = if random.nextInt(4) == 0 then ownerSource else Source.User
+            host.send(Command.StartLoop(random.nextInt(12)), sender)
+          case 83 => host.send(Command.StopLoop, if random.nextBoolean() then Source.User else ownerSource)
+          case 82 => host.send(Command.ChangeGoal(Vector("the goal", "a new goal")(random.nextInt(2))))
           case 86 =>
             // A person changes the effort of the model (CLI_SCREEN.md, 14.4), also during a turn.
             val level = Vector("none", "low", "high")(random.nextInt(3))
@@ -401,7 +415,8 @@ object Schedules:
           case Next.RunCell(_, _) =>
             val done = closing(host.live).collect { case entry @ Entry.EffectDone(_, _) => entry }
             host.send(Command.Commit(done :+ Entry.Observed("o", CellOutcome.Ok, Map.empty)))
-          case Next.End(outcome) => host.send(Command.Commit(closing(host.live) :+ Entry.TurnEnded(outcome)))
+          case Next.End(outcome)    => host.send(Command.Commit(closing(host.live) :+ Entry.TurnEnded(outcome)))
+          case Next.CheckGoal(_, _) => () // only with no open turn
     pendingStarts.foreach(startJob)
     Run(host.entries, host.live, host.durable, changed, answered, host.marks)
 

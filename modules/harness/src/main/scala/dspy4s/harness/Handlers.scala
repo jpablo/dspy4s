@@ -345,14 +345,16 @@ private def recordedSessions(inner: Sessions, recorder: Recorder): Sessions =
     def list(): Vector[SessionCard]                      = recorder.call("sessions", Json.Null)(inner.list())
     def tell(ref: SessionRef, message: String): Delivery =
       recorder.call("tell", args(session(ref), "message" -> text(message)))(inner.tell(ref, message))
-    def start(goal: String, scope: Scope, strategy: StrategyName): SessionRef =
+    def start(goal: String, scope: Scope, strategy: StrategyName, loop: Int): SessionRef =
+      // The turns of the loop go into the intent, so the fold of this session counts them (8.5).
       val called = args(
         "goal"     -> text(goal),
         "kind"     -> text(scope.productPrefix),
         "scope"    -> summon[Data[Scope]].encode(scope),
-        "strategy" -> text(strategy.toString)
+        "strategy" -> text(strategy.toString),
+        "loop"     -> Json.Number(loop)
       )
-      recorder.call("start", called)(inner.start(goal, scope, strategy))
+      recorder.call("start", called)(inner.start(goal, scope, strategy, loop))
     def observe(ref: SessionRef, question: String)(using Llm): String =
       recorder.call("observe", args(session(ref), "question" -> text(question)))(inner.observe(ref, question))
     def zoom(ref: SessionRef, part: String): String =

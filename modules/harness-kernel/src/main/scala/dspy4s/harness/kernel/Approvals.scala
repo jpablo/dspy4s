@@ -23,6 +23,11 @@ def guardCheck(s: SessionState, op: String, args: Json): GuardResult =
     case Verdict.Ask if s.config.owner.hasPerson => GuardResult.NeedsPerson(GuardRule(op, ArgMatch.Exact(args)))
     case Verdict.Ask                             => GuardResult.Refused("no person can answer in this session")
 
-/** True when the goal check can run (8.5): after a turn, with no input that waits, and with no pending call. */
+/** True when the goal check can run (8.5): a loop is on, and the session has a goal, no open turn, no release, no
+  * pending call, and no turn that can start. A message that waits can start a turn only when the limit of the
+  * unattended turns does not hold it. A check either starts a turn or ends the loop, so it runs once after the start of
+  * a loop and once after each `TurnEnded`.
+  */
 def goalCheckDue(s: SessionState): Boolean =
-  !s.closed && s.position == Position.NoTurn && s.waiting == 0 && s.pending.isEmpty
+  s.loop.isDefined && s.config.goal.nonEmpty && !s.closed && !s.releasing && s.position == Position.NoTurn &&
+    s.pending.isEmpty && (s.waiting == 0 || held(s))

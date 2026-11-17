@@ -3,15 +3,17 @@
 #
 # `python3 scripts/mutants/mutants.py modules/harness-host/src/test/mutants.toml` applies each mutant alone, runs the
 # suites of `tests`, and restores the code. The whole suite of the host takes minutes, so `tests` names only the laws of
-# the exchange file, of the journal file, of the scopes, of the jobs and of the controller. The mutants of the scopes
-# break a rule of choice 19 (5.4) of docs/code-harness/CODE_HARNESS_DESIGN.md: the clone of a Worktree scope and the
-# publish of its branch. The mutants of the jobs break a rule of the end of a job in the journal (10.3 of the same
-# file). The mutants of `tell` break the rule of its value: a message that waits for the person (8.7 of the same file).
+# the exchange file, of the journal file, of the scopes, of the jobs, of the controller and of the goal loop. The
+# mutants of the scopes break a rule of choice 19 (5.4) of docs/code-harness/CODE_HARNESS_DESIGN.md: the clone of a
+# Worktree scope and the publish of its branch. The mutants of the jobs break a rule of the end of a job in the journal
+# (10.3 of the same file). The mutants of `tell` break the rule of its value: a message that waits for the person (8.7
+# of the same file). The mutants of the goal loop break a rule of 8.5 of the same file, and the laws of GoalHostLaws
+# kill them.
 
 module = "harness-host"
 project = "harnessHost"
 sources = "modules/harness-host/src/main/scala/dspy4s/harness/host"
-tests = "dspy4s.harness.host.ExchangeFileLaws dspy4s.harness.host.SessionFileLaws dspy4s.harness.host.ScopesLaws dspy4s.harness.host.JobLaws dspy4s.harness.host.ControllerLaws"
+tests = "dspy4s.harness.host.ExchangeFileLaws dspy4s.harness.host.SessionFileLaws dspy4s.harness.host.ScopesLaws dspy4s.harness.host.JobLaws dspy4s.harness.host.ControllerLaws dspy4s.harness.host.GoalHostLaws"
 
 # ── The labels (4.2) ──
 
@@ -213,15 +215,15 @@ new = "if writer.log.nonEmpty then writer.run(Command.RecordJobEnd(job, end), So
 name = "Mutant: tell gives WaitsForPerson also when a turn reads the message"
 [[mutant.edit]]
 file = "HostSessions.scala"
-old = "case TurnLimit.AtMost(limit) if waitsForPerson(receiver) =>"
-new = "case TurnLimit.AtMost(limit) if waitsForPerson(receiver) || receiver.waiting > 0 =>"
+old = "if !waitsForPerson(receiver) then Delivery.InTurn"
+new = "if !waitsForPerson(receiver) && receiver.waiting == 0 then Delivery.InTurn"
 
 [[mutant]]
 name = "Mutant: WaitsForPerson gives the limit as the count of the turns"
 [[mutant.edit]]
 file = "HostSessions.scala"
-old = "Delivery.WaitsForPerson(receiver.unattended, limit)"
-new = "Delivery.WaitsForPerson(limit, limit)"
+old = "case TurnLimit.AtMost(limit) => Delivery.WaitsForPerson(turns, limit)"
+new = "case TurnLimit.AtMost(limit) => Delivery.WaitsForPerson(limit, limit)"
 
 [[mutant]]
 name = "Mutant: tell gives InTurn for each state of the receiver"
@@ -229,3 +231,68 @@ name = "Mutant: tell gives InTurn for each state of the receiver"
 file = "HostSessions.scala"
 old = "      HostSessions.deliveryOf\n    )"
 new = "      _ => Delivery.InTurn\n    )"
+
+[[mutant]]
+name = "Mutant: WaitsForPerson gives the limit of the host while a goal loop is on"
+[[mutant.edit]]
+file = "HostSessions.scala"
+old = "unattendedLimit(receiver) match"
+new = "unattendedLimit(receiver.copy(loop = None)) match"
+
+[[mutant]]
+name = "Mutant: WaitsForPerson does not count the turns that a loop gave"
+[[mutant.edit]]
+file = "HostSessions.scala"
+old = "val turns = unattendedUsed(receiver)"
+new = "val turns = unattendedUsed(receiver.copy(loop = None))"
+
+[[mutant]]
+name = "Mutant: tell gives InTurn for a message that waits after a loop with no limit"
+[[mutant.edit]]
+file = "HostSessions.scala"
+old = "case TurnLimit.NoLimit       => Delivery.WaitsForPerson(turns, turns)"
+new = "case TurnLimit.NoLimit       => Delivery.InTurn"
+
+# ── The goal loop (8.5 of CODE_HARNESS_DESIGN.md) ──
+
+[[mutant]]
+name = "Mutant: start takes a loop above the turns that the loop of its caller has left"
+[[mutant.edit]]
+file = "HostSessions.scala"
+old = "else if loop > left then"
+new = "else if loop > left + 100 then"
+
+[[mutant]]
+name = "Mutant: the end of a loop of the person does not end the loops that it gave"
+[[mutant.edit]]
+file = "SessionHost.scala"
+old = "if loopOff then place.endLoops(id, loopChildren(writer.log))"
+new = "if loopOff && writer.log.isEmpty then place.endLoops(id, loopChildren(writer.log))"
+
+[[mutant]]
+name = "Mutant: an activation of a work session does not ask the goal leaf"
+[[mutant.edit]]
+file = "WorkRuntime.scala"
+old = "RuntimeEnvironment.withContext(context)(inner.checkGoal(goal, blocker))"
+new = "Left(goal + blocker)"
+
+[[mutant]]
+name = "Mutant: the row of the catalog has no loop"
+[[mutant.edit]]
+file = "Catalog.scala"
+old = "loop = loopWords(now)), tally, now)"
+new = "loop = loopWords(folded)), tally, now)"
+
+[[mutant]]
+name = "Mutant: a row with a new loop does not go to the catalog"
+[[mutant.edit]]
+file = "SessionHost.scala"
+old = " || next._1.loop != row._1.loop"
+new = ""
+
+[[mutant]]
+name = "Mutant: the task of a loop has no rule of the loop"
+[[mutant.edit]]
+file = "WorkRuntime.scala"
+old = "val loop = if looping then s\"\\n\\n$LoopRule\" else \"\""
+new = "val loop = if looping then \"\" else \"\""

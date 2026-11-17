@@ -8,9 +8,10 @@ enum Command derives CanEqual:
 
   /** The start of a new session with its task in one commit (8.6, 8.7): `Activated`, then the `Input` of the task, then
     * `TurnStarted`. Only a journal with no entry takes it. `sourceOf` gives `Activated` the source `Harness`, and the
-    * `Input` and `TurnStarted` the source of the sender, so `reports` sees the task as a message of the owner.
+    * `Input` and `TurnStarted` the source of the sender, so `reports` sees the task as a message of the owner. A `loop`
+    * above 0 adds `GoalLoopStarted(loop)` after `Activated`: the turns that the owner gives from its own loop (8.5).
     */
-  case Begin(versions: Versions, config: SessionConfig, request: RequestId, text: String)
+  case Begin(versions: Versions, config: SessionConfig, request: RequestId, text: String, loop: Int = 0)
   case Send(request: RequestId, text: String, values: Map[String, Json])
   case Commit(entries: Vector[Entry])
   case Abort(reason: String)
@@ -23,6 +24,20 @@ enum Command derives CanEqual:
     * `JobEnded` for it.
     */
   case RecordJobEnd(job: EffectId, end: JobEnd)
+
+  /** `/goal set TEXT`: the new goal of the session (8.5). */
+  case ChangeGoal(goal: String)
+
+  /** `/goal on [N]`: the start of a goal loop with the limit `limit` (8.5). Only the person sends it. */
+  case StartLoop(limit: Int)
+
+  /** `/goal off`, or the end of the loop of the owner (8.5). Each sender can send it, because the end only takes
+    * authority away.
+    */
+  case StopLoop
+
+  /** The answer of the goal leaf, from the worker (8.5). */
+  case RecordGoalCheck(check: GoalCheck)
 
 /** Why `decide` refuses a command (4.5). */
 enum Rejection derives CanEqual:
@@ -48,6 +63,12 @@ enum Rejection derives CanEqual:
     */
   case JobEnded(job: EffectId)
 
+  /** `StartLoop` from a sender that is not the person (8.5). */
+  case NotPerson
+
+  /** `StartLoop` with a limit below 1 (8.5). */
+  case LoopLimit(limit: Int)
+
   /** The refusal in words for a person and for a model, with no Scala value. The terminal, the error of a cell and the
     * error of a call of the controller give these words:
     *
@@ -58,6 +79,8 @@ enum Rejection derives CanEqual:
     *   - `NotNew`: `the session has a journal already`.
     *   - `Releasing`: `the session runs its release, so it takes no message`.
     *   - `JobEnded`: `the job 12.0 has ended`, with the cell and the number of the job, as `/jobs` names it.
+    *   - `NotPerson`: `only the person starts a goal loop`.
+    *   - `LoopLimit`: `the limit of a goal loop must be 1 or more, not 0`, with the limit.
     */
   def words: String =
     this match
@@ -70,3 +93,5 @@ enum Rejection derives CanEqual:
       case NotNew        => "the session has a journal already"
       case Releasing     => "the session runs its release, so it takes no message"
       case JobEnded(job) => s"the job ${job.cell}.${job.n} has ended"
+      case NotPerson     => "only the person starts a goal loop"
+      case LoopLimit(n)  => s"the limit of a goal loop must be 1 or more, not $n"

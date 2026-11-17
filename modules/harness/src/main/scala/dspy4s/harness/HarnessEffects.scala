@@ -2,7 +2,7 @@ package dspy4s.harness
 
 import dspy4s.core.contracts.{DspyError, DynamicValues, LmUsage, ParseError, RuntimeContext}
 import dspy4s.core.runtime.{UsageScope, UsageTracker}
-import dspy4s.harness.kernel.{CellOutcome, Command, Logged, Position, Source}
+import dspy4s.harness.kernel.{CellOutcome, Command, GoalCheck, Logged, Position, Source}
 import dspy4s.harness.repl.{CellRun, ScalaRepl, lostNames, topLevelNames}
 import dspy4s.programs.strategies.Predict
 import zio.blocks.schema.DynamicValue
@@ -59,10 +59,11 @@ final class HarnessEffects(
     limits   : HarnessLimits,
     budget   : () => Budget,
     host     : Option[HostThreads],
-    runner   : PolicyRunner   = PolicyRunner.Direct,
-    zooms    : ZoomSource     = ZoomSource(),
-    progress : MemoryProgress = MemoryProgress.none,
-    drafts   : Option[Drafts] = None
+    runner   : PolicyRunner                              = PolicyRunner.Direct,
+    zooms    : ZoomSource                                = ZoomSource(),
+    progress : MemoryProgress                            = MemoryProgress.none,
+    drafts   : Option[Drafts]                            = None,
+    goalLeaf : Option[Predict[GoalQuestion, GoalAnswer]] = None
 )(using RuntimeContext)
     extends TurnEffects:
 
@@ -96,6 +97,17 @@ final class HarnessEffects(
       finally
         number.foreach((d, n) => d.end(n))
         HarnessEffects.lastUsage(tokens).foreach(u => progress.used(u.promptTokens, u.completionTokens))
+    }
+
+  /** The answer of `goalLeaf` about `goal` after the last turn of the journal (8.5): one call with the text of the last
+    * turn (`turnText`), `blocker`, and the options of the model of the session. It runs through `runner`, so a stop of
+    * the session cuts it. Effects with no leaf give an error.
+    */
+  override def checkGoal(goal: String, blocker: String): Either[String, GoalCheck] =
+    goalLeaf.toRight("this session has no goal leaf").flatMap { leaf =>
+      val question = GoalQuestion(goal, turnText(journal.log), blocker)
+      val options  = HarnessEffects.optionsOf(journal.state.config.model.options)
+      runner.run(() => leaf(question, options).map(_.output.check).left.map(_.message))
     }
 
   def runCell(cell: Long, code: String): CellResult =

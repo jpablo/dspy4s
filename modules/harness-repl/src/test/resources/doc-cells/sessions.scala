@@ -32,3 +32,14 @@ val fix = start(
 )
 println(s"Started the session ${fix.id}.")
 // --8<-- [end:start-worktree]
+
+// --8<-- [start:start-with-loop]
+// The person turned on the goal loop of the controller with /goal on 40, so the controller can give 12 turns.
+val review = start(
+  "Review the module harness-kernel for bugs. Write each finding to findings.md. Then submit the number of findings.",
+  Scope.Directory("/path/to/repo"),
+  StrategyName.MemoryTree,
+  loop = 12
+)
+println(s"Started the session ${review.id} with a goal loop of 12 turns.")
+// --8<-- [end:start-with-loop]

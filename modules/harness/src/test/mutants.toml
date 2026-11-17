@@ -890,3 +890,47 @@ name = "Mutant: a call that an interrupt stops gets the name of the exception"
 file = "Handlers.scala"
 old = "      case _: InterruptedException => \"the call stopped, because the host stopped the cell\""
 new = "      case _: InterruptedException => \"InterruptedException: \""
+
+# ── The goal leaf and the check in the worker (8.5) ──
+
+[[mutant]]
+name = "Mutant: a failed goal check is never the same blocker"
+[[mutant.edit]]
+file = "GoalLeaf.scala"
+old = "same = blocker == FailedBlocker)"
+new = "same = blocker.isEmpty && blocker.nonEmpty)"
+
+[[mutant]]
+name = "Mutant: a goal check that throws stops the worker"
+[[mutant.edit]]
+file = "Worker.scala"
+old = "Try(effects.checkGoal(goal, blocker)).toEither.left.map(e => Option(e.getMessage).getOrElse(e.toString))"
+new = "Try(effects.checkGoal(goal, blocker)).toEither.left.map(e => throw e)"
+
+[[mutant]]
+name = "Mutant: turnText gives each turn of the log"
+[[mutant.edit]]
+file = "GoalLeaf.scala"
+old = "val text = log.drop(from + 1).flatMap(turnLines).mkString(\"\\n\")"
+new = "val text = log.drop((from + 1) * 0).flatMap(turnLines).mkString(\"\\n\")"
+
+[[mutant]]
+name = "Mutant: turnText keeps the start of a long turn"
+[[mutant.edit]]
+file = "GoalLeaf.scala"
+old = "s\"$TurnCut\\n${textSuffix(text, max)}\""
+new = "s\"$TurnCut\\n${textPrefix(text, max)}\""
+
+[[mutant]]
+name = "Mutant: the goal leaf gets no last blocker"
+[[mutant.edit]]
+file = "HarnessEffects.scala"
+old = "val question = GoalQuestion(goal, turnText(journal.log), blocker)"
+new = "val question = GoalQuestion(goal, turnText(journal.log), \"\")"
+
+[[mutant]]
+name = "Mutant: the mask does not reach the check of a goal"
+[[mutant.edit]]
+file = "Secrets.scala"
+old = "Entry.GoalChecked(c.copy(reason = maskText(c.reason), blocker = maskText(c.blocker)))"
+new = "Entry.GoalChecked(c)"

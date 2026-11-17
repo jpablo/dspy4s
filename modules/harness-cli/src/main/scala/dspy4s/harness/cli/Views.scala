@@ -3,7 +3,8 @@ package dspy4s.harness.cli
 import dspy4s.harness.guest.{Access, JobStatus}
 import dspy4s.harness.host.{CatalogRow, ContextUse, ExchangeFile, SessionFile, jobName, jobStatusWords}
 import dspy4s.harness.kernel.{EffectId, EffectResult, Entry, GuardRule, Logged, Position, SessionId, SessionState}
-import dspy4s.harness.kernel.{TurnLimit, grouped, limitLines, modeWords, sandboxLines, waitsForPerson}
+import dspy4s.harness.kernel.{GoalLoop, TurnLimit, grouped, limitLines, modeWords, sandboxLines}
+import dspy4s.harness.kernel.{unattendedLimit, unattendedUsed, waitsForPerson}
 import dspy4s.harness.sandbox.SandboxedShell
 
 import java.nio.file.Path
@@ -71,15 +72,21 @@ def pendingCalls(current: SessionState, log: Vector[Logged]): Vector[(Long, Guar
   }.groupMapReduce(_._1)(_._2)(_ max _).toVector.map((rule, seq) => seq -> rule).sortBy(_._1)
 
 /** The notice of a message that waits for the person (8.7), or none when no message waits (`waitsForPerson`). The
-  * session ran its limit of turns in a row with no message of the person, so no turn starts until the person writes.
-  * The notice gives the count and the limit apart, because a restart with a lower limit leaves a count above it. It
-  * says `1 turn` for one turn, and `N turns` for more (`count`).
+  * session ran its limit of turns in a row with no message of the person, or its goal loop ended while the message
+  * waited (8.5), so no turn starts until the person writes. The notice gives the count and the limit apart, because a
+  * restart with a lower limit leaves a count above it. It says `1 turn` for one turn, and `N turns` for more (`count`).
   */
 def heldText(s: SessionState): Option[String] =
-  s.config.unattendedLimit match
+  unattendedLimit(s) match
+    case _ if s.afterLoop && waitsForPerson(s) =>
+      val why = s.loopEnd.fold("The goal loop ended.")(_.report)
+      Some(
+        s"A message waits for you. $why The end of a goal loop does not start a turn. Type a message, and the next " +
+          "turn reads it with the messages that wait, or type /goal on [N]."
+      )
     case TurnLimit.AtMost(turns) if waitsForPerson(s) =>
       Some(
-        s"A message waits for you: the session ran ${count(s.unattended, "turn")} in a row with no message of " +
+        s"A message waits for you: the session ran ${count(unattendedUsed(s), "turn")} in a row with no message of " +
           s"yours, and the limit is ${grouped(turns.toLong)}. Type a message, and the next turn reads it with the " +
           "messages that wait. --unattended-turns N changes the limit at the next start."
       )
@@ -105,7 +112,8 @@ def statusText(
     case Position.InCell(i, _, _) => s"Step ${i + 1} of $steps: a cell runs."
     case Position.Answered(_)     => "The turn has its reply, and it ends."
     case Position.Finished(_)     => "The turn has its result, and it ends."
-  val unattended = Option.when(current.unattended > 0) {
+  // While a goal loop is on, the lines of the loop give the count (8.5).
+  val unattended = Option.when(current.unattended > 0 && current.loop.isEmpty) {
     val count = grouped(current.unattended.toLong)
     current.config.unattendedLimit match
       case TurnLimit.AtMost(turns) => s"Turns in a row with no message of yours: $count of ${grouped(turns.toLong)}."
@@ -125,8 +133,31 @@ def statusText(
   val tokens = context.map(use => s"The context: ${Screen.contextWords(use, facts.window, " tokens")}.")
   val closed = Option.when(current.closed)("The session is closed.")
   val folder = s"The folder: ${SandboxedShell.pathOf(current.config.scope)}."
+  val goal   = Option.when(current.config.goal.nonEmpty || current.loop.nonEmpty || current.loopEnd.nonEmpty)(
+    loopText(current)
+  )
   (Vector(folder, turn) ++ unattended ++ heldText(current) ++ effort ++ tokens ++ stop ++ pending ++ grants ++ jobs ++
-    closed).mkString("\n")
+    goal ++ closed).mkString("\n")
+
+/** The text of `/goal`, and the goal part of `/status` (8.5): the goal, the loop on or off, the turns used of N, the
+  * last check, and the count of the same blocker of `GoalLoop.BlockedChecks`. With no loop, it gives how the last loop
+  * ended.
+  */
+def loopText(current: SessionState): String =
+  val goal = current.config.goal.fold("The session has no goal. /goal set TEXT gives it one.")(g => s"The goal: $g")
+  val loop = current.loop match
+    case Some(on) =>
+      val used    = unattendedUsed(current)
+      val checked = on.last.fold("No goal check yet.") { c =>
+        s"The last goal check: ${if c.met then "met" else "not met"}. ${c.reason}"
+      }
+      val blocker =
+        Option.when(on.blocked > 0)(s"The blocker, ${on.blocked} of ${GoalLoop.BlockedChecks} checks: ${on.blocker}")
+      Vector(s"The goal loop is on: $used of ${on.limit} turns with no person. /goal off ends it.", checked) ++ blocker
+    case None =>
+      val last = current.loopEnd.fold("")(why => s" ${why.report}")
+      Vector(s"The goal loop is off.$last /goal on [N] turns it on.")
+  (goal +: loop).mkString("\n")
 
 /** One line for each active grant of `current`, with its lifetime in words and its call, for example
   * `  for this session: exec "git push"`. The grants with a shorter lifetime come first (5.5).
@@ -180,7 +211,8 @@ def configText(id: SessionId, current: SessionState, client: ClientFacts, facts:
     else config.guard.rules.map(rule => s"  ${rule.verdict}: ${callText(rule.rule)}")
   val grants = if current.grants.isEmpty then Vector("  none") else grantLines(current)
   // The facts give the limit of the turns with no person. With no facts, the limit is the limit of an older host.
-  val limits = lines(Vector("steps of a turn" -> grouped(config.steps.toLong))) ++
+  val loop   = current.loop.fold("off")(on => s"on, at most ${grouped(on.limit.toLong)} turns with no person")
+  val limits = lines(Vector("steps of a turn" -> grouped(config.steps.toLong), "goal loop" -> loop)) ++
     config.host.fold(lines(Vector("turns with no person" -> config.unattendedLimit.words)) :+ noFacts)(host =>
       lines(limitLines(host.limits))
     )

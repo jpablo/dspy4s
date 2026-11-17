@@ -621,6 +621,14 @@ object InspectorLaws:
       for h <- text; c <- Gen.oneOf(true, false) yield Entry.ScopeRecorded(h, c),
       for m <- text; v <- json(text) yield Entry.ModelChanged(ModelChoice(m, Map("reasoning_effort" -> v))),
       Gen.oneOf(Gen.choose(0, 255).map(JobEnd.Exited(_)), Gen.const(JobEnd.Stopped)).map(Entry.JobEnded(id, _)),
+      text.map(Entry.GoalChanged(_)),
+      Gen.choose(1, 500).map(Entry.GoalLoopStarted(_)),
+      for r <- text; b <- text; m <- Gen.oneOf(true, false) yield Entry.GoalChecked(GoalCheck(m, r, b, same = !m)),
+      Gen.oneOf(
+        text.map(LoopEnd.Met(_)),
+        text.map(LoopEnd.Blocked(_)),
+        Gen.oneOf(LoopEnd.Limit, LoopEnd.Off, LoopEnd.Stopped, LoopEnd.Restarted)
+      ).map(Entry.GoalLoopEnded(_)),
       text.map(t => Entry.Releasing(Vector(ReleaseItem.Keep(t, "fake")))),
       text.map(t => Entry.Released(ReleaseStep(ReleaseItem.Keep(t, "fake"), ReleaseResult.Failed(t)))),
       Gen.oneOf(

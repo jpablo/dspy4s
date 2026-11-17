@@ -78,7 +78,7 @@ The mode of the controller gives `Files` (read only), `Llm^`, `Sessions^` and `S
 
 | Function | What it does |
 |---|---|
-| `start(goal, scope, strategy): SessionRef` | It starts a work session in the background, with `goal` as its first message. |
+| `start(goal, scope, strategy, loop = 0): SessionRef` | It starts a work session in the background, with `goal` as its first message. With `loop` above 0, the session gets a goal loop of that many turns from the loop of the controller (see [The goal loop](#the-goal-loop)). |
 | `sessions(): Vector[SessionCard]` | It gives the card of each other session of the host. |
 | `tell(session, message): Delivery` | It sends a message, and it returns after the session keeps it. It gives `InTurn` when a turn of that session reads the message, and `WaitsForPerson(turns, limit)` when the message waits for the person of that session. A session that has ended gives an error. |
 | `observe(session, question): String` | A probe: a read-only program reads the journal of the session and answers. |
@@ -134,9 +134,65 @@ that session. A new session starts again from an empty folder.
   Your next message starts the turn that reads it. The client prints a notice after the message that waits, and
   `/status` shows the notice and the count of these turns. The flag `--unattended-turns N` sets the limit for each
   session that the client opens, also for the sessions that the controller starts. `0` gives no limit. `/config`
-  shows the limit of the session. A restart with a higher limit starts the turn of a message that waits.
+  shows the limit of the session. A restart with a higher limit starts the turn of a message that waits. A goal loop
+  changes this limit (see the next section).
 - The rule also applies to a message of the controller. Then `tell` gives `WaitsForPerson(turns, limit)`, so the
   controller can tell you to open that session and write to it. The turn of the goal of `start` is one such turn.
+  While a goal loop is on, `limit` is the N of the loop.
+- While the goal loop of a session is on, its turns give no report. The end of the loop gives one report, with the
+  end and the outcome of the last turn, for example `The goal loop ended: the goal is met. <reason>`.
+
+## The goal loop
+
+A goal loop lets a session go on with no message from you, for hours or days, until its goal is met. For example, a
+session can prove a hard lemma in Lean, or the controller can run a long code review with many sessions.
+
+1. Give the session a goal. A session that the controller starts has the goal of `start`. For your own session,
+   type `/goal set TEXT`, for example `/goal set Prove the lemma add_comm in Lean, with no sorry.` The goal stays in
+   the configuration, so a reopen keeps it.
+2. Type `/goal on N`. N is the most turns in a row that no message of yours starts. With no N, it is 50. N must be 1 or
+   more. You see `The goal loop starts: the session goes on by itself until its goal is met, at most N turns with no
+   person. /goal off ends it.`
+3. After each turn, the goal leaf reads the goal and the last turn, and it answers whether the goal is met. When it is
+   not met, the harness sends a message that gives the goal, the reason, the blocker if any, and
+   `Go on with the work.` This message starts the next turn. The client shows it after `↳`, as a message of the harness.
+
+The check runs once after each turn, also after a turn that failed. It does not run while a call waits for your
+approval, so a session that waits for you uses no model calls. Your message during a loop sets the count of turns to 0
+again, so N more turns can follow.
+
+The loop ends in one of these ways. The client shows the end, for example
+`The goal loop ended: the goal is met. <reason>`.
+
+| End | When |
+|---|---|
+| `met` | A check says that the goal is met. |
+| `blocked` | Three checks in a row give the same blocker, for example a proof step that fails each time. |
+| `limit` | The session used its N turns, and the goal is not met. |
+| `off` | You typed `/goal off`, or the loop of the owner ended. |
+| `stopped` | You stopped the session with `/stop`, `/stopall` or Ctrl-C. A stop or a failure of the harness does not end the loop. |
+| `restarted` | The host started again. The permission to go on is live, so type `/goal on` again after a restart. |
+
+After the end, the limit of the host applies again: 8 turns, or the value of `--unattended-turns`. The end of a loop
+starts no turn by itself. When a message waits at the end, for example the goal message after a restart, it waits for
+you. The client prints `A message waits for you.` with the end of the loop, and `/status` shows the same notice. Your
+next message, a grant, or `/goal on` starts the turn that reads it.
+
+**A loop in the controller.** The controller has no goal, so `/goal on N` in the controller only changes its limit
+of turns. Then the reports of many sessions can start turns of the controller. The controller can also give turns of
+its loop to a session that it starts:
+
+```scala
+--8<-- "modules/harness-repl/src/test/resources/doc-cells/sessions.scala:start-with-loop"
+```
+
+`start` refuses more turns than the loop of the controller has left: N, minus its turns with no person, minus the
+turns that it gave. Your message to the controller gives it all its N turns again. `/goal off` or a stop in the
+controller also ends the loop of each session that got turns from it. A limit or a met goal of the controller does not.
+
+**What you see.** `/goal` and `/status` give the goal, the loop on or off, the turns used of N, the last check, and
+the count of the blocker of 3. `/config` gives the goal and the limit of the loop. The card of a session has the field
+`loop`, and `/sessions` shows it, for example `goal loop on 12/50`.
 
 The text gives the outcome in words, for example `The turn ended with a reply: <reply>`,
 `The turn crashed: its host stopped during the turn.` or `The session ended: <outcome>, <reason>.`
@@ -156,6 +212,7 @@ The text gives the outcome in words, for example `The turn ended with a reply: <
 | `lastSeq` | The `seq` of the last entry of the journal. |
 | `read`, `made`, `commands` | The number of files that the session read, the paths that it wrote or edited, and the number of its commands. |
 | `head`, `clean` | The git head of the scope after the last turn, and `true` when git shows no change, no new file and no ignored file. Both are `None` for a folder with no git. |
+| `loop` | The goal loop: `on 12/50` while it runs, with the turns used and N. Else how the last loop ended (`met`, `blocked`, `limit`, `off`, `stopped` or `restarted`), or `off`. |
 
 ## The end of a session
 
@@ -188,7 +245,8 @@ controller.
 
 | Command | What it does |
 |---|---|
-| `/sessions` | It prints one line for each session: `<id>  <status>  <goal or scope>  (<N> files made)`. |
+| `/sessions` | It prints one line for each session: `<id>  <status>  <goal or scope>  (<N> files made)`. A session with a goal loop also shows `goal loop <loop>` after the status. |
+| `/goal`, `/goal on [N]`, `/goal off`, `/goal set TEXT` | They show and change the goal and the goal loop of the session that the client shows. See [The goal loop](#the-goal-loop). |
 | `/open ID` | It shows the session `ID`. Give the full id. |
 | `/controller` | It shows the controller again. |
 | `/reopen ID` | It opens again the session `ID`, which has ended, and shows it. |
@@ -250,5 +308,18 @@ After a restart, the session has a new REPL:
     ```
 
     Then `ls ~/.dspy4s/harness/archive/<id>` shows `hello.txt`.
+
+5. Make an empty folder, for example `mkdir /tmp/goal-demo`, and start a work session there with
+   `scripts/dspy4s-harness /tmp/goal-demo`. Type these lines:
+
+    ```text
+    /goal set The file count.txt holds the numbers 1 to 12, one number on each line. Add only one number in each turn.
+    /goal on 20
+    ```
+
+    The first check runs at once, and its message starts the first turn. Wait. You see more than 8 turns with no
+    message of yours, each one after a message of the harness that starts with
+    `The goal check says that the goal is not met yet.` At the end you see
+    `The goal loop ended: the goal is met.` Type `/goal` to see the state of the loop.
 
 Next: [Memory](memory.md).

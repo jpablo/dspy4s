@@ -71,7 +71,9 @@ decide(Command.Send(RequestId("r1"), "Fix the test", Map.empty), s0) match
 | `GuardRule` / `ArgMatch` | A rule for the calls of one operation. `ArgMatch` is `Exact`, `Prefix` (a path rule or a text rule), or `AnyArgs`. |
 | `GrantLifetime` / `ActiveGrant` | A grant from a person lasts `Once`, for a `Turn`, or for the `Session`. |
 | `guardCheck` / `GuardResult` | The check of one call: `Run`, `NeedsPerson` with the narrowest rule, or `Refused`. |
-| `goalCheckDue` | True after a turn, when no input waits and no call is pending. |
+| `goalCheckDue` | True when the goal check of a loop can run: a loop is on, the session has a goal, no turn is open, no call is pending, and no turn can start. |
+| `GoalLoop` / `GoalCheck` / `LoopEnd` | The live goal loop of a session (8.5), the answer of the goal leaf, and why a loop ended. The person starts a loop with `StartLoop`, and an `Activate` ends it. |
+| `goalText` / `loopLeft` / `loopWords` / `loopChildren` | The text of the goal message, the turns that a loop has left, the loop in words for a card, and the sessions that got turns from a loop. |
 | `reports` / `missing` | The reports of a session to its owner, as a pure function of the journal, and the reports that the owner does not have yet. |
 
 ## Design notes
@@ -104,9 +106,9 @@ decide(Command.Send(RequestId("r1"), "Fix the test", Map.empty), s0) match
 
 | File | Contents |
 |------|----------|
-| `Entry.scala` | `Entry`, `Logged`, `Meta`, `Source`, `Taint`, the outcomes, `JobSelector`, `JobEnd`, `readOnlyOps`, and `needsFlush` |
+| `Entry.scala` | `Entry`, `Logged`, `Meta`, `Source`, `Taint`, the outcomes, `JobSelector`, `JobEnd`, `GoalCheck`, `LoopEnd`, `readOnlyOps`, and `needsFlush` |
 | `Ids.scala` | `SessionId`, `RequestId`, `EffectId`, and `Versions` |
-| `SessionState.scala` | `SessionState`, `Position`, `evolve`, `state`, and `forked` |
+| `SessionState.scala` | `SessionState`, `Position`, `GoalLoop`, `evolve`, `state`, and `forked` |
 | `SessionConfig.scala` | `SessionConfig`, `Owner`, `TurnKind`, and `ModelChoice` |
 | `Command.scala` | `Command` and `Rejection` |
 | `Decide.scala` | `decide`, `approvedText`, and `sourceOf` |
@@ -115,6 +117,7 @@ decide(Command.Send(RequestId("r1"), "Fix the test", Map.empty), s0) match
 | `Guard.scala` | `Guard`, `GuardRule`, `ArgMatch`, `Verdict`, and `GrantLifetime` |
 | `Approvals.scala` | `guardCheck`, `GuardResult`, and `goalCheckDue` |
 | `Reports.scala` | `reports` and `missing` |
+| `Goal.scala` | `goalText`, `loopLeft`, `loopWords`, and `loopChildren` (8.5) |
 | `Fold.scala` | `Fold` |
 
 ## Tests

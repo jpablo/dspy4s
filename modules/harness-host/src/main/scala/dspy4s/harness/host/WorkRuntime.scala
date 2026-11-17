@@ -91,6 +91,8 @@ object WorkEnv:
   *     runtime (8.7). The task of a step comes from `taskOf`: the controller, a session with a session as its owner, or
   *     a session of the person. Each call to the policy reads the debt of 8.6 from the journal so far (`owes`), so the
   *     task of an owned session asks for `submit` only while the owner waits for a report.
+  *   - The effects ask the `goal` leaf after each turn of a goal loop (8.5). The task of each step reads the goal and
+  *     the loop from the state of the journal, so `/goal set` and `/goal on` change the next step.
   *
   * The policy calls run on the thread of the worker, so the activation installs the context of the runtime there. The
   * context gives the LM, so the key never goes into the journal (5.6).
@@ -100,7 +102,8 @@ final class WorkRuntime(
     limits  : HarnessLimits,
     policy  : Predict[PolicyInput, PolicyStep],
     subQuery: Predict[SubQuery, SubAnswer],
-    peers   : Peers = Peers.none
+    peers   : Peers                             = Peers.none,
+    goalLeaf: Predict[GoalQuestion, GoalAnswer] = Predict(GoalLeaf.signature, name = Some("goal"))
 )(using RuntimeContext)
     extends SessionRuntime:
 
@@ -212,11 +215,12 @@ final class WorkRuntime(
           log =>
             WorkRuntime.taskOf(
               session,
-              config,
+              journal.state.config,
               scope,
               words,
               project,
-              owes = owner.exists(source => dspy4s.harness.kernel.owes(source, log))
+              owes = owner.exists(source => dspy4s.harness.kernel.owes(source, log)),
+              looping = journal.state.loop.isDefined
             ),
           Harness.apiReference(config.mode),
           WorkRuntime.policyOf(session, policy),
@@ -231,7 +235,8 @@ final class WorkRuntime(
           calls,
           zooms,
           meter,
-          Some(written)
+          Some(written),
+          Some(goalLeaf)
         )(using inSession)
         val forget = () =>
           meters.remove(session, meter): Unit
@@ -270,6 +275,8 @@ private final class WorkActivation(
       RuntimeEnvironment.withContext(context)(inner.callPolicy(mustAnswer))
     def runCell(cell: Long, code: String): CellResult =
       RuntimeEnvironment.withContext(context)(inner.runCell(cell, code))
+    override def checkGoal(goal: String, blocker: String): Either[String, GoalCheck] =
+      RuntimeEnvironment.withContext(context)(inner.checkGoal(goal, blocker))
 
   /** Steps 2 and 3 of a hard stop: the LM call of the policy, the cell and the commands stop. It returns at once. */
   def stop(): Unit =
@@ -433,6 +440,10 @@ object WorkRuntime:
     * The preamble of such a session has `submit(value: String)`, and the task does not show the preamble. So the rule
     * names the String and gives an example call that compiles. In two live runs, a rule with no call made the model
     * write `submit: 42` as the text of its reply. Then each turn ended in `Replied`, and the work never ended.
+    *
+    * The goal (8.5): each session with a goal gets it in its task, also a session of the person, after `/goal set`.
+    * `looping` is true while a goal loop is on. Then the task says that a check runs after each turn, and the owner of
+    * an owned session gets its report at the end of the loop, so the rule of `submit` holds in each turn of the loop.
     */
   def taskOf(
       session: SessionId,
@@ -440,11 +451,18 @@ object WorkRuntime:
       scope  : Path,
       shell  : String,
       project: String  = "",
-      owes   : Boolean = true
+      owes   : Boolean = true,
+      looping: Boolean = false
   ): String =
     if session == Controller.id then Controller.task(scope)
     else
       (config.owner, config.goal) match
+        case (Owner.Session(_), Some(goal)) if looping =>
+          val owner =
+            "Another session started this session, and it gets a report when the goal loop of this session ends. " +
+              s"$LoopRule When you complete the goal, write a cell that calls submit with the result as one String, " +
+              "for example submit(\"The file has 42 lines.\")."
+          s"${chatTask(scope, shell, project)}\n\nThe goal of the session: $goal\n\n$owner"
         case (Owner.Session(_), Some(goal)) =>
           val owner =
             if owes then
@@ -455,7 +473,15 @@ object WorkRuntime:
               "Another session started this session. It does not wait for a result now, so this turn gives it no " +
                 "report. A step with no code ends the turn, and its text is the reply to the person."
           s"${chatTask(scope, shell, project)}\n\nThe goal of the session: $goal\n\n$owner"
+        case (_, Some(goal)) =>
+          val loop = if looping then s"\n\n$LoopRule" else ""
+          s"${chatTask(scope, shell, project)}\n\nThe goal of the session: $goal$loop"
         case _ => chatTask(scope, shell, project)
+
+  /** The rule of a goal loop in the task (8.5). */
+  val LoopRule: String =
+    "A goal check runs after each turn. While the goal is not met, a message of the harness starts the next turn, so " +
+      "go on with the work in each turn. A step with no code ends the turn."
 
   /** The configuration of a session that `caller`, with the configuration `parent`, starts with `goal` in `scope` (8.2,
     * 8.7): a chat turn with `limits.steps` steps, the owner `Owner.Session(caller)`, the goal, `strategy`, the mode

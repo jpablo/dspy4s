@@ -3,7 +3,7 @@ package dspy4s.harness
 import dspy4s.harness.kernel.{
   ArgMatch, CellOutcome, EffectResult, Entry, GuardRule, ReleaseItem, ReleaseResult, ReleaseStep
 }
-import dspy4s.harness.kernel.SessionOutcome
+import dspy4s.harness.kernel.{LoopEnd, SessionOutcome}
 import dspy4s.harness.kernel.TurnOutcome
 import dspy4s.harness.sandbox.Environment
 import zio.blocks.schema.json.Json
@@ -60,6 +60,11 @@ final case class Secrets(values: Map[String, String]) derives CanEqual:
         case Entry.TurnStarted | Entry.StepStarted(_) => entry
         case Entry.JobEnded(_, _)                     => entry
         case Entry.ModelChanged(model)                => Entry.ModelChanged(model.copy(options = fields(model.options)))
+        case Entry.GoalChanged(goal)                  => Entry.GoalChanged(maskText(goal))
+        case Entry.GoalLoopStarted(_)                 => entry
+        case Entry.GoalChecked(c)                     =>
+          Entry.GoalChecked(c.copy(reason = maskText(c.reason), blocker = maskText(c.blocker)))
+        case Entry.GoalLoopEnded(why) => Entry.GoalLoopEnded(loopEnd(why))
 
   /** A step of a release with each text masked: the paths, the names, the commit and the error (8.7). */
   private def released(step: ReleaseStep): ReleaseStep =
@@ -118,6 +123,12 @@ final case class Secrets(values: Map[String, String]) derives CanEqual:
       case TurnOutcome.Submitted(value)                                      => TurnOutcome.Submitted(json(value))
       case TurnOutcome.Failed(error)                                         => TurnOutcome.Failed(maskText(error))
       case TurnOutcome.Exhausted | TurnOutcome.Aborted | TurnOutcome.Crashed => outcome
+
+  private def loopEnd(why: LoopEnd): LoopEnd =
+    why match
+      case LoopEnd.Met(reason)                                               => LoopEnd.Met(maskText(reason))
+      case LoopEnd.Blocked(blocker)                                          => LoopEnd.Blocked(maskText(blocker))
+      case LoopEnd.Limit | LoopEnd.Off | LoopEnd.Stopped | LoopEnd.Restarted => why
 
   private def session(outcome: SessionOutcome): SessionOutcome =
     outcome match

@@ -3,7 +3,8 @@ package dspy4s.harness.host
 import dspy4s.harness.cutEnd
 import dspy4s.harness.guest.Scope
 import dspy4s.harness.guest.SessionSchemas.given
-import dspy4s.harness.kernel.{Entry, Fold, Ledger, LedgerState, Logged, Owner, SessionId, SessionOutcome, ledger}
+import dspy4s.harness.kernel.{Entry, Fold, Ledger, LedgerState, Logged, Owner, SessionId, SessionOutcome, SessionState}
+import dspy4s.harness.kernel.{evolve, ledger, loopWords}
 import dspy4s.harness.sandbox.SandboxedShell
 import zio.blocks.schema.Schema
 import zio.blocks.schema.json.JsonCodec
@@ -57,6 +58,9 @@ enum SessionStatus derives Schema, CanEqual:
   *
   * The journal fixes each field, so the row stays a fold. The fields have no default values. So a row of an earlier
   * catalog, which has no such fields, does not decode, and `rebuild` folds its journal again.
+  *
+  * `loop` is the goal loop of the session in words (`loopWords`, 8.5). Its default is `off`: a journal of an earlier
+  * host has no loop, so a row of an earlier catalog is right with it.
   */
 final case class CatalogRow(
     session     : SessionId,
@@ -69,7 +73,8 @@ final case class CatalogRow(
     firstMessage: String,
     goal        : Option[String] = None,
     scope       : Option[Scope]  = None,
-    ledger      : Ledger         = Ledger.empty
+    ledger      : Ledger         = Ledger.empty,
+    loop        : String         = "off"
 ) derives Schema,
       CanEqual
 
@@ -102,15 +107,20 @@ private def oneLine(text: String): String =
   * from a `Releasing`, and `Ended` after `Ended`. The folder comes from the last `Activated`, the time from the last
   * entry, and the first message from the first `Input` with a text. The ledger is the fold `ledger` of the same entries
   * (8.7), so the state of the fold holds the state of the ledger. Before the first entry, the row has the owner `Cell`,
-  * the status `Idle`, the last `seq` -1, no goal, no scope and an empty ledger.
+  * the status `Idle`, the last `seq` -1, no goal, no scope and an empty ledger. The loop is `loopWords` of the state of
+  * the same entries (8.5), so the state of the fold holds the state of the session too.
   */
-def catalogRow(session: SessionId): Fold[Logged, (CatalogRow, LedgerState), CatalogRow] =
+def catalogRow(session: SessionId): Fold[Logged, (CatalogRow, LedgerState, SessionState), CatalogRow] =
   val counting = ledger
   Fold(
-    (CatalogRow(session, Owner.Cell, None, SessionStatus.Idle, -1L, "", 0L, ""), LedgerState.empty),
+    (
+      CatalogRow(session, Owner.Cell, None, SessionStatus.Idle, -1L, "", 0L, ""),
+      LedgerState.empty,
+      SessionState.initial
+    ),
     (acc, logged) =>
-      val (row, kept) = acc
-      val status      = logged.entry match
+      val (row, kept, folded) = acc
+      val status              = logged.entry match
         case Entry.Activated(_, _)                                        => SessionStatus.Idle
         case Entry.TurnStarted                                            => SessionStatus.InTurn
         case Entry.StopRequested(_) if row.status == SessionStatus.InTurn => SessionStatus.Stopping
@@ -136,7 +146,8 @@ def catalogRow(session: SessionId): Fold[Logged, (CatalogRow, LedgerState), Cata
         case Entry.Activated(_, config) => updated.copy(goal = config.goal, scope = Some(config.scope))
         case _                          => updated
       val tally = counting.step(kept, logged)
-      (named.copy(ledger = counting.done(tally)), tally)
+      val now   = evolve(folded, logged)
+      (named.copy(ledger = counting.done(tally), loop = loopWords(now)), tally, now)
     ,
     _._1
   )

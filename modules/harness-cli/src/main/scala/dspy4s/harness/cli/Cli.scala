@@ -398,6 +398,7 @@ object Cli:
         case Line.Config                          => print(configText(current.id, current.state, client, facts(), home))
         case Line.Help                            => print(helpText)
         case Line.Effort(None)                    => print(effortText(current.state, facts().choices))
+        case Line.Goal(GoalLine.Show)             => print(loopText(current.state))
         case _ if deskLine(parsed, desk.nonEmpty) =>
           atDesk.set(true)
           try
@@ -411,11 +412,11 @@ object Cli:
             case Left(error) => print(error)
             case Right(rows) => console.printRows(rows)
         case _ =>
-          // The person must see a refusal of `Close`, `Allow`, `StopJob` and `Effort`, so these wait for the commit.
+          // The person must see a refusal of `Close`, `Allow`, `StopJob`, `Effort` and `Goal`, so these wait for the commit.
           val waits = script ||
             (parsed match
-              case Line.Close(_, _) | Line.Allow(_, _) | Line.StopJob(_) | Line.Effort(_) => true
-              case _                                                                      => false)
+              case Line.Close(_, _) | Line.Allow(_, _) | Line.StopJob(_) | Line.Effort(_) | Line.Goal(_) => true
+              case _                                                                                     => false)
           commandsFor(parsed, current.state, RequestId(UUID.randomUUID().toString), asked, facts().choices) match
             case Left(error)     => print(error)
             case Right(commands) => commands.foreach { command =>
@@ -425,9 +426,10 @@ object Cli:
     def line(text: String): Unit =
       if script then idle()
       act(parseLine(text))
-    // Ctrl-C: `/stop` during a turn, and a hint with no open turn.
+    // Ctrl-C: `/stop` during a turn or a goal loop (8.5), and a hint with no open turn and no loop.
     def interrupt(): Unit =
-      if view.handle.state.position == Position.NoTurn then
+      val now = view.handle.state
+      if now.position == Position.NoTurn && now.loop.isEmpty then
         print("No turn is open. /quit ends the client, and the session stays open.")
       else act(Line.Stop)
     console.onInterrupt(() => interrupt())

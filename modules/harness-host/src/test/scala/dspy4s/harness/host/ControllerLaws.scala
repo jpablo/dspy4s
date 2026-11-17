@@ -128,12 +128,14 @@ class ControllerLaws extends munit.FunSuite:
     val calls: ConcurrentLinkedQueue[String]                                                 = ConcurrentLinkedQueue()
     val runs: ConcurrentLinkedQueue[(SessionId, Command, Source)]                            = ConcurrentLinkedQueue()
     val opens: ConcurrentLinkedQueue[(SessionId, SessionConfig, Command.Send, Source)]       = ConcurrentLinkedQueue()
+    val loops: ConcurrentLinkedQueue[Int]                                                    = ConcurrentLinkedQueue()
     def open(id: SessionId, config: Option[SessionConfig]): Either[HostError, SessionHandle] =
       calls.add(s"open ${id.value}"): Unit
       Left(HostError.OpenFailed("the fake peers open no handle"))
-    def openWith(id: SessionId, config: SessionConfig, task: Command.Send, source: Source) =
+    def openWith(id: SessionId, config: SessionConfig, task: Command.Send, source: Source, loop: Int) =
       calls.add(s"openWith ${id.value}"): Unit
       opens.add((id, config, task, source)): Unit
+      loops.add(loop): Unit
       Right(SessionState.initial)
     def runAs(id: SessionId, command: Command, source: Source) =
       calls.add(s"runAs ${id.value}"): Unit
@@ -232,7 +234,8 @@ class ControllerLaws extends munit.FunSuite:
         Vector("/w/1/b"),
         3,
         Some("a1b2"),
-        Some(true)
+        Some(true),
+        "off"
       )
     )
     val bare = HostSessions.cardOf(row(2).copy(goal = None, scope = None))
@@ -293,7 +296,14 @@ class ControllerLaws extends munit.FunSuite:
       idle.copy(unattended = 9, position = Position.InPolicy(0))   -> Delivery.InTurn,
       // A second send of the same request after a turn read the message.
       idle.copy(unattended = 8, waiting = 0) -> Delivery.InTurn,
-      none.copy(unattended = 20)             -> Delivery.InTurn
+      none.copy(unattended = 20)             -> Delivery.InTurn,
+      // A goal loop gives its N, and its count holds the turns that it gave (8.5).
+      idle.copy(unattended = 5, loop = Some(GoalLoop.start(5)))                -> Delivery.WaitsForPerson(5, 5),
+      idle.copy(unattended = 2, loop = Some(GoalLoop.start(5).copy(gave = 3))) -> Delivery.WaitsForPerson(5, 5),
+      idle.copy(unattended = 9, loop = Some(GoalLoop.start(20)))               -> Delivery.InTurn,
+      // After the end of a loop, a message waits also below the limit, and also with no limit.
+      idle.copy(unattended = 3, afterLoop = true) -> Delivery.WaitsForPerson(3, 8),
+      none.copy(unattended = 3, afterLoop = true) -> Delivery.WaitsForPerson(3, 3)
     )
     cases.foreach { (after, expected) =>
       assertEquals(told(after), (expected, summon[Data[Delivery]].encode(expected)), after.toString)
@@ -341,7 +351,7 @@ class ControllerLaws extends munit.FunSuite:
     val peers               = FakePeers(Vector.empty)
     val (sessions, journal) = handler(peers)
     val scope               = Scope.Worktree("", "feature", "/w/repo", "main")
-    val ref                 = sessions.start("Fix the fake build", scope, StrategyName.Window)
+    val ref                 = sessions.start("Fix the fake build", scope, StrategyName.Window, 0)
     val effect              = lastEffect(journal)
     assert(SessionId.valid(ref.id), ref.id)
     assertEquals(peers.calls.asScala.toVector, Vector(s"make $scope", s"openWith ${ref.id}"))
@@ -370,7 +380,7 @@ class ControllerLaws extends munit.FunSuite:
     val scope         = Scope.Directory("/fake/missing")
     val peers         = FakePeers(Vector.empty, refused = Set(scope))
     val (sessions, _) = handler(peers)
-    val error         = failure(sessions.start("goal", scope, StrategyName.Window))
+    val error         = failure(sessions.start("goal", scope, StrategyName.Window, 0))
     assert(error.exists(_.contains("does not exist")), error.toString)
     assert(peers.opens.isEmpty)
   }

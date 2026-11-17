@@ -68,12 +68,14 @@ def openRefusal(row: Option[CatalogRow]): Option[String] =
   }
 
 /** The text of a card for `/sessions`: one line with the id, the status, the goal or the scope, and the number of the
-  * files that the session made: `(1 file made)` for one file, and `(N files made)` for each other number.
+  * files that the session made: `(1 file made)` for one file, and `(N files made)` for each other number. A session
+  * with a goal loop that runs, or that ended, gives the loop too, for example `goal loop on 12/50` (8.5).
   */
 def cardText(card: SessionCard): String =
   val what  = if card.goal.nonEmpty then card.goal else card.scope.fold("no scope")(scopeText)
   val files = if card.made.size == 1 then "1 file made" else s"${card.made.size} files made"
-  s"${card.session.id}  ${card.status}  $what  ($files)"
+  val loop  = if card.loop == "off" then "" else s"  goal loop ${card.loop}"
+  s"${card.session.id}  ${card.status}$loop  $what  ($files)"
 
 /** The text of a release plan before the person confirms it: one line for each item, and the mark `(irreversible)` on
   * each item of `irreversible(plan, scopeState)`. An empty plan gives a line that says that nothing changes.
