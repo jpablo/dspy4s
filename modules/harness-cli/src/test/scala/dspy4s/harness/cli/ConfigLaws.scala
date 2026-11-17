@@ -151,6 +151,17 @@ class ConfigLaws extends munit.FunSuite:
     )
   }
 
+  // In the live check of 2026-11-17, the notice of the limit 1 said "the session ran 1 turns in a row".
+  test("CLI: the notice says 1 turn for one turn, and turns for more") {
+    def limit(n: Int) = work(Some(facts.copy(limits = facts.limits.copy(unattendedTurns = Some(TurnLimit.AtMost(n))))))
+
+    val one = heldText(limit(1).copy(unattended = 1, waiting = 1)).getOrElse(fail("no notice for the limit 1"))
+    assert(one.contains("the session ran 1 turn in a row"), one)
+    assert(!one.contains("1 turns"), one)
+    val two = heldText(limit(2).copy(unattended = 2, waiting = 1)).getOrElse(fail("no notice for the limit 2"))
+    assert(two.contains("the session ran 2 turns in a row"), two)
+  }
+
   test("CLI: /config parses, and the help lists it") {
     assertEquals(parseLine("/config"), Line.Config)
     assertEquals(parseLine("/config x"), Line.Unknown("/config x"))

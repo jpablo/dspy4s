@@ -164,8 +164,8 @@ A line that starts with `/` is a command. Each other line is a message to the se
 | `/close abandoned REASON` | end the session as abandoned, with the reason | |
 | `/close replaced ID` | end the session as replaced by the session ID | |
 | `/sessions` | list the sessions of the host (with --controller) | |
-| `/open ID` | show the session ID (with --controller) | For a session that has ended, it names `/reopen ID`. |
-| `/reopen ID` | open again the session ID, which has ended (with --controller) | |
+| `/open ID` | show the session ID (with --controller) | For a session that has ended, it names `/reopen ID`. The start of the id is enough when only one session has it. |
+| `/reopen ID` | open again the session ID, which has ended (with --controller) | The start of the id is enough when only one session has it. |
 | `/controller` | show the controller again (with --controller) | |
 | `/quit` | end the client. The session stays open for --session | Ctrl-D on an empty line does the same. |
 
@@ -258,7 +258,8 @@ After a stop, a job of the turn can still run. The client then prints
 it, for example `/stopjob 2.0 stops it.`
 
 A message of another session, of the harness or of a job can start no turn. This occurs after 8 turns in a row with
-no message of yours. The client prints the message, and then a notice:
+no message of yours. The client prints the message, and then a notice. The notice shows one time while messages
+wait, also when more messages come, and also when `/open` shows the session again:
 
 ```text
 A message waits for you: the session ran 8 turns in a row with no message of yours, and the limit is 8. Type a

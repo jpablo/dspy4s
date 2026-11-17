@@ -1714,7 +1714,8 @@ problems. Each one held against the code. These choices were made with the user:
   each session of the host, and `0` gives `NoLimit`. A restart with a higher limit starts the turn of a message
   that waits. `waitsForPerson` is true while the limit holds a message with no open turn. Then the client prints
   a notice after the message, and `/status` shows the notice and the count of the turns. `/config` and the
-  inspector show the limit.
+  inspector show the limit. The client prints the notice one time for each wait: after the first message that
+  waits after the last turn, also in the replay of `/open`.
 - `tell` gives the controller the same fact (decided on 2026-11-17). It returns a `Delivery`, which the handler
   reads from the state that the commit of the receiver gives (`HostSessions.deliveryOf`):
   `WaitsForPerson(turns, limit)` when `waitsForPerson` holds, else `InTurn`. Before, `tell` returned `Unit`, so

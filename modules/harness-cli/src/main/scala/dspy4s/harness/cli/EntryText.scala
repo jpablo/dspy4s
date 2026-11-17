@@ -11,7 +11,8 @@ import dspy4s.harness.kernel.{
   Logged,
   ModelChoice,
   Source,
-  TurnOutcome
+  TurnOutcome,
+  grouped
 }
 import zio.blocks.schema.json.Json
 
@@ -78,6 +79,11 @@ private[cli] def inQuotes(text: String): String =
     else String(Character.toChars(cp))
   }
   "\"" + body.mkString + "\""
+
+/** The number `n` and `noun`: `1 turn` for one, and the noun with an `s` for each other number, for example `0 turns`
+  * and `2 turns`. The number has the commas of `grouped`, for example `1,200 lines`.
+  */
+private[cli] def count(n: Int, noun: String): String = if n == 1 then s"1 $noun" else s"${grouped(n.toLong)} ${noun}s"
 
 /** `text` with a `\uXXXX` escape for each character that `inQuotes` escapes as hidden, and no other change. */
 private[cli] def visible(text: String): String =

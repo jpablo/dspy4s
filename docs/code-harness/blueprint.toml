@@ -3552,7 +3552,7 @@ kind = "function"
 name = "resolveSession"
 ref = "10.2"
 uses = ["session-id"]
-text = "The session of --session among the ids of the journal files: the session with that id, or else the one session whose id starts with it. An error for a blank id, for none and for more."
+text = "The session of --session among the ids of the journal files, and of /open and /reopen among the ids of the cards (2026-11-17): the session with that id, or else the one session whose id starts with it. An error for a blank id, for none and for more, which ends with the hint of the command that lists the sessions."
 
 [[group]]
 id = "console"

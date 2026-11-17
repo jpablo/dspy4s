@@ -4,7 +4,7 @@ import dspy4s.adapters.ChatAdapter
 import dspy4s.core.contracts.{DspyError, RuntimeContext, RuntimeError}
 import dspy4s.core.runtime.RuntimeEnvironment
 import dspy4s.harness.Secrets
-import dspy4s.harness.guest.JobStatus
+import dspy4s.harness.guest.{JobStatus, SessionCard}
 import dspy4s.harness.inspect.Inspector
 import dspy4s.harness.host.{
   Behind,
@@ -289,7 +289,10 @@ object Cli:
     *   - After a turn that ends `Aborted`, the client prints `stopNotice`: each job of that turn that still runs, and
     *     how to stop it (10.3).
     *   - After a message whose sender is not the person, the client prints `heldText` when the message waits for the
-    *     person (8.7): the session ran its limit of turns in a row with no message of the person.
+    *     person (8.7): the session ran its limit of turns in a row with no message of the person. The notice comes from
+    *     the state of now, so it shows only after a message that came after the last turn: no turn read that message.
+    *     It shows once for each wait, in a replay and in the live feed, also when more messages come. `/status` shows
+    *     it each time.
     *   - A console with the screen of CLI_SCREEN.md (`ClientConsole.rich`) gets the rows of `Screen.after` for each
     *     entry, in place of `entryText`, and it reads the live block (`Screen.live`) and the footer (`Screen.footer`)
     *     of the session that the client shows. Ctrl-O switches the detail of a cell, and `/show ID` prints a cell or a
@@ -313,10 +316,11 @@ object Cli:
     *     `/stop` wait too, so a person stops a script with the end of the process.
     *   - With a desk (8.7), `/sessions` prints the card of each session, `/open ID` shows the session `ID`, `/reopen
     *     ID` opens an ended session again and shows it, and `/controller` shows the controller: the client then
-    *     subscribes to the feed of that session, prints its entries, and sends the commands to it. `/close OUTCOME`
-    *     prints the release plan, asks the person to confirm each irreversible item with a line `yes`, and runs the
-    *     release through the desk. After a release that ran, the client shows the controller. With no desk, these lines
-    *     print that the client has one session, and `/close OUTCOME` sends `Close` with no release.
+    *     subscribes to the feed of that session, prints its entries, and sends the commands to it. As with `--session`,
+    *     `ID` can be the start of an id that only one card has (`resolveSession`). `/close OUTCOME` prints the release
+    *     plan, asks the person to confirm each irreversible item with a line `yes`, and runs the release through the
+    *     desk. After a release that ran, the client shows the controller. With no desk, these lines print that the
+    *     client has one session, and `/close OUTCOME` sends `Close` with no release.
     */
   def loop(
       handle : SessionHandle,
@@ -461,7 +465,9 @@ object Cli:
   /** Runs a desk line of the loop (8.7), and gives the session that the client shows after it. The confirmation of an
     * irreversible item of a release is the next line of `console`. A release ends the session, so after a release that
     * ran, it gives the controller. A `/close` of the controller prints that the controller never ends. A session that
-    * does not open prints the error of the host in words (`HostError.words`).
+    * does not open prints the error of the host in words (`HostError.words`). `/open` and `/reopen` find the id among
+    * the cards of the desk, as `--session` finds it among the journal files (`resolveSession`). An id that no card has,
+    * and a start of more than one id, print the error, and no session opens.
     */
   private def deskStep(
       desk   : Option[Desk],
@@ -481,6 +487,14 @@ object Cli:
         case Left(error) =>
           print(s"The session ${id.value} did not open: ${error.words}")
           handle
+    // The full id of `/open` or `/reopen` among the cards, and then `open` of that id.
+    def resolved(cards: Vector[SessionCard], wanted: SessionId)(open: SessionId => Either[HostError, SessionHandle])
+        : SessionHandle =
+      resolveSession(cards.map(card => SessionId(card.session.id)), wanted.value, "/sessions lists them.") match
+        case Right(id)   => shown(open(id), id)
+        case Left(error) =>
+          print(error)
+          handle
     desk match
       case None =>
         print("This client shows one session. Start the client with --controller to reach the other sessions.")
@@ -490,8 +504,8 @@ object Cli:
             val cards = d.cards
             if cards.isEmpty then print("The host has no session.") else cards.foreach(card => print(cardText(card)))
             handle
-          case Line.Open(id)               => shown(d.open(id), id)
-          case Line.Reopen(id)             => shown(d.reopen(id), id)
+          case Line.Open(id)               => resolved(d.cards, id)(d.open)
+          case Line.Reopen(id)             => resolved(d.cards, id)(d.reopen)
           case Line.Controller             => shown(d.controller, Controller.id)
           case Line.Close(outcome, reason) =>
             if release(d, handle, outcome, reason, console, print) then shown(d.controller, Controller.id) else handle
@@ -595,7 +609,8 @@ private final class View(
     val turn = AtomicLong(h.state.lastTurn)
     // A rich console starts the screen from the journal up to `from`, so the next entries continue the turn.
     val screen = AtomicReference(if rows.isDefined then Screen.of(h.read(-1).filter(_.seq <= from)) else Screen.empty)
-    val now    = Watched(h, h.subscribe(1024), Shown(from), turn, screen)
+    // No `lastTurn` is below -1, so `Long.MinValue` marks a view with no notice of a message that waits.
+    val now = Watched(h, h.subscribe(1024), Shown(from), turn, screen, AtomicLong(Long.MinValue))
     h.read(from).foreach(logged => take(now, Right(logged)))
     now
 
@@ -606,7 +621,10 @@ private final class View(
       case Left(_)       => now.handle.read(now.shown.last).foreach(printEntry(now, _))
 
   // An entry that the client did not show yet, the stop notice after a turn that a stop ended, and the notice of a
-  // message of another sender that waits for the person (8.7).
+  // message of another sender that waits for the person (8.7). The notice comes from the state of now, and not from
+  // the state at the entry. So it shows only for a message after the last turn of now, which no turn read. A wait
+  // ends at the next turn, so the `lastTurn` of a notice marks its wait, and each wait gets one notice. A replay of
+  // `opened` and the live feed share this mark.
   private def printEntry(now: Watched, logged: Logged): Unit =
     now.shown.next(logged).foreach { fresh =>
       rows match
@@ -620,17 +638,24 @@ private final class View(
         case Entry.TurnEnded(TurnOutcome.Aborted) =>
           val h = now.handle
           stopNotice(h.state, now.turn.get, jobStarts(h.read(now.turn.get)), h.jobStatus).foreach(print)
-        case Entry.Input(_, _, _) if fresh.meta.source != Source.User => heldText(now.handle.state).foreach(print)
-        case _                                                        => ()
+        case Entry.Input(_, _, _) if fresh.meta.source != Source.User =>
+          val state = now.handle.state
+          heldText(state)
+            .filter(_ => fresh.seq > state.lastTurn && now.noticed.getAndSet(state.lastTurn) != state.lastTurn)
+            .foreach(print)
+        case _ => ()
     }
 
-/** One session of a `View`: its handle, its feed, what the client showed, the turn of a stop notice, and its screen. */
+/** One session of a `View`: its handle, its feed, what the client showed, the turn of a stop notice, its screen, and
+  * the `lastTurn` of the last notice of a message that waits (`noticed`), so each wait gets one notice.
+  */
 private final case class Watched(
-    handle: SessionHandle,
-    feed  : Feed,
-    shown : Shown,
-    turn  : AtomicLong,
-    screen: AtomicReference[Screen]
+    handle : SessionHandle,
+    feed   : Feed,
+    shown  : Shown,
+    turn   : AtomicLong,
+    screen : AtomicReference[Screen],
+    noticed: AtomicLong
 )
 
 /** The jobs of `handle` that run now, for the footer. */

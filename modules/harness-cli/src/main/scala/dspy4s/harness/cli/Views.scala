@@ -72,13 +72,14 @@ def pendingCalls(current: SessionState, log: Vector[Logged]): Vector[(Long, Guar
 
 /** The notice of a message that waits for the person (8.7), or none when no message waits (`waitsForPerson`). The
   * session ran its limit of turns in a row with no message of the person, so no turn starts until the person writes.
-  * The notice gives the count and the limit apart, because a restart with a lower limit leaves a count above it.
+  * The notice gives the count and the limit apart, because a restart with a lower limit leaves a count above it. It
+  * says `1 turn` for one turn, and `N turns` for more (`count`).
   */
 def heldText(s: SessionState): Option[String] =
   s.config.unattendedLimit match
     case TurnLimit.AtMost(turns) if waitsForPerson(s) =>
       Some(
-        s"A message waits for you: the session ran ${grouped(s.unattended.toLong)} turns in a row with no message of " +
+        s"A message waits for you: the session ran ${count(s.unattended, "turn")} in a row with no message of " +
           s"yours, and the limit is ${grouped(turns.toLong)}. Type a message, and the next turn reads it with the " +
           "messages that wait. --unattended-turns N changes the limit at the next start."
       )
@@ -225,20 +226,27 @@ def sessionsText(rows: Vector[CatalogRow], zone: ZoneId): String =
       if row.firstMessage.isEmpty then head else s"$head\n    ${visible(row.firstMessage)}"
     }.mkString("\n")
 
-/** The session of `--session` (10.2) among the sessions `ids` of the journal files: the session whose id is `wanted`,
-  * or else the one session whose id starts with `wanted`. An error for an empty `wanted`, and when no session or more
-  * than one session starts with it.
+/** The session of `--session` (10.2) among the sessions `ids` of the journal files, and the session of `/open` and
+  * `/reopen` (8.7) among the ids of the cards: the session whose id is `wanted`, or else the one session whose id
+  * starts with `wanted`. An error for an empty `wanted`, and when no session or more than one session starts with it.
+  * Each error ends with `hint`, which names the command that lists the sessions: `--list` for `--session`, and
+  * `/sessions` for `/open` and `/reopen`.
   */
-def resolveSession(ids: Vector[SessionId], wanted: String): Either[String, SessionId] =
-  if wanted.isBlank then Left("Give the id of a session, or the start of it. --list lists them.")
+def resolveSession(
+    ids   : Vector[SessionId],
+    wanted: String,
+    hint  : String = "--list lists them."
+): Either[String, SessionId] =
+  if wanted.isBlank then Left(s"Give the id of a session, or the start of it. $hint")
   else
     ids.find(_.value == wanted) match
       case Some(exact) => Right(exact)
       case None        => ids.filter(_.value.startsWith(wanted)) match
           case Vector(one) => Right(one)
-          case Vector()    => Left(s"No session of the root has an id that starts with $wanted. --list lists them.")
+          case Vector()    => Left(s"No session of the root has an id that starts with $wanted. $hint")
           case more        =>
-            Left(s"${more.size} sessions have an id that starts with $wanted. Give more of the id. --list lists them.")
+            val many = s"${more.size} sessions have an id that starts with $wanted."
+            Left(s"$many Give more of the id. $hint")
 
 /** The status of a job in words. A job with a process has the status of the job table in the words of the host
   * (`jobStatusWords`), the same words as the message at the end of a job. A job with no process (no status, or `Lost`)

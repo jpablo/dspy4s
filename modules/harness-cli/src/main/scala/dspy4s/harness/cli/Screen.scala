@@ -615,8 +615,6 @@ object Screen:
   private def exitOf(rendered: String): Option[Int] =
     ExitCode.findAllMatchIn(rendered).toVector.lastOption.flatMap(_.group(1).toIntOption).filter(_ != 0)
 
-  private def count(n: Int, noun: String): String = if n == 1 then s"1 $noun" else s"$n ${noun}s"
-
   private def capital(text: String): String = text.take(1).toUpperCase + text.drop(1)
 
   private def firstLine(text: String): String = text.linesIterator.nextOption().getOrElse("").strip

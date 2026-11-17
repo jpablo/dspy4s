@@ -543,6 +543,35 @@ class CliLaws extends munit.FunSuite:
     assert(!printed(running).exists(_.contains("waits for you")), printed(running).mkString("\n"))
   }
 
+  // In the live check of 2026-11-17, /open of a session that held a message of the controller showed the notice after
+  // the goal of start, which had started a turn, and again after the message that waited.
+  test("CLI: a replay shows the notice once for the messages after the last turn, and not after a message that ran") {
+    def input(seq: Long, text: String): Logged =
+      Logged(
+        seq,
+        Meta(1000L + seq, Source.Controller, Taint.Trusted, true),
+        Entry.Input(RequestId(s"r$seq"), text, Map.empty)
+      )
+    val ran = Vector(
+      input(1, "FAKE-GOAL"),
+      at(2, 1002, Entry.TurnStarted),
+      at(3, 1003, Entry.StepStarted(0)),
+      at(4, 1004, Entry.Acted("", "FAKE-DONE", None)),
+      at(5, 1005, Entry.TurnEnded(TurnOutcome.Replied("FAKE-DONE")))
+    )
+
+    val now = SessionState.initial.copy(closed = false, unattended = 8, waiting = 2, lastTurn = 2L)
+
+    def notices(log: Vector[Logged]): Int =
+      val console = RecordingConsole()
+      try
+        Cli.loop(EntriesHandle(log, now = now), console, script = false, desk = None, home = "/home/a"): Unit
+        console.printed.asScala.count(_.contains("A message waits for you"))
+      finally console.release()
+    assertEquals(notices(ran), 0)
+    assertEquals(notices(ran ++ Vector(input(6, "FAKE-HELD-1"), input(7, "FAKE-HELD-2"))), 1)
+  }
+
   test("CLI: the live block of a rich console shows the draft of the policy of the handle (CLI_SCREEN.md, 13)") {
     val console = RecordingConsole()
     val open    = Vector(at(1, 1000, Entry.TurnStarted), at(2, 1100, Entry.StepStarted(0)))

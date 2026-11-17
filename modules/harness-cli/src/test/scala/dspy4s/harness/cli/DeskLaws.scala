@@ -42,7 +42,9 @@ class DeskLaws extends munit.FunSuite:
       None
     )
 
-  /** A desk with two sessions: `s2`, which the client shows first, and the controller. */
+  /** A desk with the cards of `s2`, which the client shows first, `s3` and `s4`, and with the controller. As the desk
+    * of a host, it has a card for each session, also for a session that has ended.
+    */
   private final class FakeDesk extends Desk:
     val controllerHandle: NamedHandle                                = NamedHandle("controller")
     val other: NamedHandle                                           = NamedHandle("s3")
@@ -50,7 +52,7 @@ class DeskLaws extends munit.FunSuite:
     // The session whose feed ends at the end of its release, as the host ends a session after `Close`.
     @volatile var endsAtRelease: Option[NamedHandle]  = None
     val confirmed: ConcurrentLinkedQueue[ReleaseItem] = ConcurrentLinkedQueue()
-    def cards: Vector[SessionCard]                    = Vector(card(2), card(3))
+    def cards: Vector[SessionCard]                    = Vector(card(2), card(3), card(4))
     // The session s4 has ended: open says so, and reopen opens it.
     val ended: NamedHandle                                    = NamedHandle("s4")
     def open(id: SessionId): Either[HostError, SessionHandle] =
@@ -219,6 +221,32 @@ class DeskLaws extends munit.FunSuite:
     assert(output.contains("/reopen"), output)
     assert(output.contains("FAKE-s4"), output)
     assertEquals(desk.ended.texts, Vector("for s4"))
+  }
+
+  // In the live check of 2026-11-17, /open 11e8a3b5 gave "no session 11e8a3b5", but --session takes the start of an id.
+  test("Desk: /open and /reopen take the start of an id that only one card has, as --session does") {
+    val long  = NamedHandle("fake-4711-long")
+    val ended = NamedHandle("fake-5822-ended")
+    val desk  = new Desk:
+      def cards: Vector[SessionCard] =
+        Vector("fake-4711-long", "fake-5822-ended", "fake-4799-other").map(id => card(2).copy(session = SessionRef(id)))
+      def open(id: SessionId): Either[HostError, SessionHandle] =
+        if id == long.id then Right(long)
+        else if id == ended.id then Left(HostError.Ended)
+        else Left(HostError.OpenFailed(s"no session ${id.value}"))
+      def reopen(id: SessionId): Either[HostError, SessionHandle] =
+        if id == ended.id then Right(ended) else Left(HostError.OpenFailed(s"no session ${id.value}"))
+      def controller: Either[HostError, SessionHandle] =
+        Right(NamedHandle("controller"))
+      def planOf(id: SessionId, outcome: SessionOutcome): Either[HostError, (ScopeState, Vector[ReleaseItem])] =
+        Left(HostError.OpenFailed("no plan"))
+      def release(id: SessionId, outcome: SessionOutcome, reason: String, confirm: ReleaseItem => Boolean)
+          : Either[HostError, Vector[ReleaseStep]] = Left(HostError.OpenFailed("no release"))
+    val output = run("/open fake-471\nfor long\n/reopen fake-58\nfor ended\n/open fake-4\n/quit\n", Some(desk))
+    assertEquals(long.texts, Vector("for long"))
+    assertEquals(ended.texts, Vector("for ended"))
+    assert(output.contains("2 sessions have an id that starts with fake-4"), output)
+    assert(output.contains("/sessions lists them"), output)
   }
 
   test("Desk: /close while the client shows the controller prints that the controller never ends") {
