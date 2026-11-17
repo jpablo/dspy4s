@@ -2,6 +2,7 @@ package dspy4s.harness.inspect
 
 import dspy4s.harness.host.{SessionFile, jobName, jobStatusOf, jobStatusWords}
 import dspy4s.harness.kernel.{EffectResult, Entry, Logged, SessionId, Source, Taint}
+import dspy4s.harness.kernel.{limitLines, modeWords, sandboxLines}
 import zio.blocks.schema.json.Json
 
 import Html.escape
@@ -47,7 +48,16 @@ object EntryViews:
     */
   def card(logged: Logged): String =
     logged.entry match
-      case Entry.Activated(versions, config) => facts(
+      case Entry.Activated(versions, config) =>
+        val guard =
+          if config.guard.rules.isEmpty then "none, so each call runs"
+          else config.guard.rules.map(rule => s"${rule.verdict}: ${ScalaText.line(rule.rule)}").mkString("; ")
+        // The limits and the sandbox are the facts of the host of this activation, as `/config` shows them.
+        val host = config.host.fold(note("This activation recorded no limits and no sandbox."))(host =>
+          "<h3>Limits</h3>" + facts(limitLines(host.limits)*) + "<h3>Sandbox</h3>" +
+            facts(sandboxLines(host.sandbox, "")*)
+        )
+        facts(
           "model"     -> config.model.model,
           "kind"      -> config.kind.toString,
           "steps"     -> config.steps.toString,
@@ -55,9 +65,12 @@ object EntryViews:
           "owner"     -> ScalaText.line(config.owner),
           "scope"     -> ScalaText.line(config.scope),
           "goal"      -> config.goal.getOrElse("none"),
+          "mode"      -> modeWords(config.mode),
+          "ceiling"   -> modeWords(config.ceiling),
+          "guard"     -> guard,
           "compiler"  -> versions.compiler,
           "guest API" -> versions.guestApi
-        ) + folded("The preamble", config.preamble)
+        ) + host + folded("The preamble", config.preamble)
       case Entry.Input(request, text, values) => paragraph(text) +
           (if values.isEmpty then "" else facts(values.toVector.map((k, v) => k -> v.print)*)) +
           note(s"request ${request.value}")

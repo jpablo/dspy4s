@@ -73,7 +73,8 @@ object Controller:
       "/allow [N] [once|turn|session] allows each call that waits for an approval, or only the call N of /status. " +
       "The last word sets how long the approval stays. The default is once.\n" +
       "/jobs lists the jobs of the session. /stopjob ID stops the job ID of /jobs.\n" +
-      "/status shows the folder, the turn, the calls that wait for an approval and the jobs.\n" +
+      "/status shows the folder, the turn, the calls that wait for an approval, the approvals and the jobs.\n" +
+      "/config shows the settings of the session: the model, the mode, the guard, the limits and the sandbox.\n" +
       "/reasoning off|line|short|full sets how much of the reasoning of a step the client shows.\n" +
       "/effort [LEVEL] shows the reasoning effort and its levels, or sets the effort of the next steps.\n" +
       "/show ID shows the cell ID or the call ID of the session in full.\n" +

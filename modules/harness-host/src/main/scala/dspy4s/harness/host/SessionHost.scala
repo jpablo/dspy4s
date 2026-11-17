@@ -5,7 +5,7 @@ import dspy4s.harness.{Budget, Draft, Harness, Journal, MemoryTree, Secrets, Tur
 import dspy4s.harness.guest.{JobStatus, Mode, Scope}
 import dspy4s.harness.kernel.{Command, EffectId, Entry, Logged, Next, Position, ReleaseItem, ReleaseStep, RequestId}
 import dspy4s.harness.kernel.{JobEnd, JobSelector, Owner, Rejection, ReleasePlans, ReleaseResult, ScopeState}
-import dspy4s.harness.kernel.{irreversible, releasePlan}
+import dspy4s.harness.kernel.{HostFacts, irreversible, releasePlan}
 import dspy4s.harness.sandbox.Layout
 import dspy4s.harness.kernel.{
   SessionConfig, SessionId, SessionOutcome, SessionState, Source, TurnOutcome, closing, next
@@ -177,6 +177,14 @@ trait SessionRuntime:
     */
   def memoryUse(session: SessionId): Option[MemoryUse] =
     val _ = session
+    None
+
+  /** The limits and the sandbox of an activation of `config` in this runtime, or none. The host puts them in the
+    * configuration of each `Activate` and `Begin`, so the journal shows what acted on each turn (`HostFacts`). A reopen
+    * gets the facts of the runtime of the reopen, not the facts of the journal. The default is none.
+    */
+  def facts(config: SessionConfig): Option[HostFacts] =
+    val _ = config
     None
 
   /** The tokens of the last call to the policy of the open session `session`, or none. The default is none. */
@@ -859,13 +867,16 @@ private final class OpenSession private (
     val _ = error
     shutdown()
 
-  /** Commits the `Activate` of this open. */
   /** Commits the `Begin` of a new session with its task `task` from `source` (8.7): one commit. */
   private def begin(config: SessionConfig, task: Command.Send, source: Source): Either[HostError, Unit] =
-    writer.run(Command.Begin(Harness.versions, config, task.request, task.text), source).map(_ => ())
+    writer.run(Command.Begin(Harness.versions, withFacts(config), task.request, task.text), source).map(_ => ())
 
+  /** Commits the `Activate` of this open. */
   private def activate(config: SessionConfig): Either[HostError, Unit] =
-    writer.run(Command.Activate(Harness.versions, config), Source.Harness).map(_ => ())
+    writer.run(Command.Activate(Harness.versions, withFacts(config)), Source.Harness).map(_ => ())
+
+  /** `config` with the facts of the runtime of this open, in place of the facts of an earlier activation. */
+  private def withFacts(config: SessionConfig): SessionConfig = config.copy(host = place.runtime.facts(config))
 
   /** Calls `SessionRuntime.opened` once for this open, with the configuration `config` of the open, and keeps the
     * result until the end of the session. `start` calls it before the `Activate`, when no commit and no other thread

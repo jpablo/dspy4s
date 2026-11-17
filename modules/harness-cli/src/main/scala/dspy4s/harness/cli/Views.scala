@@ -1,10 +1,12 @@
 package dspy4s.harness.cli
 
-import dspy4s.harness.guest.JobStatus
-import dspy4s.harness.host.{CatalogRow, ContextUse, jobName, jobStatusWords}
+import dspy4s.harness.guest.{Access, JobStatus}
+import dspy4s.harness.host.{CatalogRow, ContextUse, ExchangeFile, SessionFile, jobName, jobStatusWords}
 import dspy4s.harness.kernel.{EffectId, EffectResult, Entry, GuardRule, Logged, Position, SessionId, SessionState}
+import dspy4s.harness.kernel.{grouped, limitLines, modeWords, sandboxLines}
 import dspy4s.harness.sandbox.SandboxedShell
 
+import java.nio.file.Path
 import java.time.format.DateTimeFormatter
 import java.time.{Instant, ZoneId}
 
@@ -92,7 +94,8 @@ def statusText(
     ("Pending calls. /allow N allows the call N, /allow allows each call, and a message refuses them:" +:
       calls.map((seq, rule) => s"  $seq. ${callText(rule)}")).mkString("\n")
   }
-  val jobs = Option.when(current.jobs.nonEmpty) {
+  val grants = Option.when(current.grants.nonEmpty)(("Active grants:" +: grantLines(current)).mkString("\n"))
+  val jobs   = Option.when(current.jobs.nonEmpty) {
     val running = current.jobs.keys.count(job => status.get(job).contains(JobStatus.Running))
     s"$running of ${current.jobs.size} jobs run. /jobs lists them."
   }
@@ -100,7 +103,88 @@ def statusText(
   val tokens = context.map(use => s"The context: ${Screen.contextWords(use, facts.window, " tokens")}.")
   val closed = Option.when(current.closed)("The session is closed.")
   val folder = s"The folder: ${SandboxedShell.pathOf(current.config.scope)}."
-  (Vector(folder, turn) ++ effort ++ tokens ++ stop ++ pending ++ jobs ++ closed).mkString("\n")
+  (Vector(folder, turn) ++ effort ++ tokens ++ stop ++ pending ++ grants ++ jobs ++ closed).mkString("\n")
+
+/** One line for each active grant of `current`, with its lifetime in words and its call, for example
+  * `  for this session: exec "git push"`. The grants with a shorter lifetime come first (5.5).
+  */
+private def grantLines(current: SessionState): Vector[String] =
+  current.grants.toVector.map(grant => (grant.lifetime.ordinal, s"  ${grant.lifetime.words}: ${callText(grant.rule)}"))
+    .sorted.map(_._2)
+
+/** What the client knows apart from the journal, for `/config`: the root of the host, the base URL of the endpoint of
+  * the model, and whether the host writes the exchange file of each session (`DSPY_EXCHANGES`). An empty root or URL is
+  * not known.
+  */
+final case class ClientFacts(root: Path, endpoint: String, exchanges: Boolean) derives CanEqual
+
+object ClientFacts:
+  val unknown: ClientFacts = ClientFacts(Path.of(""), "", exchanges = false)
+
+/** The text of `/config`: each setting that acts on the session `id` and on its turns, in eight parts. The session, the
+  * model, the mode, the guard, the limits and the sandbox come from the configuration of the last `Activated`
+  * (`current.config`), which holds the facts of the host of this activation (`HostFacts`). The grants come from
+  * `current`, the context window from `facts`, and the endpoint and the files from `client`. A path in the home folder
+  * `home` starts with `~`. An activation of an older host has no limits and no sandbox, and the text says so.
+  */
+def configText(id: SessionId, current: SessionState, client: ClientFacts, facts: ModelFacts, home: String): String =
+  val config                      = current.config
+  def short(path: String): String =
+    if home.nonEmpty && (path == home || path.startsWith(home + "/")) then "~" + path.drop(home.length) else path
+  def lines(pairs: Vector[(String, String)]): Vector[String] = pairs.map((name, value) => s"  $name: ${visible(value)}")
+  def known(text : String): String                           = if text.isEmpty then "not known" else text
+  val noFacts                                                = "  This activation recorded no limits and no sandbox."
+  val session                                                = lines(Vector(
+    "id"           -> id.value,
+    "owner"        -> config.owner.words,
+    "goal"         -> config.goal.getOrElse("none"),
+    "scope"        -> s"${config.scope.productPrefix} ${short(SandboxedShell.pathOf(config.scope))}",
+    "strategy"     -> config.strategy.toString,
+    "kind of turn" -> config.kind.toString
+  ))
+  val model = lines(
+    Vector("name" -> config.model.model, "endpoint" -> known(client.endpoint)) ++
+      config.model.options.toVector.sortBy(_._1).map((name, value) => s"option $name" -> value.print) :+
+      ("context window" -> facts.window.fold("not known")(window => s"${grouped(window)} tokens"))
+  )
+  val mode = lines(
+    Vector("this session" -> modeWords(config.mode)) ++
+      Option.when(config.ceiling != config.mode)("the most for a session that it starts" -> modeWords(config.ceiling))
+  )
+  val guard =
+    if config.guard.rules.isEmpty then Vector("  rules: none, so each call runs")
+    else config.guard.rules.map(rule => s"  ${rule.verdict}: ${callText(rule.rule)}")
+  val grants = if current.grants.isEmpty then Vector("  none") else grantLines(current)
+  val limits = lines(Vector(
+    "steps of a turn"      -> grouped(config.steps.toLong),
+    "turns with no person" -> grouped(SessionState.UnattendedTurns.toLong)
+  )) ++ config.host.fold(Vector(noFacts))(host => lines(limitLines(host.limits)))
+  val network = "network" -> (if config.mode.network == Access.Full then "on, for the hosts of the list" else "off")
+  val sandbox = config.host.fold(lines(Vector(network)))(host =>
+    lines(network +: sandboxLines(host.sandbox, home))
+  )
+  val root  = client.root.toString
+  val files = lines(
+    if root.isEmpty then Vector("root" -> "not known")
+    else
+      Vector(
+        "root"          -> short(root),
+        "journal"       -> short(SessionFile.folderOf(client.root).resolve(s"${id.value}.db").toString),
+        "exchange file" ->
+          (if client.exchanges then short(ExchangeFile.pathOf(client.root, id).toString)
+           else "off (DSPY_EXCHANGES=off)")
+      )
+  )
+  Vector(
+    "Session" -> session,
+    "Model"   -> model,
+    "Mode"    -> mode,
+    "Guard"   -> guard,
+    "Grants"  -> grants,
+    "Limits"  -> limits,
+    "Sandbox" -> sandbox,
+    "Files"   -> files
+  ).flatMap((head, body) => head +: body).mkString("\n")
 
 /** The text of `--list` (10.2): the sessions of `rows`, the newest first. Each session has one line with its id, its
   * status in words (`SessionStatus.words`, as the card of the controller), the time of its last entry in `zone` and its

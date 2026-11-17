@@ -72,7 +72,7 @@ that file also when you give another `--root`.
 | `DSPY_MODEL` | The name of the model. With it, the client also reads the context window and the effort levels from `GET <base>/models`. | `none` |
 | `DSPY_NATIVE_REASONING` | `true` tells the client that the model gives its reasoning apart from its text. | not set |
 | `DSPY_REASONING_EFFORT` | The effort level of a new session, for example `low`. It goes to the model as the option `reasoning_effort`. | `low` with native reasoning, else no effort |
-| `DSPY_CONTEXT_WINDOW` | The size of the context window in tokens (a whole number above 0), for the footer and `/status`. It wins over the value of the endpoint. | the value of `GET <base>/models` |
+| `DSPY_CONTEXT_WINDOW` | The size of the context window in tokens (a whole number above 0), for the footer, `/status` and `/config`. It wins over the value of the endpoint. | the value of `GET <base>/models` |
 | `DSPY_SUMMARY_OPTIONS` | A JSON object: the provider options of each summary call of the memory. `{}` sends no option. | `{"reasoning_effort": "none"}` with native reasoning, else `{}` |
 | `DSPY_EXCHANGES` | `off` turns the exchange file of each session off. | on |
 | `NO_COLOR` | Any value that is not empty turns the colors of the client off. | colors on |

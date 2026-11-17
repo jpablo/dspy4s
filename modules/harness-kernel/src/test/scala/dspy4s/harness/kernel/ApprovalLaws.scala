@@ -72,6 +72,21 @@ class ApprovalLaws extends ScalaCheckSuite:
     }
   }
 
+  test("Grant: the text after a grant gives the exact call, so the model makes the same call again") {
+    // A live model made the call again with another goal text, and the grant did not cover it (G3).
+    val start = GuardRule("start", ArgMatch.Exact(Json.Object(("goal", Json.String("Count the lines.")))))
+    val text  = approvedText(start)
+    assert(text.contains("""start({"goal":"Count the lines."})"""), text)
+    assert(text.contains("with the same arguments"), text)
+    assert(text.contains("other arguments"), text)
+    // A long call does not go into the text. The model has the code of its cell.
+    val write = GuardRule("write", ArgMatch.Exact(Json.Object(("text", Json.String("x" * 5_000)))))
+    assert(!approvedText(write).contains("xxxx"), approvedText(write))
+    assert(approvedText(write).contains("with the same arguments"), approvedText(write))
+    // A rule that is not exact covers more than one call, so the text names only the operation.
+    assert(approvedText(exec).contains("`exec`"), approvedText(exec))
+  }
+
   property("Grant: a journal fork starts with no grants") {
     forAll(schedules)(run => assert(forked(run.journal).grants.isEmpty))
   }

@@ -435,6 +435,29 @@ object Fixtures:
 
   def activated(c: SessionConfig = config()): Entry = Entry.Activated(versions, c)
 
+  /** Host facts with the default limits of the harness and a sandbox of macOS. */
+  val hostFacts: HostFacts = HostFacts(
+    Limits(
+      cellMillis = 30_000L,
+      callsPerCell = 10_000,
+      cellsPerRepl = 300,
+      commandSeconds = 600,
+      observationChars = 4_000,
+      memoryChars = 40_000,
+      modelCalls = 60,
+      summaryCalls = 64,
+      batch = 4,
+      depth = 2
+    ),
+    SandboxFacts(
+      backend = Some("Seatbelt"),
+      hosts = Vector.empty,
+      secretPaths = Vector("/home/u/.ssh", "/home/u/.aws"),
+      secretNames = Vector(".env"),
+      env = Vector("HOME", "PATH")
+    )
+  )
+
   def input(request: String, source: Source = Source.User): (Source, Entry) =
     source -> Entry.Input(RequestId(request), s"message $request", Map.empty)
 

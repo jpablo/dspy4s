@@ -1025,7 +1025,10 @@ lifetime is in the grant, because only the person knows how much they trust that
 
 **The answer.** A `Grant` that answers a pending call commits `Granted`, an `Input` and, with no open turn,
 `TurnStarted` in one commit. So the client sends one command. The harness writes the text of the `Input`, and
-`meta.source` is `Source.Harness`. While the work is open, the owner gets a report of that turn (8.6). A repeat with
+`meta.source` is `Source.Harness`. The text gives the exact call, `op(args)`, and tells the model to make the call
+again with the same arguments, because the grant covers only them (`approvedText`). A model that got only the name
+of the operation made the call again with another goal text, and it got a second question. The arguments of a
+long call stay out of the text. While the work is open, the owner gets a report of that turn (8.6). A repeat with
 the same request id commits nothing, so one OK gives one grant. To refuse, a person sends a plain message. A new turn
 empties `pending`, and the model asks again if it still needs the call.
 
@@ -1481,11 +1484,18 @@ final case class SessionConfig(
     preamble: String,            // the types, `submit` and the input fields of this session (5.1)
     model   : ModelChoice,
     goal    : Option[String],
-    env     : Set[String]        // more names of variables for a command (5.6)
+    env     : Set[String],       // more names of variables for a command (5.6)
+    host    : Option[HostFacts] = None // the limits and the sandbox of this activation
 )
 ```
 
-`Activated` holds this value, so a journal keeps it for good, and it must hold no secret (5.6). The entry before an
+`Activated` holds this value, so a journal keeps it for good, and it must hold no secret (5.6). The host puts the
+facts of the runtime of each open in `host`: the limits of the harness (`Limits`, for example the time and the
+guest API calls of a cell) and the sandbox (`SandboxFacts`: the backend, the hosts, the closed paths and names, and
+the variables of a command). A reopen gets the facts of its own runtime, not the facts of the journal. So the
+journal shows what acted on each turn, and `/config` and the inspector show the same facts. The fields of the facts
+have no default values, because the JSON codec leaves out a field with its default value, and a later default
+would then change an old record. A journal of an older host has no facts. The entry before an
 `Activated` says why the session came alive: nothing for a start, `Ended` for a reopen, and `TurnEnded(Crashed)` for a
 return after a crash in a turn. A crash with no open turn and a change of mode look alike, apart from the new
 configuration. Neither one cut any work.
@@ -2332,7 +2342,9 @@ rules together (12).
   calls change. `/allow` with no number still grants each pending call.
 - The stop notice offers only `/stopjob`. `/stopall` stops the jobs of the newest turn, and a new turn can start after
   the notice.
-- `/status` shows the folder, where the turn stands, the pending calls and how many jobs run. The client printed one
+- `/status` shows the folder, where the turn stands, the pending calls, the active grants with their lifetimes, and
+  how many jobs run. `/config` shows each setting that acts on the session and on its turns: the session, the
+  model, the mode, the guard, the grants, the limits, the sandbox and the files (2026-11-16). The client printed one
   line at each `StepStarted`, so the person saw that the model worked during a long model call. The status line of the
   editor now shows this with a spinner and the time, so the client prints no line at a `StepStarted` (2026-11-11). The
   call to the model has no words: `/status` says `Step 2 of 30.`, because "the model works" read as a claim that the

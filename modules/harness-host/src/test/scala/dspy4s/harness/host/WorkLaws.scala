@@ -422,6 +422,46 @@ class WorkLaws extends munit.FunSuite:
     finally place.close()
   }
 
+  test("Work: each activation records the limits and the sandbox of its runtime, also after a reopen") {
+    val model                                   = sessionModel(policy("FAKE-DONE", None))
+    val place                                   = Place()
+    def facts(handle: SessionHandle): HostFacts = handle.state.config.host.getOrElse(fail("the config has no facts"))
+    try withRoot { root =>
+        val env    = WorkEnv(place.home, HostList.empty, Backends.detect(), Secrets.none, root)
+        val config = WorkRuntime.config(place.root, "fake-model", limits)
+        withHost(root, Models.withModel(model)(WorkRuntime.forWork(env, limits))) { host =>
+          val first = facts(opened(host, id(1), Some(config)))
+          assertEquals(first.limits.cellMillis, limits.cellTimeout.toMillis)
+          assertEquals(first.limits.callsPerCell, limits.callsPerCell)
+          assertEquals(first.limits.summaryCalls, limits.summaryCalls)
+          assertEquals(first.limits.memoryChars, limits.budget)
+          assertEquals(first.sandbox.backend, Backends.detect().map(_.name))
+          assertEquals(first.sandbox.secretNames, Vector(".env"))
+          assert(first.sandbox.secretPaths.exists(_.endsWith("/.ssh")), first.sandbox.secretPaths.toString)
+          assert(first.sandbox.env.contains("PATH"), first.sandbox.env.toString)
+        }
+        // The reopen takes the configuration of the journal, and the facts of the new runtime.
+        val fewer = limits.copy(summaryCalls = 0, callsPerCell = 7)
+        withHost(root, Models.withModel(model)(WorkRuntime.forWork(env, fewer))) { host =>
+          val again = facts(opened(host, id(1), None))
+          assertEquals((again.limits.summaryCalls, again.limits.callsPerCell), (0, 7))
+        }
+      }
+    finally place.close()
+  }
+
+  test("Work: the limit of the guest API calls of a cell comes from the limits of the host") {
+    val model = sessionModel(
+      policy("loop", Some("""(1 to 5).foreach(_ => now()); println("FAKE-END")""")),
+      policy("FAKE-DONE", None)
+    )
+    work(model, settings = limits.copy(callsPerCell = 3)) { (_, handle) =>
+      assertEquals(handle.send(message("m1")), Right(()))
+      assert(eventually(60)(outcomes(handle).size == 1), entries(handle).toString)
+      assert(outputs(handle).exists(_.contains("more than 3 guest API calls")), outputs(handle).toString)
+    }
+  }
+
   test("Work: a job with report = true sends a message with the source Harness at its end, and it starts a turn") {
     sandboxed()
     val model = sessionModel(

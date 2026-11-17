@@ -122,6 +122,10 @@ final class WorkRuntime(
   /** The tokens of the last call to the policy of the activation of `session` (`MemoryMeter.context`), or none. */
   override def contextUse(session: SessionId): Option[ContextUse] = Option(meters.get(session)).flatMap(_.context)
 
+  /** The limits of this runtime and the sandbox of `env`. */
+  override def facts(config: SessionConfig): Option[HostFacts] =
+    Some(limits.facts(env.backend, env.hosts, env.home, config.env))
+
   /** The draft of the call to the policy of the activation of `session` that runs now (`Drafts.current`), or none. */
   override def draft(session: SessionId): Option[Draft] = Option(drafts.get(session)).flatMap(_.current)
 
@@ -195,6 +199,7 @@ final class WorkRuntime(
             config.preamble,
             limits.cellTimeout,
             limits.cellLimit,
+            limits.callsPerCell,
             stops = () => journal.state.stopping
           )
         // The task changes with the debt of 8.6, so each call to the policy reads the debt from the journal so far.

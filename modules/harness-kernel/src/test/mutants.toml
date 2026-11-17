@@ -68,6 +68,13 @@ old = "        closed = true,\n        grants = Set.empty,\n"
 new = "        closed = true,\n"
 
 [[mutant]]
+name = "Mutant: the text after a grant does not give the call"
+[[mutant.edit]]
+file = "Decide.scala"
+old = "if shown.length <= ApprovedArgsChars then"
+new = "if shown.isEmpty then"
+
+[[mutant]]
 name = "Mutant: a Session grant stays after an Activated"
 [[mutant.edit]]
 file = "SessionState.scala"

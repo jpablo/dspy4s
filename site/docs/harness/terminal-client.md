@@ -152,7 +152,8 @@ A line that starts with `/` is a command. Each other line is a message to the se
 | `/allow [N] [once|turn|session]` | allow each pending call, or only the call N of the prompt and of /status | The lifetime is `once` when you give none. |
 | `/jobs` | list the jobs of the session | One line for each job, for example `2.1 runs: "sbt ~test"`. |
 | `/stopjob ID` | stop the job ID of /jobs, for example 12.0 | A job that has ended keeps its end, and the client prints `The session refused the command: the job ID has ended`. |
-| `/status` | show the folder, the turn, the pending calls and the jobs | It also shows the effort and the context. |
+| `/status` | show the folder, the turn, the pending calls, the grants and the jobs | It also shows the effort and the context. |
+| `/config` | show the settings: the model, the mode, the guard, the limits and the sandbox | [The settings](#the-settings) tells more. |
 | `/reasoning off|line|short|full` | set how much of the reasoning of a step the client shows | The history keeps the rows that it printed. |
 | `/effort [LEVEL]` | show the reasoning effort and its levels, or set the effort of the next steps | The level must be one of the levels of the model. |
 | `/show ID` | show the cell ID or the call ID of the session in full, for example 12 or 12.0 | A cell shows its full form. A call shows all of its result. |
@@ -194,6 +195,49 @@ never gets a SIGINT from your Ctrl-C. A `kill -INT` of the client process does t
 
 The client keeps the lines that you type in `<root>/history`, by default `~/.dspy4s/harness/history`. The file keeps
 the last 1000 lines, and the client masks each known secret in a line before it keeps the line.
+
+## The settings
+
+`/config` shows each setting that acts on the session and on its turns. It changes nothing. The text has eight parts:
+
+| Part | What it shows |
+|---|---|
+| `Session` | the id, the owner, the goal, the scope and its folder, the strategy, and the kind of turn |
+| `Model` | the name, the endpoint, each option (for example `reasoning_effort`), and the context window |
+| `Mode` | the capabilities of the session. The controller also shows the most that a session that it starts can get. |
+| `Guard` | each rule with its verdict, for example `Ask: start with kind starting with "Directory"` |
+| `Grants` | each grant of `/allow` that is active, with its lifetime |
+| `Limits` | the steps of a turn, the model calls of a turn, the time of a cell, the guest API calls of a cell, the memory, and more |
+| `Sandbox` | the network, the backend, the closed paths, the closed names, and the variables that a command gets |
+| `Files` | the root, the journal and the exchange file of the session |
+
+An example of the last parts in a work session, with some lines cut:
+
+```text
+Limits
+  steps of a turn: 10
+  turns with no person: 8
+  model calls of a turn: 60
+  time of a cell: 30 s
+  guest API calls of a cell: 10,000
+  characters of the memory: 40,000
+  summary calls of a turn: 64
+Sandbox
+  network: off
+  backend: seatbelt
+  closed paths: ~/.ssh, ~/.aws, ~/.azure, ~/.gnupg, ~/.kube, ~/.docker, ~/.netrc, ...
+  closed names: .env, and each .env.NAME
+  variables of a command: HOME, LANG, LC_ALL, LC_CTYPE, LOGNAME, PATH, SHELL, TEMP, TERM, TMP, TMPDIR, USER
+Files
+  root: ~/.dspy4s/harness
+  journal: ~/.dspy4s/harness/sessions/<id>.db
+  exchange file: ~/.dspy4s/harness/sessions/<id>.http.jsonl
+```
+
+The host records the limits and the sandbox in the `Activated` entry of each open of the session. So the values are
+the values of this run, also after a reopen with other limits, for example with `--no-memory-calls`. The inspector
+shows the same facts on the card of each `Activated` entry. A session of an older client recorded no limits, and
+`/config` then shows `This activation recorded no limits and no sandbox.` until the next open.
 
 ## Why the turn waits
 
@@ -242,5 +286,7 @@ its process.
    that starts with `■ Stopped`.
 4. Type `/status`. You must see `The folder: ...`, `No turn is open.` and `The effort: high.`. Then type `/show N`
    with the cell id of task 1. You must see the code, each call and the output of that cell.
+5. Type `/config`. You must see the parts from `Session` to `Files`, `option reasoning_effort: "high"` in the part
+   `Model`, and `network: off` in the part `Sandbox`.
 
 Next: [The guest API](guest-api.md).

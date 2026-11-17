@@ -28,8 +28,11 @@ enum Line derives CanEqual:
   /** `/stopjob ID`: the stop of the job `job`, whose name `jobName` gives, for example `12.0` (10.3). */
   case StopJob(job: EffectId)
 
-  /** `/status`: the folder, where the turn stands, the pending calls with their numbers, and the jobs. */
+  /** `/status`: the folder, where the turn stands, the pending calls with their numbers, the grants, and the jobs. */
   case Status
+
+  /** `/config`: each setting that acts on the session and on its turns (`configText`). It changes nothing. */
+  case Config
 
   /** `/reasoning off`, `/reasoning line`, `/reasoning short` or `/reasoning full`: how much of the reasoning of a step
     * the client shows.
@@ -102,6 +105,7 @@ private def command(words: List[String]): Option[Line] =
     case List("/jobs")            => Some(Line.Jobs)
     case List("/stopjob", job)    => jobOf(job).map(Line.StopJob(_))
     case List("/status")          => Some(Line.Status)
+    case List("/config")          => Some(Line.Config)
     case List("/show", id)        => Some(Line.Show(id))
     case List("/help")            => Some(Line.Help)
     case List("/reasoning", view) => ReasoningView.values.find(_.toString.equalsIgnoreCase(view)).map(Line.Reasoning(_))
@@ -165,7 +169,8 @@ val commandHelp: Vector[(String, String)] = Vector(
   "/allow [N] [once|turn|session]" -> "allow each pending call, or only the call N of the prompt and of /status",
   "/jobs"                          -> "list the jobs of the session",
   "/stopjob ID"                    -> "stop the job ID of /jobs, for example 12.0",
-  "/status"                        -> "show the folder, the turn, the pending calls and the jobs",
+  "/status"                        -> "show the folder, the turn, the pending calls, the grants and the jobs",
+  "/config"                        -> "show the settings: the model, the mode, the guard, the limits and the sandbox",
   "/reasoning off|line|short|full" -> "set how much of the reasoning of a step the client shows",
   "/effort [LEVEL]"                -> "show the reasoning effort and its levels, or set the effort of the next steps",
   "/show ID"                       -> "show the cell ID or the call ID of the session in full, for example 12 or 12.0",
@@ -250,7 +255,9 @@ def commandsFor(
       else Left(s"The model has no effort $level. Its levels are ${listWords(choices)}.")
     case Line.Unknown(text) => Left(s"$text is not a command. /help lists the commands.")
     // These lines change only the client.
-    case Line.Jobs | Line.Status | Line.Reasoning(_) | Line.Show(_) | Line.Help | Line.Quit | Line.Wait(_) |
+    case Line.Jobs | Line.Status | Line.Config | Line.Reasoning(_) | Line.Show(_) | Line.Help | Line.Quit | Line.Wait(
+          _
+        ) |
         Line.Sessions | Line.Open(_) | Line.Controller | Line.Reopen(_) | Line.Effort(None) => Right(Vector.empty)
 
 /** The text of `/effort` with no level: the effort of the model of `current`, and the levels `choices` of the model

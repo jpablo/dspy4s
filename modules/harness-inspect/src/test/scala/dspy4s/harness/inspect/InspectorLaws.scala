@@ -236,6 +236,23 @@ class InspectorLaws extends ScalaCheckSuite:
     assertEquals(card(JobEnd.Stopped), "<p>The job 12.0 stopped.</p>")
   }
 
+  test("Inspect: the card of an Activated gives the mode, the guard, the limits and the sandbox of the activation") {
+    val facts = HostFacts(
+      Limits(30_000L, 10_000, 300, 600, 4_000, 40_000, 60, 0, 4, 2),
+      SandboxFacts(Some("Seatbelt"), Vector.empty, Vector("/home/u/.ssh"), Vector(".env"), Vector("PATH"))
+    )
+    def card(host: Option[HostFacts]) =
+      EntryViews.card(Logged(
+        0L,
+        Meta(Start, Source.Harness, Taint.Trusted, true),
+        Entry.Activated(Versions("3.10.0", "1"), Support.config(TurnKind.Chat, 3).copy(host = host))
+      ))
+    val text = card(Some(facts))
+    Vector("mode", "guard", "guest API calls of a cell", "10,000", "summary calls of a turn", "Seatbelt", ".ssh")
+      .foreach(part => assert(text.contains(part), s"no $part in $text"))
+    assert(card(None).contains("no limits and no sandbox"), card(None))
+  }
+
   test("Inspect L14: the escape gives an entity for each of the five marks of HTML") {
     assertEquals(Html.escape("""<a href="x">'&"""), "&lt;a href=&quot;x&quot;&gt;&#39;&amp;")
   }

@@ -124,8 +124,8 @@ object Cli:
     val model = modelOf(name, env)
     // The facts of the model come on a daemon thread, so the start does not wait for the endpoint (CLI_SCREEN.md, 14.4).
     val facts = AtomicReference(ModelFacts.withEnv(ModelFacts.unknown, env))
+    val base  = env.getOrElse("OPENAI_BASE_URL", OpenAiClient.defaultBaseUrl)
     if env.get("DSPY_MODEL").exists(_.nonEmpty) then
-      val base = env.getOrElse("OPENAI_BASE_URL", OpenAiClient.defaultBaseUrl)
       Thread.ofPlatform().daemon(true).name("harness-cli-facts").start { () =>
         facts.set(ModelFacts.withEnv(ModelFacts.fetch(base, env.get("OPENAI_API_KEY"), name, FactsTimeout), env))
       }: Unit
@@ -175,7 +175,9 @@ object Cli:
                   console.print(
                     s"The session ${visible(handle.id.value)} is open. Type a message, or /help for the commands."
                   )
-                  if loop(handle, console, cli.script, Some(desk), home.toString, () => facts.get) then 0 else 1
+                  val client = ClientFacts(cli.root, base, ExchangeFile.enabled(env))
+                  if loop(handle, console, cli.script, Some(desk), home.toString, () => facts.get, client) then 0
+                  else 1
             finally
               // The person gets the terminal back first, because the close of the host can wait for the stop of jobs.
               console.close()
@@ -267,7 +269,7 @@ object Cli:
 
   /** The loop of the client with `desk` and the home folder `home`, and with no facts of the model. */
   def loop(handle: SessionHandle, console: ClientConsole, script: Boolean, desk: Option[Desk], home: String): Boolean =
-    loop(handle, console, script, desk, home, () => ModelFacts.unknown)
+    loop(handle, console, script, desk, home, () => ModelFacts.unknown, ClientFacts.unknown)
 
   /** The loop of the client: a thread prints `entryText` of each entry of the feed of `handle`, and another thread
     * reads the lines of `console` and runs the commands of `commandsFor`.
@@ -278,8 +280,9 @@ object Cli:
     *   - `/help` prints `helpText`.
     *   - A message, `/stop` and `/stopall` go through `send`. `/close`, `/allow` and `/stopjob` go through `run`, so
     *     the person sees a refusal, for example `Close` during a turn.
-    *   - `/jobs` and `/status` print `jobsText` and `statusText`, and `/reasoning` sets the view of the reasoning of
-    *     the next steps. They change nothing in the session. `/allow N` grants the call that the entry N asked for.
+    *   - `/jobs`, `/status` and `/config` print `jobsText`, `statusText` and `configText`, with the facts `client` of
+    *     the client, and `/reasoning` sets the view of the reasoning of the next steps. They change nothing in the
+    *     session. `/allow N` grants the call that the entry N asked for.
     *   - `/effort` prints `effortText`, and `/effort LEVEL` goes through `run` with the levels of `facts`, the facts of
     *     the model. The footer and `/status` show the effort, and the context with the window of `facts`.
     *   - After a turn that ends `Aborted`, the client prints `stopNotice`: each job of that turn that still runs, and
@@ -318,7 +321,8 @@ object Cli:
       script : Boolean,
       desk   : Option[Desk],
       home   : String,
-      facts  : () => ModelFacts
+      facts  : () => ModelFacts,
+      client : ClientFacts
   ): Boolean =
     val done                      = CountDownLatch(1)
     val rich                      = console.rich
@@ -384,6 +388,7 @@ object Cli:
             current.contextUse,
             facts()
           ))
+        case Line.Config                          => print(configText(current.id, current.state, client, facts(), home))
         case Line.Help                            => print(helpText)
         case Line.Effort(None)                    => print(effortText(current.state, facts().choices))
         case _ if deskLine(parsed, desk.nonEmpty) =>

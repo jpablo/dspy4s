@@ -46,13 +46,81 @@ final case class SessionConfig(
     kind    : TurnKind,
     steps   : Int,
     mode    : Mode,
-    ceiling : Mode,       // the most that a session started from here can get
+    ceiling : Mode, // the most that a session started from here can get
     strategy: StrategyName,
     scope   : Scope,
     owner   : Owner,
-    guard   : Guard,      // the rules of 5.5
-    preamble: String,     // the types, `submit` and the input fields of this session (5.1)
+    guard   : Guard, // the rules of 5.5
+    preamble: String, // the types, `submit` and the input fields of this session (5.1)
     model   : ModelChoice,
     goal    : Option[String],
-    env     : Set[String] // more names of variables for a command (5.6)
+    env     : Set[String], // more names of variables for a command (5.6)
+    host    : Option[HostFacts] = None // the limits and the sandbox of this activation
+) derives Schema, CanEqual
+
+/** The limits and the sandbox of one activation (5.4, 5.6, 6, 7.1, 8.2). The host gives them in the `Activate` of each
+  * open, so the journal shows what acted on each turn, and `/config` and the inspector show the same facts. A journal
+  * of an older host has none.
+  *
+  * The fields have no default values. The JSON codec leaves out a field with its default value, and a later default
+  * would then change the record of an old activation.
+  */
+final case class HostFacts(limits: Limits, sandbox: SandboxFacts) derives Schema, CanEqual
+
+/** The limits of the harness for an activation (`HarnessLimits`).
+  *
+  * @param cellMillis
+  *   the time limit of a cell. The clock stops during each guest API call.
+  * @param callsPerCell
+  *   the guest API calls of one cell. Each later call of the cell fails.
+  * @param cellsPerRepl
+  *   the cells of one REPL. Then the harness starts a new REPL.
+  * @param commandSeconds
+  *   the time limit of a command of `exec`
+  * @param observationChars
+  *   the most characters of the output of a cell that the model gets
+  * @param memoryChars
+  *   the characters of the projection of the memory
+  * @param modelCalls
+  *   the model calls of one turn, with the queries and the children
+  * @param summaryCalls
+  *   the calls of `compress` and `merge` of one turn. 0 means no call.
+  * @param batch
+  *   the queries or children that one batch call runs at the same time
+  * @param depth
+  *   the depth limit of `rlm`
+  */
+final case class Limits(
+    cellMillis      : Long,
+    callsPerCell    : Int,
+    cellsPerRepl    : Int,
+    commandSeconds  : Int,
+    observationChars: Int,
+    memoryChars     : Int,
+    modelCalls      : Int,
+    summaryCalls    : Int,
+    batch           : Int,
+    depth           : Int
+) derives Schema, CanEqual
+
+/** The sandbox of the commands of an activation (5.4, 5.6).
+  *
+  * @param backend
+  *   the OS sandbox, for example `Seatbelt` or `bubblewrap`. With none, no command runs.
+  * @param hosts
+  *   the patterns of the host list of a mode with `Network^`
+  * @param secretPaths
+  *   the paths that each command cannot read
+  * @param secretNames
+  *   the names of the files that each command cannot read, in each folder. A name also covers the name with a dot and
+  *   more text, for example `.env.local`.
+  * @param env
+  *   the names of the variables that a command gets from the host process, when the process has them
+  */
+final case class SandboxFacts(
+    backend    : Option[String],
+    hosts      : Vector[String],
+    secretPaths: Vector[String],
+    secretNames: Vector[String],
+    env        : Vector[String]
 ) derives Schema, CanEqual

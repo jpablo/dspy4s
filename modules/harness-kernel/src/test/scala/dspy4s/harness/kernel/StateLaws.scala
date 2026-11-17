@@ -72,6 +72,57 @@ class StateLaws extends ScalaCheckSuite:
     forAll(schedules)(run => assertEquals(forked(run.journal).inputs, state(run.journal).inputs))
   }
 
+  test("Journal codec: an Activated with no host facts decodes with none, and each fact of the host is in the text") {
+    val codec = Schema[Logged].jsonCodec
+    // A journal of an older host has no field `host`, so its text is the text of a config with no facts.
+    val old = Logged(0L, Fixtures.meta, Fixtures.activated())
+    assert(!codec.encodeToString(old).contains("\"host\""), codec.encodeToString(old))
+    assertEquals(codec.decode(codec.encode(old)), Right(old))
+    val facts = Fixtures.hostFacts
+    val now   = Logged(0L, Fixtures.meta, Fixtures.activated(Fixtures.config().copy(host = Some(facts))))
+    assertEquals(codec.decode(codec.encode(now)), Right(now))
+    // A fact with the same value as a default would go out of the text, and a later default would then change it.
+    val text = codec.encodeToString(now)
+    Vector("cellMillis", "callsPerCell", "summaryCalls", "backend", "secretNames", "env")
+      .foreach(field => assert(text.contains(s"\"$field\""), s"$field is not in $text"))
+  }
+
+  test("Settings: the mode, the limits and the sandbox in words") {
+    import dspy4s.harness.guest.{Access, Mode}
+    val work = Mode(Access.Full, Access.Full, Access.None, Access.Full, Access.None, Access.None, Access.Full)
+    assertEquals(modeWords(work), "Files^, Shell^, Llm^ and Store^")
+    assertEquals(modeWords(work.copy(files = Access.Read, shell = Access.None)), "Files, Llm^ and Store^")
+    assertEquals(
+      modeWords(work.meet(Mode(
+        Access.None,
+        Access.None,
+        Access.None,
+        Access.None,
+        Access.None,
+        Access.None,
+        Access.None
+      ))),
+      "no capability"
+    )
+    val limits = limitLines(Fixtures.hostFacts.limits).toMap
+    assertEquals(limits("time of a cell"), "30 s")
+    assertEquals(limits("guest API calls of a cell"), "10,000")
+    assertEquals(limits("summary calls of a turn"), "64")
+    assertEquals(
+      limitLines(Fixtures.hostFacts.limits.copy(summaryCalls = 0)).toMap.apply("summary calls of a turn"),
+      "0 (no compress or merge call)"
+    )
+    val sandbox = sandboxLines(Fixtures.hostFacts.sandbox, "/home/u").toMap
+    assertEquals(sandbox("backend"), "Seatbelt")
+    assertEquals(sandbox("closed paths"), "~/.ssh, ~/.aws")
+    assertEquals(sandbox("closed names"), ".env, and each .env.NAME")
+    assertEquals(sandbox("variables of a command"), "HOME, PATH")
+    assertEquals(
+      sandboxLines(Fixtures.hostFacts.sandbox.copy(backend = None), "/home/u").toMap.apply("backend"),
+      "none, so no command runs"
+    )
+  }
+
   property("Journal codec: each entry of a run comes back equal through the codec of Logged") {
     val codec = Schema[Logged].jsonCodec
     forAll(schedules) { run =>

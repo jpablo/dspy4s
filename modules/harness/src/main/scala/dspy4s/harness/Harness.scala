@@ -127,6 +127,9 @@ final case class Harness[I, O](
     * exception. The recorder refuses each call after the end of the program call (9), and only the top session joins
     * the trace of the host threads.
     */
+  /** The limits and the sandbox of an activation of `config` in this harness, for its `Activate`. */
+  private def factsOf(config: SessionConfig): HostFacts = limits.facts(env.backend, env.hosts, env.home, config.env)
+
   private def session(
       config : SessionConfig,
       task   : String,
@@ -138,7 +141,8 @@ final case class Harness[I, O](
       source : Source
   )(using RuntimeContext): Either[DspyError, TurnOutcome] =
     for
-      _ <- journal.run(Command.Activate(Harness.versions, config), Source.Harness).left.map(rejected)
+      _ <- journal.run(Command.Activate(Harness.versions, config.copy(host = Some(factsOf(config)))), Source.Harness)
+             .left.map(rejected)
       _ <- journal.run(Command.Send(RequestId("task"), task, fields.toMap), source).left.map(rejected)
     yield
       val recorder = Recorder(journal, () => tree.budget.closed, env.secrets.maskJson)
@@ -155,8 +159,9 @@ final case class Harness[I, O](
         children = Option.when(config.mode.children == Access.Full)(children)
       )
       val handlers = recorded(bindings, recorder, Some(tree.fork))
-      val newRepl  = () => ScalaRepl(config.mode, handlers, config.preamble, limits.cellTimeout, limits.cellLimit)
-      val effects  = HarnessEffects(
+      val newRepl  = () =>
+        ScalaRepl(config.mode, handlers, config.preamble, limits.cellTimeout, limits.cellLimit, limits.callsPerCell)
+      val effects = HarnessEffects(
         _ => task,
         Harness.apiReference(config.mode),
         policy,

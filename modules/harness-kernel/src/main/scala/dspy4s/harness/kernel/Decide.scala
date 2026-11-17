@@ -136,9 +136,23 @@ private def after(s: SessionState, entries: Vector[Entry]): SessionState =
 
 /** The text of the `Input` after a grant that answers a pending call (5.5). The harness writes it, so a client cannot
   * put words in it.
+  *
+  * A grant of a pending call covers only the same arguments, so the text gives the exact call, `op(args)` as in the
+  * error of the call. A model that made the call again with another goal text got a second question (G3). The arguments
+  * of a long call do not go in the text, because the model has the code of its cell.
   */
 def approvedText(rule: GuardRule): String =
-  s"The person approved a call of `${rule.op}`. Make the call again if you still need it."
+  rule.args match
+    case ArgMatch.Exact(args) =>
+      val shown = args.print
+      val call  = if shown.length <= ApprovedArgsChars then s" `${rule.op}($shown)`" else s" of `${rule.op}`"
+      s"The person approved the call$call. If you still need it, make the call again with the same arguments. " +
+        "A call with other arguments needs a new approval."
+    case _ =>
+      s"The person approved the calls of `${rule.op}` that the rule covers. Make the call again if you still need it."
+
+/** The most characters of the arguments that `approvedText` gives. */
+private val ApprovedArgsChars = 600
 
 /** The sender of an entry that `command` commits for `sender` (5.5). The `Input` after a grant comes from the harness,
   * so its turn gives a report to the owner (8.6).

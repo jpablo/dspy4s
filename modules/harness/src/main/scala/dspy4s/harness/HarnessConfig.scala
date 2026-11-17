@@ -1,8 +1,8 @@
 package dspy4s.harness
 
 import dspy4s.harness.guest.{Access, Mode}
-import dspy4s.harness.kernel.{Logged, SessionId}
-import dspy4s.harness.sandbox.{Backend, HostList}
+import dspy4s.harness.kernel.{HostFacts, Limits, Logged, SandboxFacts, SessionId}
+import dspy4s.harness.sandbox.{Backend, Environment, HostList, Layout}
 import zio.blocks.schema.Schema
 
 import java.nio.file.Path
@@ -52,6 +52,8 @@ object HarnessEnv:
   * @param summaryCalls
   *   the calls of the leaves `compress` and `merge` of the memory tree in one turn (7.1), apart from `modelCalls`.
   *   After them, a node gets the line of its source, and a later turn builds it again.
+  * @param callsPerCell
+  *   the guest API calls of one cell. After them, each later call of the cell fails at once (`ScalaRepl`).
   */
 final case class HarnessLimits(
     steps         : Int            = 10,
@@ -63,8 +65,36 @@ final case class HarnessLimits(
     modelCalls    : Int            = 60,
     depth         : Int            = 2,
     batch         : Int            = 4,
-    summaryCalls  : Int            = 64
-) derives CanEqual
+    summaryCalls  : Int            = 64,
+    callsPerCell  : Int            = 10_000
+) derives CanEqual:
+
+  /** These limits, the backend `backend`, the hosts `hosts` and the secrets of the home folder `home` as the facts of
+    * an activation (`HostFacts`). The host gives them in each `Activate`, so the journal shows them. `env` holds the
+    * more names of variables of the session (`SessionConfig.env`).
+    */
+  def facts(backend: Option[Backend], hosts: HostList, home: Path, env: Set[String]): HostFacts =
+    HostFacts(
+      Limits(
+        cellMillis = cellTimeout.toMillis,
+        callsPerCell = callsPerCell,
+        cellsPerRepl = cellLimit,
+        commandSeconds = execTimeout,
+        observationChars = maxObservation,
+        memoryChars = budget,
+        modelCalls = modelCalls,
+        summaryCalls = summaryCalls,
+        batch = batch,
+        depth = depth
+      ),
+      SandboxFacts(
+        backend = backend.map(_.name),
+        hosts = hosts.patterns.toVector.sorted,
+        secretPaths = Layout.secretsUnder(home).map(_.toString),
+        secretNames = Layout.secretNames.toVector.sorted,
+        env = (Environment.allowed ++ env).filterNot(Environment.isSecret).toVector.sorted
+      )
+    )
 
 /** The input of the finisher leaf (9): the task, and the steps of the call as text. */
 final case class FinishInput(task: String, transcript: String) derives Schema

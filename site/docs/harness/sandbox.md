@@ -194,8 +194,16 @@ is `once`. A grant covers only the same operation with the same arguments.
 | `session` | When the client ends with `/quit`, or when the session ends with `/close`. A new start of the client asks again. This also applies to the controller. |
 
 After the grant, the screen shows `✓ Allowed once: exec "git push origin main".` Then the harness sends the model
-the message `` The person approved a call of `exec`. Make the call again if you still need it. `` With no open turn,
-the grant starts a new turn, so the model can make the call again.
+a message with the exact call. For example:
+
+```text
+The person approved the call `exec({"command":"git push origin main"})`. If you still need it, make the call again
+with the same arguments. A call with other arguments needs a new approval.
+```
+
+With no open turn, the grant starts a new turn, so the model can make the call again. `/status` lists the active
+grants with their lifetimes. `/config` shows the rules of the guard, the closed paths and names, and the variables
+that a command gets.
 
 !!! warning "A message refuses the call"
     Each message that you send starts a new turn, and a new turn removes the pending calls. So a question such as
