@@ -1,6 +1,6 @@
 package dspy4s.harness
 
-import dspy4s.harness.guest.{Data, Llm, Scope, SessionCard, SessionRef, Sessions, StrategyName}
+import dspy4s.harness.guest.{Data, Delivery, Llm, Scope, SessionCard, SessionRef, Sessions, StrategyName}
 import dspy4s.harness.kernel.*
 import dspy4s.harness.repl.Bindings
 import dspy4s.harness.sandbox.{HostList, Profiles}
@@ -195,9 +195,10 @@ class HandlerLaws extends FunSuite:
       None,
       None
     )
+    val waits = Delivery.WaitsForPerson(8, 8)
     val inner = new Sessions:
       def list(): Vector[SessionCard]                                                       = Vector(card)
-      def tell(session   : SessionRef, message : String): Unit                              = ()
+      def tell(session   : SessionRef, message : String): Delivery                          = waits
       def start(goal     : String, scope       : Scope, strategy: StrategyName): SessionRef = SessionRef("s3")
       def observe(session: SessionRef, question: String)(using Llm): String                 = "an answer"
       def zoom(session   : SessionRef, ref     : String): String                            = "a line"
@@ -207,7 +208,7 @@ class HandlerLaws extends FunSuite:
     val bound = recorded(Bindings(turn = JournalTurn(j, () => 5L), sessions = Some(inner)), recorder)
     bound.sessions.foreach { s =>
       assertEquals(s.list(), Vector(card))
-      s.tell(SessionRef("s2"), "go on")
+      assertEquals(s.tell(SessionRef("s2"), "go on"), waits)
       assertEquals(s.start("fix", Scope.Directory("/w"), StrategyName.Window), SessionRef("s3"))
       assertEquals(s.observe(SessionRef("s2"), "why?")(using llm), "an answer")
       assertEquals(s.zoom(SessionRef("s2"), "1.0"), "a line")
@@ -225,6 +226,7 @@ class HandlerLaws extends FunSuite:
     assert(needsFlush(Entry.EffectStarted(EffectId(cell, 1), "tell", Json.Null)))
     assert(needsFlush(Entry.EffectStarted(EffectId(cell, 2), "start", Json.Null)))
     val done = effects(j).collect { case Entry.EffectDone(_, EffectResult.Value(json, _)) => json }
+    assertEquals(done(1), summon[Data[Delivery]].encode(waits))
     assertEquals(done(2), summon[Data[SessionRef]].encode(SessionRef("s3")))
   }
 

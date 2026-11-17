@@ -19,7 +19,7 @@ for card <- sessions() do
 // --8<-- [end:list-sessions]
 
 // --8<-- [start:tell-and-observe]
-tell(ref, "Also write the file bye.txt with the text bye.")
+println(tell(ref, "Also write the file bye.txt with the text bye."))
 val answer = observe(ref, "Which files did the session write, and did a cell fail?")
 println(answer)
 // --8<-- [end:tell-and-observe]

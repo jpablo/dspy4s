@@ -69,7 +69,7 @@ The REPL gets a fake handler for each capability. Each cell runs in-process, so 
 - llm: `FakeLlm`. `llmQuery(prompt)` gives `the answer to <the first line of the prompt>`.
 - store: `FakeStore`, in memory. A `load` sees each earlier `store` of the same cell file. The value goes in at once.
 - sessions: `FakeSessions`. `sessions()` gives one idle session `s-1`. `start` gives `s-2`, then `s-3`. `tell`
-  returns. `observe` and `zoom` give a text.
+  gives `Delivery.InTurn`. `observe` and `zoom` give a text.
 - children: `FakeChildren`. `rlm[String]` gives `the result of <task>`. Another type fails at run time.
 
 The preamble is the preamble of a session of the terminal client: `submit(value: String)` and no input. Read

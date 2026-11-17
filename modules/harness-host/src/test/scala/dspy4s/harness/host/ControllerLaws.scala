@@ -6,7 +6,7 @@ import dspy4s.harness.{Budget, Harness, HarnessLimits, Journal, Place, Recorder,
 import dspy4s.harness.{JournalTurn, LocalFiles}
 import dspy4s.harness.Models.policy
 import dspy4s.harness.Support.answer
-import dspy4s.harness.guest.{Llm, Scope, SessionCard, SessionRef, Sessions, StrategyName}
+import dspy4s.harness.guest.{Data, Delivery, Llm, Scope, SessionCard, SessionRef, Sessions, StrategyName}
 import dspy4s.harness.kernel.*
 import dspy4s.harness.host.HostSupport.*
 import dspy4s.harness.repl.Bindings
@@ -118,9 +118,13 @@ class ControllerLaws extends munit.FunSuite:
   // ── The handler of Sessions, with fake peers ──
 
   /** Peers that keep each call. A `refused` scope does not make, and a Scratch or a Worktree with an empty path gets
-    * `/work/<session>`.
+    * `/work/<session>`. `runAs` gives the state `after`.
     */
-  private final class FakePeers(val rows: Vector[CatalogRow], refused: Set[Scope] = Set.empty) extends Peers:
+  private final class FakePeers(
+      val rows: Vector[CatalogRow],
+      refused : Set[Scope]   = Set.empty,
+      after   : SessionState = SessionState.initial
+  ) extends Peers:
     val calls: ConcurrentLinkedQueue[String]                                                 = ConcurrentLinkedQueue()
     val runs: ConcurrentLinkedQueue[(SessionId, Command, Source)]                            = ConcurrentLinkedQueue()
     val opens: ConcurrentLinkedQueue[(SessionId, SessionConfig, Command.Send, Source)]       = ConcurrentLinkedQueue()
@@ -134,7 +138,7 @@ class ControllerLaws extends munit.FunSuite:
     def runAs(id: SessionId, command: Command, source: Source) =
       calls.add(s"runAs ${id.value}"): Unit
       runs.add((id, command, source)): Unit
-      Right(SessionState.initial)
+      Right(after)
     def journalOf(id: SessionId): Either[String, Vector[Logged]] =
       calls.add(s"journalOf ${id.value}"): Unit
       Right(Vector(Logged(0L, Meta(0L, Source.User, Taint.Trusted, required = true), Entry.TurnStarted)))
@@ -243,7 +247,7 @@ class ControllerLaws extends munit.FunSuite:
   test("Sessions: tell runs a Send with the request id of its effect and the source Controller through runAs") {
     val peers               = FakePeers(Vector(row(1)))
     val (sessions, journal) = handler(peers)
-    sessions.tell(SessionRef(id(1).value), "please go on")
+    sessions.tell(SessionRef(id(1).value), "please go on"): Unit
     val effect = lastEffect(journal)
     assertEquals(
       peers.runs.asScala.toVector,
@@ -253,6 +257,58 @@ class ControllerLaws extends munit.FunSuite:
         Source.Controller
       ))
     )
+  }
+
+  /** The value that `journal` records for its last effect. */
+  private def lastValue(journal: Journal): Json =
+    val effect = lastEffect(journal)
+    journal.log.collectFirst { case Logged(_, _, Entry.EffectDone(`effect`, EffectResult.Value(value, _))) => value }
+      .getOrElse(fail("the last effect has no value"))
+
+  // On 2026-11-17, tell gave Unit. So the controller did not learn that its message waited for the person of a
+  // session at its limit of the turns with no person.
+  test("Sessions: tell gives WaitsForPerson with the count and the limit when the message waits, else InTurn") {
+    val config = Controller.config(home, "fake-model", limits)
+
+    def withLimit(limit: TurnLimit): SessionConfig =
+      config.copy(host = Some(limits.copy(unattendedTurns = limit).facts(None, HostList.empty, home, Set.empty)))
+
+    val idle = SessionState.initial.copy(config = config, closed = false, waiting = 1)
+    val two  = idle.copy(config = withLimit(TurnLimit.AtMost(2)))
+    val none = idle.copy(config = withLimit(TurnLimit.NoLimit))
+
+    def told(after: SessionState): (Delivery, Json) =
+      val (sessions, journal) = handler(FakePeers(Vector(row(1)), after = after))
+      val delivery            = sessions.tell(SessionRef(id(1).value), "go on")
+      (delivery, lastValue(journal))
+
+    val cases = Vector(
+      // An activation with no facts has the limit of an older host: 8.
+      idle.copy(unattended = 8) -> Delivery.WaitsForPerson(8, 8),
+      // A restart with a lower limit: the count is above the limit.
+      idle.copy(unattended = 9) -> Delivery.WaitsForPerson(9, 8),
+      two.copy(unattended = 2)  -> Delivery.WaitsForPerson(2, 2),
+      // The message started a turn, or the open turn reads it.
+      idle.copy(unattended = 8, position = Position.BeforeStep(0)) -> Delivery.InTurn,
+      idle.copy(unattended = 9, position = Position.InPolicy(0))   -> Delivery.InTurn,
+      // A second send of the same request after a turn read the message.
+      idle.copy(unattended = 8, waiting = 0) -> Delivery.InTurn,
+      none.copy(unattended = 20)             -> Delivery.InTurn
+    )
+    cases.foreach { (after, expected) =>
+      assertEquals(told(after), (expected, summon[Data[Delivery]].encode(expected)), after.toString)
+    }
+  }
+
+  test("Controller: the API reference of its mode shows what tell gives, and that of a work session does not") {
+    val reference = Harness.apiReference(Controller.mode)
+    Vector(
+      "def tell(session: SessionRef, message: String)(using s: Sessions^): Delivery",
+      "enum Delivery",
+      "case InTurn",
+      "case WaitsForPerson(turns: Int, limit: Int)"
+    ).foreach(text => assert(reference.contains(text), s"the reference does not hold $text"))
+    assert(!Harness.apiReference(WorkRuntime.workMode).contains("Delivery"))
   }
 
   test(
@@ -395,7 +451,7 @@ class ControllerLaws extends munit.FunSuite:
   /** Runs `check` with a host at a new root, the controller open in it, a folder for work, the folder of the sessions
     * of `start`, and the model that `modelOf` makes for the folder for work.
     */
-  private def withController(modelOf: Path => RequestLm)(
+  private def withController(modelOf: Path => RequestLm, bound: HarnessLimits = limits)(
       check: (LocalHost, SessionHandle, Path, Path, RequestLm) => Unit
   ): Unit =
     val place = Place()
@@ -403,8 +459,8 @@ class ControllerLaws extends munit.FunSuite:
         val env   = WorkEnv(place.home, HostList.empty, None, Secrets.none, root)
         val model = modelOf(place.root)
         val work  = place.base.resolve("work")
-        withPeers(root, env, model, limits, work = Some(work)) { host =>
-          val controller = opened(host, Controller.id, Some(Controller.config(place.home, "fake-model", limits)))
+        withPeers(root, env, model, bound, work = Some(work)) { host =>
+          val controller = opened(host, Controller.id, Some(Controller.config(place.home, "fake-model", bound)))
           check(host, controller, place.root, work, model)
         }
       }
@@ -441,6 +497,42 @@ class ControllerLaws extends munit.FunSuite:
       val report = work.resolve(started.value).resolve("report.txt")
       assert(eventually(30)(Files.exists(report)), host.journalOf(started).toString)
       assertEquals(Files.readString(report), "FAKE-REPORT")
+    }
+  }
+
+  // A session that the controller starts runs its first turn with no message of the person. So with the limit 1, the
+  // next message of the controller waits for the person, and tell says so.
+  test("Controller: tell to a session at its limit of the turns with no person gives WaitsForPerson, and no turn") {
+    val goal  = "Write the fake notes"
+    val model = (_: Path) =>
+      routedModel(
+        Controller.instructions -> Seq(
+          policy("start", Some(s"""println(start("$goal", Scope.Scratch(""), StrategyName.Window).id)""")),
+          policy("Started.", None),
+          policy("tell", Some("""println(tell(sessions().head.session, "FAKE-MORE"))""")),
+          policy("Told.", None)
+        ),
+        goal -> Seq(policy("Done.", None))
+      )
+    withController(model, limits.copy(unattendedTurns = TurnLimit.AtMost(1))) { (host, controller, _, _, _) =>
+      controller.send(message("m1", "start the work")).left.foreach(e => fail(e.toString))
+      def toldValue: Option[Json] =
+        host.journalOf(Controller.id).toOption.flatMap { journal =>
+          val tells = journal.collect { case Logged(_, _, Entry.EffectStarted(id, "tell", _)) => id }.toSet
+          journal.collectFirst {
+            case Logged(_, _, Entry.EffectDone(id, EffectResult.Value(value, _))) if tells(id) => value
+          }
+        }
+      assert(eventually(60)(toldValue.nonEmpty), host.journalOf(Controller.id).toString)
+      assertEquals(toldValue, Some(summon[Data[Delivery]].encode(Delivery.WaitsForPerson(1, 1))))
+      val started = host.rows.find(_.owner == Owner.Session(Controller.id)).getOrElse(fail("no session")).session
+      val entries = host.journalOf(started).fold(e => fail(e), identity).map(_.entry)
+      val at      = entries.lastIndexWhere {
+        case Entry.Input(_, text, _) => text == "FAKE-MORE"
+        case _                       => false
+      }
+      assert(at >= 0, entries.toString)
+      assert(!entries.drop(at).contains(Entry.TurnStarted), entries.toString)
     }
   }
 

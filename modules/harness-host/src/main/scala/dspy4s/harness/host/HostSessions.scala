@@ -2,8 +2,9 @@ package dspy4s.harness.host
 
 import dspy4s.core.contracts.RuntimeContext
 import dspy4s.harness.{Budget, Journal}
-import dspy4s.harness.guest.{Llm, Scope, SessionCard, SessionRef, Sessions, StrategyName}
-import dspy4s.harness.kernel.{Command, EffectId, RequestId, SessionConfig, SessionId}
+import dspy4s.harness.guest.{Delivery, Llm, Scope, SessionCard, SessionRef, Sessions, StrategyName}
+import dspy4s.harness.kernel.{Command, EffectId, RequestId, SessionConfig, SessionId, SessionState, TurnLimit}
+import dspy4s.harness.kernel.waitsForPerson
 
 import java.util.UUID
 
@@ -15,8 +16,9 @@ import java.util.UUID
   *   - `list` gives the card of each row of the catalog (`cardOf`), apart from the row of `caller`.
   *   - `tell` sends the message to the session with the source `Controller.messageSource(caller)` through
   *     `Peers.runAs`, so it returns after the receiver commits (8.6). The request id holds `caller` and the open `tell`
-  *     effect of `journal`, so a second send after a crash commits nothing. A session that the catalog does not have,
-  *     or whose row has ended, gives an error, and nothing opens.
+  *     effect of `journal`, so a second send after a crash commits nothing. It gives the `Delivery` of the state of the
+  *     receiver after the commit (`deliveryOf`), so the caller learns when the message waits for the person (8.7). A
+  *     session that the catalog does not have, or whose row has ended, gives an error, and nothing opens.
   *   - `start` gives the new session a random UUID as its id, makes its scope (`Peers.make`), and opens it with the
   *     configuration of `configure` for that scope and the goal as its task, in one commit (`Peers.openWith`). The
   *     runtime gives `WorkRuntime.ownedConfig` as `configure`. A crash before the commit leaves the effect `Unknown`,
@@ -39,16 +41,16 @@ final class HostSessions(
 
   def list(): Vector[SessionCard] = peers.rows.filterNot(_.session == caller).map(HostSessions.cardOf)
 
-  def tell(session: SessionRef, message: String): Unit =
+  def tell(session: SessionRef, message: String): Delivery =
     val row = rowOf("tell", session)
     row.status match
       case SessionStatus.Ended(_) => throw IllegalStateException(s"tell: the session ${session.id} has ended")
       case _                      => ()
     val send = Command.Send(HostSessions.requestOf("tell", caller, effect("tell")), message, Map.empty)
-    peers.runAs(row.session, send, Controller.messageSource(caller)).left
-      .foreach(error =>
-        throw IllegalStateException(s"tell: the session ${session.id} did not take the message: ${error.words}")
-      )
+    peers.runAs(row.session, send, Controller.messageSource(caller)).fold(
+      error => throw IllegalStateException(s"tell: the session ${session.id} did not take the message: ${error.words}"),
+      HostSessions.deliveryOf
+    )
 
   def start(goal: String, scope: Scope, strategy: StrategyName): SessionRef =
     val id   = SessionId(UUID.randomUUID().toString)
@@ -102,6 +104,16 @@ object HostSessions:
       row.ledger.head,
       row.ledger.clean
     )
+
+  /** What `tell` gives for `receiver`, the state of the receiver after the commit of the message (8.7).
+    * `WaitsForPerson` holds the count of the unattended turns and the limit of the activation, when the message waits
+    * for the person (`waitsForPerson`). Each other state gives `InTurn`: a turn started for the message, a turn runs,
+    * or no message waits. `NoLimit` never holds a message, so it always gives `InTurn`.
+    */
+  def deliveryOf(receiver: SessionState): Delivery =
+    receiver.config.unattendedLimit match
+      case TurnLimit.AtMost(limit) if waitsForPerson(receiver) => Delivery.WaitsForPerson(receiver.unattended, limit)
+      case _                                                   => Delivery.InTurn
 
   /** The request id of the operation `op` of `caller` in its effect `effect`: `op:<caller>:<cell>.<n>` (8.6). */
   def requestOf(op: String, caller: SessionId, effect: EffectId): RequestId =

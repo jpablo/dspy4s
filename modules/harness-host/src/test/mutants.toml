@@ -3,14 +3,15 @@
 #
 # `python3 scripts/mutants/mutants.py modules/harness-host/src/test/mutants.toml` applies each mutant alone, runs the
 # suites of `tests`, and restores the code. The whole suite of the host takes minutes, so `tests` names only the laws of
-# the exchange file, of the journal file, of the scopes and of the jobs. The mutants of the scopes break a rule of
-# choice 19 (5.4) of docs/code-harness/CODE_HARNESS_DESIGN.md: the clone of a Worktree scope and the publish of its
-# branch. The mutants of the jobs break a rule of the end of a job in the journal (10.3 of the same file).
+# the exchange file, of the journal file, of the scopes, of the jobs and of the controller. The mutants of the scopes
+# break a rule of choice 19 (5.4) of docs/code-harness/CODE_HARNESS_DESIGN.md: the clone of a Worktree scope and the
+# publish of its branch. The mutants of the jobs break a rule of the end of a job in the journal (10.3 of the same
+# file). The mutants of `tell` break the rule of its value: a message that waits for the person (8.7 of the same file).
 
 module = "harness-host"
 project = "harnessHost"
 sources = "modules/harness-host/src/main/scala/dspy4s/harness/host"
-tests = "dspy4s.harness.host.ExchangeFileLaws dspy4s.harness.host.SessionFileLaws dspy4s.harness.host.ScopesLaws dspy4s.harness.host.JobLaws"
+tests = "dspy4s.harness.host.ExchangeFileLaws dspy4s.harness.host.SessionFileLaws dspy4s.harness.host.ScopesLaws dspy4s.harness.host.JobLaws dspy4s.harness.host.ControllerLaws"
 
 # ── The labels (4.2) ──
 
@@ -205,3 +206,26 @@ name = "Mutant: the end of a job after Ended waits for the writer"
 file = "SessionHost.scala"
 old = "if !writer.state.closed then writer.run(Command.RecordJobEnd(job, end), Source.Harness): Unit"
 new = "if writer.log.nonEmpty then writer.run(Command.RecordJobEnd(job, end), Source.Harness): Unit"
+
+# ── The value of tell (8.7) ──
+
+[[mutant]]
+name = "Mutant: tell gives WaitsForPerson also when a turn reads the message"
+[[mutant.edit]]
+file = "HostSessions.scala"
+old = "case TurnLimit.AtMost(limit) if waitsForPerson(receiver) =>"
+new = "case TurnLimit.AtMost(limit) if waitsForPerson(receiver) || receiver.waiting > 0 =>"
+
+[[mutant]]
+name = "Mutant: WaitsForPerson gives the limit as the count of the turns"
+[[mutant.edit]]
+file = "HostSessions.scala"
+old = "Delivery.WaitsForPerson(receiver.unattended, limit)"
+new = "Delivery.WaitsForPerson(limit, limit)"
+
+[[mutant]]
+name = "Mutant: tell gives InTurn for each state of the receiver"
+[[mutant.edit]]
+file = "HostSessions.scala"
+old = "      HostSessions.deliveryOf\n    )"
+new = "      _ => Delivery.InTurn\n    )"

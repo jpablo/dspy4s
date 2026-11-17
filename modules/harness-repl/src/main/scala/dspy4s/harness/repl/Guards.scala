@@ -91,7 +91,7 @@ private final class GatedStore(inner: Store, gate: CallGate) extends Store:
 
 private final class GatedSessions(inner: Sessions, gate: CallGate) extends Sessions:
   def list(): Vector[SessionCard]                                           = gate("sessions")(inner.list())
-  def tell(session: SessionRef, message: String): Unit                      = gate("tell")(inner.tell(session, message))
+  def tell(session: SessionRef, message: String): Delivery                  = gate("tell")(inner.tell(session, message))
   def start(goal: String, scope: Scope, strategy: StrategyName): SessionRef =
     gate("start")(inner.start(goal, scope, strategy))
   def observe(session: SessionRef, question: String)(using llm: Llm): String =

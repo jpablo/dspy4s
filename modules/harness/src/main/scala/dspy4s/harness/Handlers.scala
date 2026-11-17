@@ -1,7 +1,7 @@
 package dspy4s.harness
 
-import dspy4s.harness.guest.{Children, Data, Files, JobId, JobStatus, Llm, Scope, SessionCard, SessionRef, Sessions}
-import dspy4s.harness.guest.{Shell, StrategyName, Store, Turn}
+import dspy4s.harness.guest.{Children, Data, Delivery, Files, JobId, JobStatus, Llm, Scope, SessionCard, SessionRef}
+import dspy4s.harness.guest.{Sessions, Shell, StrategyName, Store, Turn}
 import dspy4s.harness.kernel.{EffectId, EffectResult, Entry}
 import dspy4s.harness.repl.Bindings
 import dspy4s.harness.sandbox.{Layout, Profile}
@@ -342,8 +342,8 @@ private def recordedSessions(inner: Sessions, recorder: Recorder): Sessions =
   def text(value : String): Json               = Json.String(value)
   def session(ref: SessionRef): (String, Json) = "session" -> text(ref.id)
   new Sessions:
-    def list(): Vector[SessionCard]                  = recorder.call("sessions", Json.Null)(inner.list())
-    def tell(ref: SessionRef, message: String): Unit =
+    def list(): Vector[SessionCard]                      = recorder.call("sessions", Json.Null)(inner.list())
+    def tell(ref: SessionRef, message: String): Delivery =
       recorder.call("tell", args(session(ref), "message" -> text(message)))(inner.tell(ref, message))
     def start(goal: String, scope: Scope, strategy: StrategyName): SessionRef =
       val called = args(

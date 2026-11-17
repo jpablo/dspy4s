@@ -5,7 +5,7 @@ import language.experimental.captureChecking
 
 import caps.assumeSafe
 
-// The types of the sessions, for `Sessions.start` and `Sessions.list`.
+// The types of the sessions, for `Sessions.start`, `Sessions.list` and `Sessions.tell`.
 
 /** The strategies of the context of a session. */
 @assumeSafe enum StrategyName derives CanEqual:
@@ -42,6 +42,20 @@ import caps.assumeSafe
 @assumeSafe final case class SessionRef(id: String) derives CanEqual
 
 @assumeSafe object SessionRef
+
+/** What `tell` gives: what the session does with the message when the call returns. */
+@assumeSafe enum Delivery derives CanEqual:
+
+  /** A turn of that session reads the message: the turn that the message started, or the turn that runs. */
+  case InTurn
+
+  /** The message waits for the person of that session. The session ran `turns` turns in a row with no message of its
+    * person, and its limit is `limit`. No turn of that session starts until its person writes there, so tell the
+    * person.
+    */
+  case WaitsForPerson(turns: Int, limit: Int)
+
+@assumeSafe object Delivery
 
 /** What `list` shows about a session: the id, the goal, the scope, the owner, the parent of a fork, the status, the
   * last `seq`, and the part of the ledger that the controller needs. The owner and the status are words: the owner is

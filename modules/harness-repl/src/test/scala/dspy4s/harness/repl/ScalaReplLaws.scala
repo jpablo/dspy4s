@@ -109,7 +109,9 @@ final class FakeStore extends Store:
       if keys.contains(key) then values.map((k, v) => if k == key then k -> json else k -> v)
       else values :+ (key -> json)
 
-/** The other sessions of a test: one idle session `s-1`. Each message and each goal goes to a list. */
+/** The other sessions of a test: one idle session `s-1`. Each message and each goal goes to a list, and `tell` gives
+  * `Delivery.InTurn`.
+  */
 final class FakeSessions extends Sessions:
   @volatile var told: Vector[(SessionRef, String)] = Vector.empty
   @volatile var goals: Vector[String]              = Vector.empty
@@ -129,8 +131,11 @@ final class FakeSessions extends Sessions:
     clean = Some(true)
   )
 
-  def list(): Vector[SessionCard]                      = Vector(card)
-  def tell(session: SessionRef, message: String): Unit = told = told :+ (session -> message)
+  def list(): Vector[SessionCard] = Vector(card)
+
+  def tell(session: SessionRef, message: String): Delivery =
+    told = told :+ (session -> message)
+    Delivery.InTurn
 
   def start(goal: String, scope: Scope, strategy: StrategyName): SessionRef =
     goals = goals :+ goal

@@ -1198,6 +1198,16 @@ uses = []
 text = "A reference to another session, for tell, observe and zoom. It is plain data, so the store can hold it."
 
 [[node]]
+id = "delivery"
+group = "session-types"
+kind = "data"
+name = "Delivery"
+ref = "8.7"
+spec = true
+uses = []
+text = "What tell gives (2026-11-17): InTurn when a turn of that session reads the message, or WaitsForPerson with the count of the turns with no person and the limit, when the message waits for the person of that session."
+
+[[node]]
 id = "session-card"
 group = "session-types"
 kind = "data"
@@ -1430,7 +1440,7 @@ kind = "data"
 name = "Sessions"
 ref = "5.1"
 spec = true
-uses = ["cap", "session-card", "session-ref", "scope", "strategy-name", "llm"]
+uses = ["cap", "session-card", "session-ref", "scope", "strategy-name", "llm", "delivery"]
 text = "list, tell, start, observe and zoom, as section 8.2 gives them. The host of phases 7 and 9 gives the handlers."
 
 [[node]]
@@ -4473,12 +4483,12 @@ id = "host-sessions"
 group = "host-sessions"
 kind = "data"
 name = "HostSessions"
-ops = ["list", "tell", "start", "observe", "zoom", "cardOf", "requestOf"]
+ops = ["list", "tell", "start", "observe", "zoom", "cardOf", "requestOf", "deliveryOf"]
 ref = "8.7"
 spec = true
-uses = ["sessions", "peers", "session-id", "session-config", "journal-trait", "probe", "budget", "runtime-context", "session-card", "session-ref", "scope", "strategy-name", "llm", "catalog-row", "effect-id", "request-id", "command", "logged", "session-state", "source"]
+uses = ["sessions", "peers", "session-id", "session-config", "journal-trait", "probe", "budget", "runtime-context", "session-card", "session-ref", "scope", "strategy-name", "llm", "catalog-row", "effect-id", "request-id", "command", "logged", "session-state", "source", "delivery"]
 proof_uses = ["controller", "owner", "session-status", "host-error"]
-text = "list gives the cards of the other rows, with the owner and the status in words (cardOf). tell sends through runAs with the request id of its effect, and refuses a session that has ended. start makes the scope and opens the session with ownedConfig and its task in one commit. An error of the host in tell and start gives its words (HostError.words). observe asks the probe with the budget of the turn. zoom reads the memory of that session."
+text = "list gives the cards of the other rows, with the owner and the status in words (cardOf). tell sends through runAs with the request id of its effect, and refuses a session that has ended. It gives the Delivery of the state after the commit of the receiver (deliveryOf): WaitsForPerson with the count and the limit while the limit of the turns with no person holds the message (8.7), else InTurn. start makes the scope and opens the session with ownedConfig and its task in one commit. An error of the host in tell and start gives its words (HostError.words). observe asks the probe with the budget of the turn. zoom reads the memory of that session."
 
 [[group]]
 id = "scopes"
@@ -4681,7 +4691,7 @@ kind = "law"
 name = "Controller:"
 ref = "8.7"
 uses = ["controller", "local-host", "work-runtime", "host-sessions"]
-text = "The configuration of the controller, its task and its sources. Its API reference names Sessions and not write, edit, exec or rlm. A cell of the controller starts a session whose first entries are Activated and its task. zoomInto reads the memory of another session with no LM call."
+text = "The configuration of the controller, its task and its sources. Its API reference names Sessions and not write, edit, exec or rlm. A cell of the controller starts a session whose first entries are Activated and its task. The API reference of the controller shows Delivery, and a tell to a session at its limit of the turns with no person gives WaitsForPerson and starts no turn. zoomInto reads the memory of another session with no LM call."
 
 [[node]]
 id = "law-sessions"
@@ -4690,7 +4700,7 @@ kind = "law"
 name = "Sessions:"
 ref = "8.7"
 uses = ["host-sessions", "peers", "probe", "recorded"]
-text = "With fake peers: list gives the other cards, tell runs a Send with the request id of its effect and refuses a session that has ended, start makes the scope and opens the session once, zoom and observe give the text of the host and of the probe, and requestOf gives two ids for two effects."
+text = "With fake peers: list gives the other cards, tell runs a Send with the request id of its effect, refuses a session that has ended, and gives WaitsForPerson with the count and the limit while the message waits, else InTurn, start makes the scope and opens the session once, zoom and observe give the text of the host and of the probe, and requestOf gives two ids for two effects."
 
 [[group]]
 id = "report-pass-laws"

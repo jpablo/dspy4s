@@ -168,7 +168,7 @@ object ReferenceLaws:
       def store[A: Data](key: String, value: A): Unit = ???),
     sessions = Some(new Sessions:
       def list(): Vector[SessionCard]                                                       = ???
-      def tell(session   : SessionRef, message : String): Unit                              = ???
+      def tell(session   : SessionRef, message : String): Delivery                          = ???
       def start(goal     : String, scope       : Scope, strategy: StrategyName): SessionRef = ???
       def observe(session: SessionRef, question: String)(using Llm): String                 = ???
       def zoom(session   : SessionRef, ref     : String): String                            = ???),

@@ -53,8 +53,10 @@ import caps.assumeSafe
   /** The cards of the sessions of the host. */
   def list(): Vector[SessionCard]
 
-  /** Sends `message` to that session. It returns after the session keeps the message. */
-  update def tell(session: SessionRef, message: String): Unit
+  /** Sends `message` to that session. It returns after the session keeps the message, and its value tells whether a
+    * turn reads the message or the message waits for the person of that session.
+    */
+  update def tell(session: SessionRef, message: String): Delivery
 
   /** Starts a session in the background. Its report comes back as a message that starts a turn. The scope is a
     * `Scratch`, a `Worktree` or a `Directory`, as `api.start` tells. A `Home` or a `Fork` scope gives an error.
@@ -198,8 +200,10 @@ final case class NeedsApproval(op: String, argument: String)
   /** The cards of the sessions of the host. */
   def sessions()(using s: Sessions): Vector[SessionCard]                           = s.list()
 
-  /** Sends `message` to `session`. The call returns after the session keeps the message. */
-  def tell(session: SessionRef, message: String)(using s: Sessions^): Unit         = s.tell(session, message)
+  /** Sends `message` to `session`. The call returns after the session keeps the message. Its value tells whether a
+    * turn of that session reads the message, or the message waits for the person of that session.
+    */
+  def tell(session: SessionRef, message: String)(using s: Sessions^): Delivery     = s.tell(session, message)
 
   /** The answer to `question` about `session`. A read-only child reads the journal of that session, and it changes
     * nothing there.

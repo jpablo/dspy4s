@@ -37,7 +37,7 @@ a capability can only read. The type `T^` can also change something. For example
 | `sessions(): Vector[SessionCard]` | `Sessions` | See [Sessions and the controller](sessions.md). |
 | `observe(session: SessionRef, question: String): String` | `Sessions`, `Llm^` | See [Sessions and the controller](sessions.md). |
 | `zoom(session: SessionRef, ref: String): String` | `Sessions` | See [Sessions and the controller](sessions.md). |
-| `tell(session: SessionRef, message: String): Unit` | `Sessions^` | See [Sessions and the controller](sessions.md). |
+| `tell(session: SessionRef, message: String): Delivery` | `Sessions^` | See [Sessions and the controller](sessions.md). |
 | `start(goal: String, scope: Scope, strategy: StrategyName): SessionRef` | `Sessions^` | See [Sessions and the controller](sessions.md). |
 | `rlm[A: Data](task: String, inputs: Map[String, String] = Map.empty): A` | `Children^` | Runs a child with the task, and gives the value of its `submit`. |
 | `rlmBatched[A: Data](tasks: Vector[(String, Map[String, String])]): Vector[A]` | `Children^` | Runs one child for each task, some at the same time, and gives the values in the order of the tasks. |

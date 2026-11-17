@@ -80,7 +80,7 @@ The mode of the controller gives `Files` (read only), `Llm^`, `Sessions^` and `S
 |---|---|
 | `start(goal, scope, strategy): SessionRef` | It starts a work session in the background, with `goal` as its first message. |
 | `sessions(): Vector[SessionCard]` | It gives the card of each other session of the host. |
-| `tell(session, message): Unit` | It sends a message, and it returns after the session keeps it. A session that has ended gives an error. |
+| `tell(session, message): Delivery` | It sends a message, and it returns after the session keeps it. It gives `InTurn` when a turn of that session reads the message, and `WaitsForPerson(turns, limit)` when the message waits for the person of that session. A session that has ended gives an error. |
 | `observe(session, question): String` | A probe: a read-only program reads the journal of the session and answers. |
 | `zoom(session, ref): String` | It gives a part of the memory of the session. See [Memory](memory.md). |
 
@@ -135,6 +135,8 @@ that session. A new session starts again from an empty folder.
   `/status` shows the notice and the count of these turns. The flag `--unattended-turns N` sets the limit for each
   session that the client opens, also for the sessions that the controller starts. `0` gives no limit. `/config`
   shows the limit of the session. A restart with a higher limit starts the turn of a message that waits.
+- The rule also applies to a message of the controller. Then `tell` gives `WaitsForPerson(turns, limit)`, so the
+  controller can tell you to open that session and write to it. The turn of the goal of `start` is one such turn.
 
 The text gives the outcome in words, for example `The turn ended with a reply: <reply>`,
 `The turn crashed: its host stopped during the turn.` or `The session ended: <outcome>, <reason>.`

@@ -1524,7 +1524,7 @@ configuration. Neither one cut any work.
 | `rlm[A: Data](task, inputs): A` | `Children^` | Runs a child inside the cell and gives its value. It is one effect of the parent, and the child has its own journal. A child that ends with no `submit` makes the call fail (5.1). |
 | `rlmBatched[A: Data](tasks): Vector[A]` | `Children^` | Runs several children at the same time inside the cell. Each task has its inputs, as the inputs of `rlm`. It is one effect of the parent, and each child has its own journal. |
 | `start(goal, scope, strategy): SessionRef` | `Sessions^` | Starts a session in the background. Its report comes back as an `Input` with `Source.Child`, and this starts a turn (8.6). |
-| `tell(session, message)` | `Sessions^` | `Send` to that session, with `Source.Controller` or `Source.Child`. It returns after the receiver commits (8.6). |
+| `tell(session, message): Delivery` | `Sessions^` | `Send` to that session, with `Source.Controller` or `Source.Child`. It returns after the receiver commits (8.6). It gives `WaitsForPerson(turns, limit)` when the message waits for the person of the receiver (8.7), else `InTurn`. |
 | `observe(session, question): String` | `Sessions`, `Llm^` | A read-only `rlm` with the journal of that session as an input. It changes nothing in that session. |
 | `zoom(session, ref): String` | `Sessions` | Reads a part of a journal. |
 | `list(): Vector[SessionCard]` | `Sessions` | The cards of the sessions. The catalog gives the deterministic part (10.2). |
@@ -1715,6 +1715,11 @@ problems. Each one held against the code. These choices were made with the user:
   that waits. `waitsForPerson` is true while the limit holds a message with no open turn. Then the client prints
   a notice after the message, and `/status` shows the notice and the count of the turns. `/config` and the
   inspector show the limit.
+- `tell` gives the controller the same fact (decided on 2026-11-17). It returns a `Delivery`, which the handler
+  reads from the state that the commit of the receiver gives (`HostSessions.deliveryOf`):
+  `WaitsForPerson(turns, limit)` when `waitsForPerson` holds, else `InTurn`. Before, `tell` returned `Unit`, so
+  the model of the controller did not know that its message waited. The turn of the goal of `start` counts as a
+  turn with no person, so a session at the limit 1 holds the next message of the controller.
 - The authority of the controller stays narrow in phase 9. The person ends a session in a client, so
   [CODE_HARNESS.md](CODE_HARNESS.md), 7.9 changes. The person makes the commits of a worktree, because its `.git`
   stays read-only in the sandbox (F7). So the rows of 7.9 for a merged branch apply to the commits of the person.
