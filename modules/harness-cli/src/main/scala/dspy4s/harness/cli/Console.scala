@@ -481,7 +481,8 @@ object EditorConsole:
       }
 
   /** A console on `terminal`, with its history in the file `history`. Each line goes through `mask` before it goes into
-    * the history. Tab after `/effort` completes the levels that `levels` gives.
+    * the history. Tab after `/effort` completes the levels that `levels` gives. If the terminal has `enacs`, `on` sends
+    * it one time, so the box characters show correctly in tmux and GNU screen.
     */
   def on(
       terminal: Terminal,
@@ -514,6 +515,9 @@ object EditorConsole:
     val attributes = terminal.getAttributes
     attributes.setLocalFlag(Attributes.LocalFlag.ISIG, false)
     terminal.setAttributes(attributes)
+    // JLine draws a box character between smacs and rmacs, and it never sends enacs. In tmux and GNU screen, smacs is
+    // ^N, so without enacs a rule shows as q. A terminal with no enacs, for example xterm-256color, gets nothing.
+    if terminal.puts(InfoCmp.Capability.ena_acs) then terminal.flush()
     EditorConsole(reader, color, glyphs)
 
   /** At Enter after an odd number of `\` at the end of the line, the last `\` becomes a new line, and the line goes on.

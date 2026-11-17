@@ -3,6 +3,7 @@ package dspy4s.harness.cli
 import dspy4s.harness.host.HostSupport.withRoot
 import org.jline.terminal.{Attributes, Size, Terminal}
 import org.jline.terminal.impl.{DumbTerminal, ExternalTerminal}
+import org.jline.utils.{Curses, InfoCmp}
 
 import java.io.{BufferedReader, ByteArrayInputStream, ByteArrayOutputStream, PipedInputStream, PipedOutputStream}
 import java.io.{InputStream, OutputStream, PrintStream, StringReader}
@@ -461,6 +462,39 @@ class ConsoleLaws extends munit.FunSuite:
       assert(soon(seen(out).exists(_.startsWith("› Hi"))), seen(out).mkString("\n"))
       Thread.sleep(400)
       ruleOver("› Hi", seen(out))
+    }
+  }
+
+  test("CLI editor: on a terminal of tmux or screen, the line set is on before the first line, so a rule is not qqq") {
+    // Live in tmux on 2026-11-16, the rule above the prompt showed as qqqq. JLine draws a box character with the code
+    // of the line set (q for ─) between smacs and rmacs. In tmux and GNU screen, smacs is ^N, which selects the
+    // charset G1, and G1 is the line set only after enacs (\E(B\E)0). JLine never sends enacs. JLine bundles the
+    // entry of screen-256color, which is the same as tmux-256color here, so this law needs no terminfo of the system.
+    val out  = ByteArrayOutputStream()
+    val term = ExternalTerminal("fake", "screen-256color", ByteArrayInputStream(Array.emptyByteArray), out, UTF_8)
+    assertEquals(Curses.tputs(term.getStringCapability(InfoCmp.Capability.enter_alt_charset_mode)), "\u000e")
+    withHistory { history =>
+      val console = EditorConsole.on(term, history, identity)
+      console.printRows(Vector(Row.of(Glyphs.unicode.rule * 8, Tone.Dim)))
+      term.flush()
+      val text   = out.toString(UTF_8)
+      val shift  = text.indexOf('\u000e')
+      val enable = text.indexOf("\u001b)0")
+      assert(shift >= 0, s"the rule did not use the line set: ${visible(text)}")
+      assert(enable >= 0 && enable < shift, s"no enacs before the first ^N: ${visible(text)}")
+    }
+  }
+
+  test("CLI editor: on xterm-256color, the rule uses the line set with no enacs, as before") {
+    val out  = ByteArrayOutputStream()
+    val term = ExternalTerminal("fake", "xterm-256color", ByteArrayInputStream(Array.emptyByteArray), out, UTF_8)
+    withHistory { history =>
+      val console = EditorConsole.on(term, history, identity)
+      console.printRows(Vector(Row.of(Glyphs.unicode.rule * 8, Tone.Dim)))
+      term.flush()
+      val text  = out.toString(UTF_8)
+      val start = text.indexOf("\u001b(0")
+      assert(start >= 0 && text.indexOf("qqqqqqqq") > start, visible(text))
     }
   }
 

@@ -268,6 +268,10 @@ Each phase keeps the script mode as it is: plain lines, with no live block and n
   hints and the times, and one accent (cyan) for `›` and `●`.
 - An ASCII set for a terminal with no Unicode, as in ATC: `*` for `●`, `+` for `✓`, `x` for `✗`, `!` for `⚠`, `>`
   for `▸`, `v` for `▾`, `|` for `│`, and `| / - \` for the spinner.
+- JLine draws the box characters `─` and `│` with the line set of the terminal: `q` and `x` between `smacs` and
+  `rmacs`. In tmux and GNU screen, `smacs` is `^N`, which selects the charset G1. G1 is the line set only after
+  `enacs`, and JLine never sends it. So the editor sends `enacs` once at its start, when the terminal has it. Before
+  this fix, the rule showed as `qqqq` in tmux (2026-11-16).
 
 ## 10. The sources
 
