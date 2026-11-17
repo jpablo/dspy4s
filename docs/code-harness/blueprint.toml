@@ -2517,8 +2517,8 @@ group = "harness-config"
 kind = "data"
 name = "HarnessLimits"
 ref = "9"
-uses = ["backend", "host-list", "layout"]
-text = "The limits of a call: the steps, the budget of a projection, the time of a cell and of a command, the size of an observation, the cell limit, and since phase 5 the model calls of the tree (60), the depth limit of rlm (2) and the width of a batch (4). Since 2026-11-16 also the guest API calls of a cell (10,000), and the facts of an activation (HostFacts) with the backend, the host list and the secrets of the layout, which the host records in each Activate."
+uses = ["backend", "host-list", "layout", "session-state"]
+text = "The limits of a call: the steps, the budget of a projection, the time of a cell and of a command, the size of an observation, the cell limit, and since phase 5 the model calls of the tree (60), the depth limit of rlm (2) and the width of a batch (4). Since 2026-11-16 also the guest API calls of a cell (10,000), since 2026-11-17 the limit of the turns with no person (8), and the facts of an activation (HostFacts) with the backend, the host list and the secrets of the layout, which the host records in each Activate."
 
 [[node]]
 id = "finish-input"
@@ -4820,7 +4820,7 @@ kind = "law"
 name = "Unattended:"
 ref = "8.7"
 uses = ["decide", "evolve"]
-text = "A turn that no person starts counts, and a message of the person or a grant sets the count to 0. At the limit, a message of another session waits, a message of the person starts the turn, and Activate starts none."
+text = "A turn that no person starts counts, and a message of the person or a grant sets the count to 0. At the limit, a message of another session waits, a message of the person starts the turn, and Activate starts none. The limit is the limit of the activation (8 with no facts), NoLimit never holds, a restart with a higher limit starts the turn, and waitsForPerson holds only for a held message with no open turn."
 
 [[node]]
 id = "law-id"

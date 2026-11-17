@@ -437,6 +437,7 @@ class WorkLaws extends munit.FunSuite:
           assertEquals(first.limits.callsPerCell, limits.callsPerCell)
           assertEquals(first.limits.summaryCalls, limits.summaryCalls)
           assertEquals(first.limits.memoryChars, limits.budget)
+          assertEquals(first.limits.unattendedTurns, Some(limits.unattendedTurns))
           assertEquals(first.sandbox.backend, Backends.detect().map(_.name))
           assertEquals(first.sandbox.secretNames, Vector(".env"))
           assert(first.sandbox.secretPaths.exists(_.endsWith("/.ssh")), first.sandbox.secretPaths.toString)
@@ -447,6 +448,16 @@ class WorkLaws extends munit.FunSuite:
         withHost(root, Models.withModel(model)(WorkRuntime.forWork(env, fewer))) { host =>
           val again = facts(opened(host, id(1), None))
           assertEquals((again.limits.summaryCalls, again.limits.callsPerCell), (0, 7))
+        }
+        // A restart with another limit of the unattended turns records it, and the kernel uses it (8.7).
+        withHost(
+          root,
+          Models.withModel(model)(WorkRuntime.forWork(env, limits.copy(unattendedTurns = TurnLimit.NoLimit)))
+        ) {
+          host =>
+            val again = opened(host, id(1), None)
+            assertEquals(facts(again).limits.unattendedTurns, Some(TurnLimit.NoLimit))
+            assertEquals(again.state.config.unattendedLimit, TurnLimit.NoLimit)
         }
       }
     finally place.close()

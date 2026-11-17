@@ -147,6 +147,35 @@ class HandlerLaws extends FunSuite:
       case other => fail(s"the last entry is $other")
   }
 
+  test("Recorded: a call that an interrupt stops gets an Error in words, and an exception with no text its name") {
+    val j        = journal()
+    val cell     = inCell(j)
+    val recorder = Recorder(j)
+    recorder.startCell(cell)
+    def lastError: String =
+      j.log.last.entry match
+        case Entry.EffectDone(_, EffectResult.Error(message)) => message
+        case other                                            => fail(s"the last entry is $other")
+    // The host stops a cell with an interrupt, for example at its wall limit (D1): the call in progress gets it. An
+    // InterruptedException on the thread of munit stops the suite, so the call runs on its own thread.
+    val stopped = AtomicReference[Throwable]()
+    val runner  = Thread.ofPlatform().start { () =>
+      try recorder.call[String]("exec", Json.String("sleep 30"))(throw InterruptedException()): Unit
+      catch case e: InterruptedException => stopped.set(e)
+    }
+    runner.join(10_000)
+    assert(Option(stopped.get).exists(_.isInstanceOf[InterruptedException]), String.valueOf(stopped.get))
+    assertEquals(lastError, "the call stopped, because the host stopped the cell")
+    intercept[IllegalStateException] {
+      recorder.call[String]("read", Json.String("a.txt"))(throw IllegalStateException())
+    }: Unit
+    assertEquals(lastError, "IllegalStateException")
+    intercept[IllegalStateException] {
+      recorder.call[String]("read", Json.String("a.txt"))(throw IllegalStateException("FAKE-CAUSE"))
+    }: Unit
+    assertEquals(lastError, "IllegalStateException: FAKE-CAUSE")
+  }
+
   test("Recorded: each call of Sessions commits its op and its arguments, and the value of its handler (8.7)") {
     val j        = journal()
     val cell     = inCell(j)

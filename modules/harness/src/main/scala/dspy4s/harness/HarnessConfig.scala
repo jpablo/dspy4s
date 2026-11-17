@@ -1,7 +1,7 @@
 package dspy4s.harness
 
 import dspy4s.harness.guest.{Access, Mode}
-import dspy4s.harness.kernel.{HostFacts, Limits, Logged, SandboxFacts, SessionId}
+import dspy4s.harness.kernel.{HostFacts, Limits, Logged, SandboxFacts, SessionId, SessionState, TurnLimit}
 import dspy4s.harness.sandbox.{Backend, Environment, HostList, Layout}
 import zio.blocks.schema.Schema
 
@@ -57,20 +57,24 @@ object HarnessEnv:
   * @param cellWallTime
   *   the wall-clock limit of one cell, with its guest API calls (`ScalaRepl`). `cellTimeout` counts only the guest
   *   code, so a loop of slow calls has no other end. None gives no wall limit.
+  * @param unattendedTurns
+  *   the turns in a row that no message of the person starts (8.7). At the limit, a message of another session, the
+  *   harness or a job waits for the person. `TurnLimit.NoLimit` never holds a message.
   */
 final case class HarnessLimits(
-    steps         : Int                    = 10,
-    budget        : Int                    = 40_000,
-    cellTimeout   : FiniteDuration         = 30.seconds,
-    execTimeout   : Int                    = 600,
-    maxObservation: Int                    = 4_000,
-    cellLimit     : Int                    = 300,
-    modelCalls    : Int                    = 60,
-    depth         : Int                    = 2,
-    batch         : Int                    = 4,
-    summaryCalls  : Int                    = 64,
-    callsPerCell  : Int                    = 10_000,
-    cellWallTime  : Option[FiniteDuration] = Some(15.minutes)
+    steps          : Int                    = 10,
+    budget         : Int                    = 40_000,
+    cellTimeout    : FiniteDuration         = 30.seconds,
+    execTimeout    : Int                    = 600,
+    maxObservation : Int                    = 4_000,
+    cellLimit      : Int                    = 300,
+    modelCalls     : Int                    = 60,
+    depth          : Int                    = 2,
+    batch          : Int                    = 4,
+    summaryCalls   : Int                    = 64,
+    callsPerCell   : Int                    = 10_000,
+    cellWallTime   : Option[FiniteDuration] = Some(15.minutes),
+    unattendedTurns: TurnLimit              = TurnLimit.AtMost(SessionState.UnattendedTurns)
 ) derives CanEqual:
 
   /** These limits, the backend `backend`, the hosts `hosts` and the secrets of the home folder `home` as the facts of
@@ -90,7 +94,8 @@ final case class HarnessLimits(
         modelCalls = modelCalls,
         summaryCalls = summaryCalls,
         batch = batch,
-        depth = depth
+        depth = depth,
+        unattendedTurns = Some(unattendedTurns)
       ),
       SandboxFacts(
         backend = backend.map(_.name),

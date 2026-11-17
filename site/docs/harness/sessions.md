@@ -131,7 +131,10 @@ that session. A new session starts again from an empty folder.
 - A report that the controller did not get comes when the controller opens again. The controller gets each report one
   time.
 - After 8 turns in a row that no message of the person started, a message from another sender waits in the journal.
-  Your next message starts the turn that reads it.
+  Your next message starts the turn that reads it. The client prints a notice after the message that waits, and
+  `/status` shows the notice and the count of these turns. The flag `--unattended-turns N` sets the limit for each
+  session that the client opens, also for the sessions that the controller starts. `0` gives no limit. `/config`
+  shows the limit of the session. A restart with a higher limit starts the turn of a message that waits.
 
 The text gives the outcome in words, for example `The turn ended with a reply: <reply>`,
 `The turn crashed: its host stopped during the turn.` or `The session ended: <outcome>, <reason>.`

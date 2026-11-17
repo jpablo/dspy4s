@@ -18,7 +18,7 @@ import dspy4s.harness.host.{
   WorkRuntime
 }
 import dspy4s.harness.kernel.{EffectResult, Entry, GuardRule, Logged, Position, ReleaseItem, RequestId, SessionId}
-import dspy4s.harness.kernel.{SessionOutcome, TurnOutcome}
+import dspy4s.harness.kernel.{SessionOutcome, Source, TurnOutcome}
 import dspy4s.harness.sandbox.{Backends, HostList}
 import dspy4s.lm.contracts.{LanguageModel, LmCapabilities, LmMode, LmRequest, LmResponse}
 import dspy4s.lm.providers.{OpenAiClient, OpenAiLanguageModel}
@@ -56,9 +56,9 @@ import scala.util.control.NonFatal
   * exchange file of the session (`ExchangeFile`), with the mask of the client, and `DSPY_EXCHANGES=off` turns the file
   * off. `--no-memory-calls` gives the host the limits `cli.limits`, with no summary call of the memory tree, so a
   * person can compare the cost of a session with and without the memory calls. `--cell-wall-minutes` sets the wall
-  * limit of a cell in the same limits. `--script` runs the loop in the script mode, so a script or an agent can drive
-  * the session. `--list` prints `listText` and starts no session. `--session` takes an id or the start of an id
-  * (`resolveSession`).
+  * limit of a cell in the same limits, and `--unattended-turns` the limit of the turns with no person. `--script` runs
+  * the loop in the script mode, so a script or an agent can drive the session. `--list` prints `listText` and starts no
+  * session. `--session` takes an id or the start of an id (`resolveSession`).
   *
   * The file `<home>/.dspy4s/harness/.env` can give each of these variables (`EnvFile`). A variable of the process wins
   * over the file, apart from the base URL and the key, which come both from the file or both from the process. A line
@@ -288,6 +288,8 @@ object Cli:
     *     the model. The footer and `/status` show the effort, and the context with the window of `facts`.
     *   - After a turn that ends `Aborted`, the client prints `stopNotice`: each job of that turn that still runs, and
     *     how to stop it (10.3).
+    *   - After a message whose sender is not the person, the client prints `heldText` when the message waits for the
+    *     person (8.7): the session ran its limit of turns in a row with no message of the person.
     *   - A console with the screen of CLI_SCREEN.md (`ClientConsole.rich`) gets the rows of `Screen.after` for each
     *     entry, in place of `entryText`, and it reads the live block (`Screen.live`) and the footer (`Screen.footer`)
     *     of the session that the client shows. Ctrl-O switches the detail of a cell, and `/show ID` prints a cell or a
@@ -603,7 +605,8 @@ private final class View(
       case Right(logged) => printEntry(now, logged)
       case Left(_)       => now.handle.read(now.shown.last).foreach(printEntry(now, _))
 
-  // An entry that the client did not show yet, and the stop notice after a turn that a stop ended.
+  // An entry that the client did not show yet, the stop notice after a turn that a stop ended, and the notice of a
+  // message of another sender that waits for the person (8.7).
   private def printEntry(now: Watched, logged: Logged): Unit =
     now.shown.next(logged).foreach { fresh =>
       rows match
@@ -617,7 +620,8 @@ private final class View(
         case Entry.TurnEnded(TurnOutcome.Aborted) =>
           val h = now.handle
           stopNotice(h.state, now.turn.get, jobStarts(h.read(now.turn.get)), h.jobStatus).foreach(print)
-        case _ => ()
+        case Entry.Input(_, _, _) if fresh.meta.source != Source.User => heldText(now.handle.state).foreach(print)
+        case _                                                        => ()
     }
 
 /** One session of a `View`: its handle, its feed, what the client showed, the turn of a stop notice, and its screen. */

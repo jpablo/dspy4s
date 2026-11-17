@@ -49,11 +49,12 @@ final case class SessionState(
 
 object SessionState:
 
-  /** The most turns in a row that no message of the person starts (8.7). At the limit, a message from another session,
+  /** The default limit of the turns in a row that no message of the person starts (8.7), and the limit of an older
+    * host, whose facts have no limit (`SessionConfig.unattendedLimit`). At the limit, a message from another session,
     * the harness or a job waits in the journal, and no turn starts until the person writes. So two sessions cannot send
     * messages to each other with no end, and the start of a host does not go on with them.
     */
-  val UnattendedTurns: Int = 8
+  val UnattendedTurns: Int = TurnLimit.DefaultTurns
 
   /** The state before the first entry: a closed session with no turn. The first entry of a journal is an `Activated`
     * with the real configuration, so nothing reads this one. It has the least authority.

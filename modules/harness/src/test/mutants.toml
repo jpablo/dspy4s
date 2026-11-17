@@ -883,3 +883,10 @@ name = "Mutant: an empty memory comes in the system message"
 file = "PolicyAdapter.scala"
 old = "val shown  = values.filterNot((_, value) => DynamicValues.asString(value).contains(\"\"))"
 new = "val shown  = values.filterNot((_, value) => DynamicValues.asString(value).contains(\"FAKE\"))"
+
+[[mutant]]
+name = "Mutant: a call that an interrupt stops gets the name of the exception"
+[[mutant.edit]]
+file = "Handlers.scala"
+old = "      case _: InterruptedException => \"the call stopped, because the host stopped the cell\""
+new = "      case _: InterruptedException => \"InterruptedException: \""

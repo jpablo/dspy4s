@@ -56,7 +56,14 @@ final case class SessionConfig(
     goal    : Option[String],
     env     : Set[String], // more names of variables for a command (5.6)
     host    : Option[HostFacts] = None // the limits and the sandbox of this activation
-) derives Schema, CanEqual
+) derives Schema, CanEqual:
+
+  /** The limit of the turns in a row that no message of the person starts (8.7): the limit of the facts of the host. An
+    * activation with no facts, or with the facts of an older host, has `TurnLimit.DefaultTurns` (8), because that host
+    * held a message after 8 turns.
+    */
+  def unattendedLimit: TurnLimit =
+    host.flatMap(_.limits.unattendedTurns).getOrElse(TurnLimit.AtMost(TurnLimit.DefaultTurns))
 
 /** The limits and the sandbox of one activation (5.4, 5.6, 6, 7.1, 8.2). The host gives them in the `Activate` of each
   * open, so the journal shows what acted on each turn, and `/config` and the inspector show the same facts. A journal
@@ -92,6 +99,10 @@ final case class HostFacts(limits: Limits, sandbox: SandboxFacts) derives Schema
   *   the queries or children that one batch call runs at the same time
   * @param depth
   *   the depth limit of `rlm`
+  * @param unattendedTurns
+  *   the turns in a row that no message of the person starts (8.7). At the limit, a message of another session, the
+  *   harness or a job waits for the person. None means an activation of an older host, which held such a message after
+  *   `SessionState.UnattendedTurns` (8) turns.
   */
 final case class Limits(
     cellMillis      : Long,
@@ -104,8 +115,31 @@ final case class Limits(
     modelCalls      : Int,
     summaryCalls    : Int,
     batch           : Int,
-    depth           : Int
+    depth           : Int,
+    unattendedTurns : Option[TurnLimit]
 ) derives Schema, CanEqual
+
+/** The limit of the turns in a row that no message of the person starts (8.7). `AtMost(n)` holds a message of another
+  * session, the harness or a job after `n` such turns. `NoLimit` never holds a message.
+  */
+enum TurnLimit derives Schema, CanEqual:
+  case AtMost(turns: Int)
+  case NoLimit
+
+  /** The limit in words, for example `1,000`, or `none` for no limit. */
+  def words: String =
+    this match
+      case AtMost(turns) => grouped(turns.toLong)
+      case NoLimit       => "none"
+
+object TurnLimit:
+
+  /** The turns of the default limit (8.7). A host with the default limits has `AtMost(DefaultTurns)`, and an older
+    * host, whose facts have no limit, held a message after so many turns. `SessionState.UnattendedTurns` gives the same
+    * number. The number is here and not in `SessionState`, because `SessionState` holds a `SessionConfig`, and the
+    * configuration must not need the state.
+    */
+  val DefaultTurns: Int = 8
 
 /** The sandbox of the commands of an activation (5.4, 5.6).
   *

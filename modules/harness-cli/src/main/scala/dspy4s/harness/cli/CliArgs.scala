@@ -2,7 +2,7 @@ package dspy4s.harness.cli
 
 import dspy4s.harness.HarnessLimits
 import dspy4s.harness.inspect.Inspector
-import dspy4s.harness.kernel.SessionId
+import dspy4s.harness.kernel.{SessionId, TurnLimit}
 
 import java.nio.file.Path
 import scala.annotation.tailrec
@@ -36,6 +36,9 @@ import scala.concurrent.duration.*
   * @param cellWallMinutes
   *   the wall-clock limit of a cell in minutes from `--cell-wall-minutes`, with its guest API calls. None keeps the
   *   default limit of `HarnessLimits`, and 0 gives no wall limit.
+  * @param unattendedTurns
+  *   the limit of the turns in a row that no message of the person starts (8.7), from `--unattended-turns`. None keeps
+  *   the default limit of `HarnessLimits`, and 0 gives no limit.
   */
 final case class CliArgs(
     scope          : Path,
@@ -47,19 +50,23 @@ final case class CliArgs(
     inspect        : Boolean     = false,
     port           : Int         = Inspector.DefaultPort,
     memoryCalls    : Boolean     = true,
-    cellWallMinutes: Option[Int] = None
+    cellWallMinutes: Option[Int] = None,
+    unattendedTurns: Option[Int] = None
 ) derives CanEqual:
 
   /** The limits of the sessions of the host: the default limits, with no summary call of the memory tree (7.1) when
     * `memoryCalls` is false. A spent summary budget gives each message its first bytes as its line, and the store does
     * not keep that line, so a later run with the memory calls builds the summaries. `cellWallMinutes` sets the wall
-    * limit of a cell, and 0 gives none.
+    * limit of a cell, and 0 gives none. `unattendedTurns` sets the limit of the turns with no person, and 0 gives none.
     */
   def limits: HarnessLimits =
     val default = HarnessLimits()
     default.copy(
       summaryCalls = if memoryCalls then default.summaryCalls else 0,
-      cellWallTime = cellWallMinutes.fold(default.cellWallTime)(minutes => Option.when(minutes > 0)(minutes.minutes))
+      cellWallTime = cellWallMinutes.fold(default.cellWallTime)(minutes => Option.when(minutes > 0)(minutes.minutes)),
+      unattendedTurns = unattendedTurns.fold(default.unattendedTurns)(turns =>
+        if turns > 0 then TurnLimit.AtMost(turns) else TurnLimit.NoLimit
+      )
     )
 
 object CliArgs:
@@ -67,7 +74,7 @@ object CliArgs:
   /** The text that an error of the arguments gives. */
   val usage
       : String = "Usage: dspy4s-harness [--root DIR] [--session ID | --controller] [--script] [--no-memory-calls]\n" +
-    "                      [--cell-wall-minutes N] [FOLDER]\n" +
+    "                      [--cell-wall-minutes N] [--unattended-turns N] [FOLDER]\n" +
     "       dspy4s-harness [--root DIR] --list\n" +
     "       dspy4s-harness [--root DIR] --inspect [--port N]\n" +
     "  --root DIR     the root of the host, by default ~/.dspy4s/harness\n" +
@@ -85,12 +92,17 @@ object CliArgs:
     "  --cell-wall-minutes N\n" +
     "                 stop a cell after N minutes of wall time, with its guest API calls, by default 15; 0 gives\n" +
     "                 no wall limit. It applies to each session of the host, also to a session that opens again\n" +
+    "  --unattended-turns N\n" +
+    "                 after N turns in a row with no message of yours, a message of another session, of a job or\n" +
+    "                 of the harness waits for you, by default 8; 0 gives no limit. It applies to each session of\n" +
+    "                 the host, also to a session that opens again\n" +
     "  FOLDER         the folder of a new session, by default the current folder"
 
   /** The arguments from the command line: `[--root DIR] [--session ID | --controller] [--script] [--no-memory-calls]
-    * [--cell-wall-minutes N] [--list] [FOLDER]`. The folder is `cwd` by default, and the root is
-    * `<home>/.dspy4s/harness`. An unknown flag, a missing value, a value of `--cell-wall-minutes` that is not a whole
-    * number 0 or more, or both `--session` and `--controller` give an error with the usage.
+    * [--cell-wall-minutes N] [--unattended-turns N] [--list] [FOLDER]`. The folder is `cwd` by default, and the root is
+    * `<home>/.dspy4s/harness`. An unknown flag, a missing value, a value of `--cell-wall-minutes` or of
+    * `--unattended-turns` that is not a whole number 0 or more, or both `--session` and `--controller` give an error
+    * with the usage.
     *
     * The folder and the root are normal paths, with no `.` or `..` part. A live scenario of 2026-11-10 gave the folder
     * `.`, and the scope of the session was `.../ws/.`.
@@ -109,7 +121,7 @@ object CliArgs:
         case Nil
             if got.inspect &&
               (got.session.nonEmpty || got.controller || got.list || got.script || !got.memoryCalls ||
-                got.cellWallMinutes.nonEmpty || folder.nonEmpty) =>
+                got.cellWallMinutes.nonEmpty || got.unattendedTurns.nonEmpty || folder.nonEmpty) =>
           Left(s"Give --inspect with only --root and --port.\n$usage")
         case Nil                                                                      => Right(folder.fold(got)(f => got.copy(scope = f)))
         case "--inspect" :: more                                                      => walk(more, got.copy(inspect = true), folder, port)
@@ -123,6 +135,8 @@ object CliArgs:
         case "--no-memory-calls" :: more                                        => walk(more, got.copy(memoryCalls = false), folder, port)
         case "--cell-wall-minutes" :: n :: more if n.toIntOption.exists(_ >= 0) =>
           walk(more, got.copy(cellWallMinutes = n.toIntOption), folder, port)
+        case "--unattended-turns" :: n :: more if n.toIntOption.exists(_ >= 0) =>
+          walk(more, got.copy(unattendedTurns = n.toIntOption), folder, port)
         case "--list" :: more                   => walk(more, got.copy(list = true), folder, port)
         case "--controller" :: more             => walk(more, got.copy(controller = true), folder, port)
         case flag :: _ if flag.startsWith("--") => Left(s"The argument $flag is not right.\n$usage")

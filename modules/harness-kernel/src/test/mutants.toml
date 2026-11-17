@@ -299,3 +299,38 @@ name = "Mutant: a Commit of a JobEnded commits"
 file = "Decide.scala"
 old = "    case Entry.ScopeRecorded(_, _)                      => !s.closed"
 new = "    case Entry.ScopeRecorded(_, _) | Entry.JobEnded(_, _) => !s.closed"
+
+[[mutant]]
+name = "Mutant: held ignores the limit of the activation"
+[[mutant.edit]]
+file = "Decide.scala"
+old = "      case TurnLimit.AtMost(turns) => s.unattended >= turns"
+new = "      case TurnLimit.AtMost(_) => s.unattended >= SessionState.UnattendedTurns"
+
+[[mutant]]
+name = "Mutant: NoLimit holds a message after 8 turns"
+[[mutant.edit]]
+file = "Decide.scala"
+old = "      case TurnLimit.NoLimit       => false)"
+new = "      case TurnLimit.NoLimit       => s.unattended >= SessionState.UnattendedTurns)"
+
+[[mutant]]
+name = "Mutant: unattendedLimit ignores the facts of the host"
+[[mutant.edit]]
+file = "SessionConfig.scala"
+old = "    host.flatMap(_.limits.unattendedTurns).getOrElse(TurnLimit.AtMost(TurnLimit.DefaultTurns))"
+new = "    TurnLimit.AtMost(TurnLimit.DefaultTurns)"
+
+[[mutant]]
+name = "Mutant: waitsForPerson ignores the open turn"
+[[mutant.edit]]
+file = "Decide.scala"
+old = "  !s.closed && s.position == Position.NoTurn && s.waiting > 0 && !s.releasing && held(s)"
+new = "  !s.closed && s.waiting > 0 && !s.releasing && held(s)"
+
+[[mutant]]
+name = "Mutant: waitsForPerson holds with no message that waits"
+[[mutant.edit]]
+file = "Decide.scala"
+old = "  !s.closed && s.position == Position.NoTurn && s.waiting > 0 && !s.releasing && held(s)"
+new = "  !s.closed && s.position == Position.NoTurn && !s.releasing && held(s)"

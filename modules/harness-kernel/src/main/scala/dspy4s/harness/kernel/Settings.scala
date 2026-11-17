@@ -27,12 +27,15 @@ def modeWords(mode: Mode): String =
     case more        => s"${more.init.mkString(", ")} and ${more.last}"
 
 /** The limits of an activation as names and values, for example `wall time of a cell` and `15 min`. `/config` and the
-  * inspector show these lines.
+  * inspector show these lines. An older host recorded no limit of the turns with no person, and it held a message after
+  * `SessionState.UnattendedTurns` turns, so the line gives that number.
   */
 def limitLines(limits: Limits): Vector[(String, String)] =
   val summaries =
     if limits.summaryCalls == 0 then "0 (no compress or merge call)" else grouped(limits.summaryCalls.toLong)
+  val unattended = limits.unattendedTurns.getOrElse(TurnLimit.AtMost(SessionState.UnattendedTurns))
   Vector(
+    "turns with no person"             -> unattended.words,
     "model calls of a turn"            -> grouped(limits.modelCalls.toLong),
     "time of the guest code of a cell" -> millisWords(limits.cellMillis),
     "wall time of a cell"              -> limits.cellWallMillis.fold("none")(timeWords),

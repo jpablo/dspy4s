@@ -83,7 +83,16 @@ object Recorder:
   /** The longest text of a value for a reader. The `Json` holds the whole value. */
   private val RenderedLimit = 2_000
 
-  private def message(e: Exception): String = s"${e.getClass.getSimpleName}: ${Option(e.getMessage).getOrElse("")}"
+  /** The text of the `Error` of a call that threw `e`. The host stops a cell with an interrupt, for example at its wall
+    * limit, so an `InterruptedException` gives that reason in words. An exception with no text gives its name only, for
+    * example `IllegalStateException`. Each other exception gives its name and its text.
+    */
+  private def message(e: Exception): String =
+    e match
+      case _: InterruptedException => "the call stopped, because the host stopped the cell"
+      case _                       =>
+        val name = e.getClass.getSimpleName
+        Option(e.getMessage).filter(_.nonEmpty).fold(name)(text => s"$name: $text")
 
   /** The text of a value for a reader, at most `RenderedLimit` units and a note of the rest. It goes into the journal,
     * so the cut keeps each character whole.

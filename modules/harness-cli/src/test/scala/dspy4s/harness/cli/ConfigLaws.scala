@@ -27,7 +27,8 @@ class ConfigLaws extends munit.FunSuite:
       modelCalls = 60,
       summaryCalls = 64,
       batch = 4,
-      depth = 2
+      depth = 2,
+      unattendedTurns = Some(TurnLimit.AtMost(8))
     ),
     SandboxFacts(
       backend = Some("Seatbelt"),
@@ -96,6 +97,7 @@ class ConfigLaws extends munit.FunSuite:
       "  journal: ~/.dspy4s/harness/sessions/abc.db",
       "  exchange file: ~/.dspy4s/harness/sessions/abc.http.jsonl"
     ).foreach(line => assert(all.contains(line), s"no line [$line] in\n$text"))
+    assertEquals(all.count(_ == "  turns with no person: 8"), 1, text)
     val off = configText(SessionId("abc"), state, client.copy(exchanges = false), ModelFacts.unknown, "/home/u")
     assert(lines(off).contains("  exchange file: off (DSPY_EXCHANGES=off)"), off)
     assert(lines(off).contains("  context window: not known"), off)
@@ -113,6 +115,40 @@ class ConfigLaws extends munit.FunSuite:
     val text = configText(SessionId("abc"), work(host = None), client, ModelFacts.unknown, "/home/u")
     assert(text.contains("This activation recorded no limits and no sandbox."), text)
     assert(lines(text).contains("  steps of a turn: 10"), text)
+  }
+
+  test("CLI: /config gives the limit of the turns with no person of the activation, and none for no limit (8.7)") {
+    def shown(host: Option[HostFacts]): Vector[String] =
+      lines(configText(SessionId("abc"), work(host), client, ModelFacts.unknown, "/home/u"))
+        .filter(_.startsWith("  turns with no person: "))
+    def limited(limit: Option[TurnLimit]) = Some(facts.copy(limits = facts.limits.copy(unattendedTurns = limit)))
+    assertEquals(shown(limited(Some(TurnLimit.NoLimit))), Vector("  turns with no person: none"))
+    assertEquals(shown(limited(Some(TurnLimit.AtMost(20)))), Vector("  turns with no person: 20"))
+    assertEquals(shown(limited(None)), Vector("  turns with no person: 8"))
+    assertEquals(shown(None), Vector("  turns with no person: 8"))
+  }
+
+  test("CLI: /status gives the turns with no person, and the notice of a message that waits for the person (8.7)") {
+    assertEquals(heldText(work()), None)
+    assert(!statusText(work(), Map.empty, Vector.empty).contains("with no message of yours"))
+    val three = lines(statusText(work().copy(unattended = 3), Map.empty, Vector.empty))
+    assert(three.contains("Turns in a row with no message of yours: 3 of 8."), three.mkString("\n"))
+    val free = work(Some(facts.copy(limits = facts.limits.copy(unattendedTurns = Some(TurnLimit.NoLimit)))))
+    val any  = lines(statusText(free.copy(unattended = 3), Map.empty, Vector.empty))
+    assert(any.contains("Turns in a row with no message of yours: 3 (no limit)."), any.mkString("\n"))
+    val waits  = work().copy(unattended = 8, waiting = 1)
+    val notice = heldText(waits).getOrElse(fail("no notice for a message that waits"))
+    Vector("A message waits for you", "8 turns in a row", "Type a message", "--unattended-turns")
+      .foreach(part => assert(notice.contains(part), s"no [$part] in $notice"))
+    val status = statusText(waits, Map.empty, Vector.empty)
+    assert(status.contains(notice), status)
+    assert(lines(status).contains("Turns in a row with no message of yours: 8 of 8."), status)
+    // After a restart with a lower limit, the count is above the limit, and the notice gives both numbers.
+    val lower = work(Some(facts.copy(limits = facts.limits.copy(unattendedTurns = Some(TurnLimit.AtMost(2))))))
+    val after = heldText(lower.copy(unattended = 9, waiting = 1)).getOrElse(fail("no notice after a lower limit"))
+    Vector("ran 9 turns in a row", "the limit is 2").foreach(part =>
+      assert(after.contains(part), s"no [$part] in $after")
+    )
   }
 
   test("CLI: /config parses, and the help lists it") {

@@ -10,9 +10,10 @@ package dspy4s.harness.kernel
   *     `JobsStopRequested` through `StopJobs`, and `Close` stay valid. `Ended` closes the release, so a session that
   *     opens again after its end takes messages.
   *   - The unattended turns: a `Send` whose sender is not the person gives its `Input` and no `TurnStarted` when
-  *     `unattended` is at `SessionState.UnattendedTurns`. So it waits in the journal, and the next message of the
-  *     person starts the turn that sees it. The end of a turn and `Activate` after a restart start no turn for such a
-  *     message either.
+  *     `unattended` is at the limit of the activation (`SessionConfig.unattendedLimit`). So it waits in the journal,
+  *     and the next message of the person starts the turn that sees it. The end of a turn starts no turn for such a
+  *     message either. `Activate` after a restart reads the limit of the new configuration, so a higher limit or no
+  *     limit starts the turn of the message that waits. The limit `NoLimit` never holds a message.
   *
   * The rule of the model (CLI_SCREEN.md, 14.4): `ChangeModel` gives `ModelChanged` in an open session, also during a
   * turn and a release, and the next call to the policy uses the new model. The model of the session gives no entry, and
@@ -91,10 +92,21 @@ def decide(command: Command, s: SessionState, sender: Source = Source.User): Eit
 /** True when the journal has the end of the job `job` (10.3). */
 private def ended(s: SessionState, job: EffectId): Boolean = s.jobs.get(job).exists(_.end.isDefined)
 
-/** True when a turn must wait for the person (8.7): `unattended` is at `SessionState.UnattendedTurns`, and no message
-  * of the person waits.
+/** True when a turn must wait for the person (8.7): `unattended` is at the limit of the activation
+  * (`SessionConfig.unattendedLimit`), and no message of the person waits. `NoLimit` never holds.
   */
-private def held(s: SessionState): Boolean = s.unattended >= SessionState.UnattendedTurns && !s.personWaits
+private def held(s: SessionState): Boolean =
+  !s.personWaits &&
+    (s.config.unattendedLimit match
+      case TurnLimit.AtMost(turns) => s.unattended >= turns
+      case TurnLimit.NoLimit       => false)
+
+/** True when a message waits for the person (8.7): the session is open, no turn is open, a message waits, no release
+  * runs, and the limit of the unattended turns holds the message (`held`). A client shows a notice then, because no
+  * turn starts until the person writes.
+  */
+def waitsForPerson(s: SessionState): Boolean =
+  !s.closed && s.position == Position.NoTurn && s.waiting > 0 && !s.releasing && held(s)
 
 /** True when `entry` of a `Commit` is valid at this place of the language of 4.1. An `EffectStarted` needs an `n` above
   * the `n` of each call that its cell started, open or closed. A second intent with the id of an open effect would

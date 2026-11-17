@@ -238,7 +238,7 @@ class InspectorLaws extends ScalaCheckSuite:
 
   test("Inspect: the card of an Activated gives the mode, the guard, the limits and the sandbox of the activation") {
     val facts = HostFacts(
-      Limits(30_000L, Some(900_000L), 10_000, 300, 600, 4_000, 40_000, 60, 0, 4, 2),
+      Limits(30_000L, Some(900_000L), 10_000, 300, 600, 4_000, 40_000, 60, 0, 4, 2, Some(TurnLimit.AtMost(8))),
       SandboxFacts(Some("Seatbelt"), Vector.empty, Vector("/home/u/.ssh"), Vector(".env"), Vector("PATH"))
     )
     def card(host: Option[HostFacts]) =

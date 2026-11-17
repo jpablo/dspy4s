@@ -1504,7 +1504,8 @@ guest API calls of a cell) and the sandbox (`SandboxFacts`: the backend, the hos
 the variables of a command). A reopen gets the facts of its own runtime, not the facts of the journal. So the
 journal shows what acted on each turn, and `/config` and the inspector show the same facts. The fields of the facts
 have no default values, because the JSON codec leaves out a field with its default value, and a later default
-would then change an old record. A journal of an older host has no facts. The entry before an
+would then change an old record. A journal of an older host has no facts. The kernel reads one fact: the limit
+of the unattended turns (`Limits.unattendedTurns`, 8.7). The entry before an
 `Activated` says why the session came alive: nothing for a start, `Ended` for a reopen, and `TurnEnded(Crashed)` for a
 return after a crash in a turn. A crash with no open turn and a change of mode look alike, apart from the new
 configuration. Neither one cut any work.
@@ -1706,6 +1707,14 @@ problems. Each one held against the code. These choices were made with the user:
 - The turns that no person starts have a limit. After `SessionState.UnattendedTurns` (8) such turns in a row, a message
   from another session, the harness or a job waits in the journal, and the next message of the person starts the turn
   that sees it. A restart starts no such turn either. So `decide` gets the sender of a `Send`.
+- The limit is a setting, and a person sees it (decided on 2026-11-17). The host records it in the facts of each
+  activation (`Limits.unattendedTurns: Option[TurnLimit]`, `AtMost(n)` or `NoLimit`), and `held` reads it through
+  `SessionConfig.unattendedLimit`. An activation with no facts, or with the facts of an older host, gets
+  `AtMost(8)`, because that host held a message after 8 turns. The client flag `--unattended-turns N` sets it for
+  each session of the host, and `0` gives `NoLimit`. A restart with a higher limit starts the turn of a message
+  that waits. `waitsForPerson` is true while the limit holds a message with no open turn. Then the client prints
+  a notice after the message, and `/status` shows the notice and the count of the turns. `/config` and the
+  inspector show the limit.
 - The authority of the controller stays narrow in phase 9. The person ends a session in a client, so
   [CODE_HARNESS.md](CODE_HARNESS.md), 7.9 changes. The person makes the commits of a worktree, because its `.git`
   stays read-only in the sandbox (F7). So the rows of 7.9 for a merged branch apply to the commits of the person.

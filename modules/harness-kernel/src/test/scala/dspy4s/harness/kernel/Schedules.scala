@@ -448,7 +448,8 @@ object Fixtures:
       modelCalls = 60,
       summaryCalls = 64,
       batch = 4,
-      depth = 2
+      depth = 2,
+      unattendedTurns = Some(TurnLimit.AtMost(8))
     ),
     SandboxFacts(
       backend = Some("Seatbelt"),

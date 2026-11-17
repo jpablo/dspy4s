@@ -151,6 +151,71 @@ class ControlLaws extends FunSuite:
       case Left(error)    => fail(error.toString)
   }
 
+  // ── The limit of the activation ──
+
+  /** The configuration with facts whose limit of the unattended turns is `limit`. */
+  private def configWith(limit: Option[TurnLimit]): SessionConfig =
+    config().copy(host = Some(hostFacts.copy(limits = hostFacts.limits.copy(unattendedTurns = limit))))
+
+  /** `n` turns after `start` that a message of `from` starts, each to its end. */
+  private def turnsFrom(start: SessionState, n: Int, from: Source): SessionState = (0 until n).foldLeft(start) {
+    (s, i) =>
+      val started = commitFrom(s, Command.Send(RequestId(s"m$i"), "work", Map.empty), from)
+      commit(
+        started,
+        Vector(Entry.StepStarted(0), Entry.Acted("", "done", None), Entry.TurnEnded(TurnOutcome.Replied("done")))
+      )
+  }
+
+  private def idleWith(limit: Option[TurnLimit]): SessionState = state(journal(activated(configWith(limit))))
+
+  private def more = Command.Send(RequestId("x"), "more", Map.empty)
+
+  private def starts(entries: Either[Rejection, Vector[Entry]]): Boolean =
+    entries.fold(e => fail(e.toString), _.contains(Entry.TurnStarted))
+
+  test("Unattended: the limit of the activation holds a message of another session after its own count of turns") {
+    val two = turnsFrom(idleWith(Some(TurnLimit.AtMost(2))), 2, other)
+    assertEquals(decide(more, two, other), Right(Vector(Entry.Input(RequestId("x"), "more", Map.empty))))
+    assert(starts(decide(more, turnsFrom(idleWith(Some(TurnLimit.AtMost(2))), 1, other), other)))
+  }
+
+  test("Unattended: with no limit, each message of another session starts its turn, also after many turns") {
+    val many = turnsFrom(idleWith(Some(TurnLimit.NoLimit)), 3 * SessionState.UnattendedTurns, other)
+    assertEquals(many.unattended, 3 * SessionState.UnattendedTurns)
+    assert(starts(decide(more, many, other)))
+  }
+
+  test("Unattended: an activation with no facts, or with the facts of an older host, holds after 8 turns") {
+    assertEquals(SessionState.UnattendedTurns, 8)
+    assertEquals(config().unattendedLimit, TurnLimit.AtMost(8))
+    assertEquals(configWith(None).unattendedLimit, TurnLimit.AtMost(8))
+    assertEquals(configWith(Some(TurnLimit.AtMost(3))).unattendedLimit, TurnLimit.AtMost(3))
+    assertEquals(configWith(Some(TurnLimit.NoLimit)).unattendedLimit, TurnLimit.NoLimit)
+    val old = turnsFrom(idleWith(None), 8, other)
+    assertEquals(decide(more, old, other), Right(Vector(Entry.Input(RequestId("x"), "more", Map.empty))))
+  }
+
+  test("Unattended: a restart with a higher limit or no limit starts the turn of the waiting message") {
+    val waits = commitFrom(turnsFrom(idleWith(Some(TurnLimit.AtMost(2))), 2, other), more, other)
+    assert(waitsForPerson(waits))
+    assert(starts(decide(Command.Activate(versions, configWith(Some(TurnLimit.AtMost(5)))), waits)))
+    assert(starts(decide(Command.Activate(versions, configWith(Some(TurnLimit.NoLimit))), waits)))
+    assert(!starts(decide(Command.Activate(versions, configWith(Some(TurnLimit.AtMost(2)))), waits)))
+  }
+
+  test("Unattended: waitsForPerson holds only while the limit holds a message, with no turn open") {
+    val full = turns(SessionState.UnattendedTurns, other)
+    assert(!waitsForPerson(full), "no message waits")
+    val waits = commitFrom(full, more, other)
+    assert(waitsForPerson(waits))
+    assert(!waitsForPerson(commitFrom(waits, Command.Send(RequestId("p"), "go on", Map.empty), Source.User)))
+    val below = commitFrom(turns(SessionState.UnattendedTurns - 1, other), more, other)
+    assert(below.position != Position.NoTurn)
+    assert(!waitsForPerson(below))
+    assert(!waitsForPerson(waits.copy(closed = true)))
+  }
+
   // ── The words of a refusal ──
 
   test("Rejection: words give each refusal in words, with no Scala value") {

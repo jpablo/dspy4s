@@ -152,7 +152,7 @@ A line that starts with `/` is a command. Each other line is a message to the se
 | `/allow [N] [once|turn|session]` | allow each pending call, or only the call N of the prompt and of /status | The lifetime is `once` when you give none. |
 | `/jobs` | list the jobs of the session | One line for each job, for example `2.1 runs: "sbt ~test"`. |
 | `/stopjob ID` | stop the job ID of /jobs, for example 12.0 | A job that has ended keeps its end, and the client prints `The session refused the command: the job ID has ended`. |
-| `/status` | show the folder, the turn, the pending calls, the grants and the jobs | It also shows the effort and the context. |
+| `/status` | show the folder, the turn, the pending calls, the grants and the jobs | It also shows the effort, the context, and the turns in a row with no message of yours. |
 | `/config` | show the settings: the model, the mode, the guard, the limits and the sandbox | [The settings](#the-settings) tells more. |
 | `/reasoning off|line|short|full` | set how much of the reasoning of a step the client shows | The history keeps the rows that it printed. |
 | `/effort [LEVEL]` | show the reasoning effort and its levels, or set the effort of the next steps | The level must be one of the levels of the model. |
@@ -256,6 +256,17 @@ with `The release did not run:`. A message, `/stop` and `/stopall` do not wait.
 After a stop, a job of the turn can still run. The client then prints
 `The stop ended the turn, and a job of the turn still runs:`, a line for each such job, and the command that stops
 it, for example `/stopjob 2.0 stops it.`
+
+A message of another session, of the harness or of a job can start no turn. This occurs after 8 turns in a row with
+no message of yours. The client prints the message, and then a notice:
+
+```text
+A message waits for you: the session ran 8 turns in a row with no message of yours, and the limit is 8. Type a
+message, and the next turn reads it with the messages that wait. --unattended-turns N changes the limit at the next start.
+```
+
+`/status` shows the same notice, and the line `Turns in a row with no message of yours: 8 of 8.`
+[Sessions and the controller](sessions.md) tells more about this limit.
 
 ## Plain lines and `--script`
 

@@ -83,7 +83,16 @@ class StateLaws extends ScalaCheckSuite:
     assertEquals(codec.decode(codec.encode(now)), Right(now))
     // A fact with the same value as a default would go out of the text, and a later default would then change it.
     val text = codec.encodeToString(now)
-    Vector("cellMillis", "cellWallMillis", "callsPerCell", "summaryCalls", "backend", "secretNames", "env")
+    Vector(
+      "cellMillis",
+      "cellWallMillis",
+      "callsPerCell",
+      "summaryCalls",
+      "unattendedTurns",
+      "backend",
+      "secretNames",
+      "env"
+    )
       .foreach(field => assert(text.contains(s"\"$field\""), s"$field is not in $text"))
   }
 
@@ -96,6 +105,19 @@ class StateLaws extends ScalaCheckSuite:
     assertEquals(facts.map(_.limits.cellWallMillis), Right(None))
     assertEquals(facts.map(_.sandbox.hosts), Right(Vector.empty[String]))
     assertEquals(facts.map(_.limits.summaryCalls), Right(0))
+    // That host held a message after 8 turns, and the configuration says so.
+    assertEquals(facts.map(_.limits.unattendedTurns), Right(None))
+    val old = Fixtures.config().copy(host = facts.toOption)
+    assertEquals(old.unattendedLimit, TurnLimit.AtMost(8))
+  }
+
+  test("Journal codec: each limit of the unattended turns comes back from the text of the facts") {
+    val codec = Schema[Logged].jsonCodec
+    Vector(Some(TurnLimit.AtMost(8)), Some(TurnLimit.AtMost(20)), Some(TurnLimit.NoLimit), None).foreach { limit =>
+      val facts = Fixtures.hostFacts.copy(limits = Fixtures.hostFacts.limits.copy(unattendedTurns = limit))
+      val now   = Logged(0L, Fixtures.meta, Fixtures.activated(Fixtures.config().copy(host = Some(facts))))
+      assertEquals(codec.decode(codec.encode(now)), Right(now))
+    }
   }
 
   test("Settings: the mode, the limits and the sandbox in words") {
@@ -123,6 +145,15 @@ class StateLaws extends ScalaCheckSuite:
     assertEquals(wall(Some(90_000L)), "90 s")
     assertEquals(wall(None), "none")
     assertEquals(limits("guest API calls of a cell"), "10,000")
+    val unattended = (limit: Option[TurnLimit]) =>
+      limitLines(Fixtures.hostFacts.limits.copy(unattendedTurns = limit)).toMap.apply("turns with no person")
+    assertEquals(limits("turns with no person"), "8")
+    assertEquals(unattended(Some(TurnLimit.AtMost(20))), "20")
+    assertEquals(unattended(Some(TurnLimit.NoLimit)), "none")
+    // An older host recorded no limit, and it held a message after 8 turns.
+    assertEquals(unattended(None), "8")
+    assertEquals(TurnLimit.AtMost(1_000).words, "1,000")
+    assertEquals(TurnLimit.NoLimit.words, "none")
     assertEquals(limits("summary calls of a turn"), "64")
     assertEquals(
       limitLines(Fixtures.hostFacts.limits.copy(summaryCalls = 0)).toMap.apply("summary calls of a turn"),

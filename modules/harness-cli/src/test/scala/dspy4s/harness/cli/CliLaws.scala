@@ -100,6 +100,24 @@ class CliLaws extends munit.FunSuite:
     assert(CliArgs.usage.contains("--cell-wall-minutes"), CliArgs.usage)
   }
 
+  test("CLI: parse reads --unattended-turns, 8 by default, and 0 gives no limit of the turns with no person (8.7)") {
+    def limit(args: String*) = CliArgs.parse(args.toVector, home, cwd).map(_.limits.unattendedTurns)
+    assertEquals(limit(), Right(TurnLimit.AtMost(8)))
+    assertEquals(limit("--unattended-turns", "50"), Right(TurnLimit.AtMost(50)))
+    assertEquals(limit("--unattended-turns", "0"), Right(TurnLimit.NoLimit))
+    assertEquals(
+      CliArgs.parse(Vector("--cell-wall-minutes", "30", "--unattended-turns", "3"), home, cwd).map(_.limits),
+      Right(HarnessLimits(cellWallTime = Some(30.minutes), unattendedTurns = TurnLimit.AtMost(3)))
+    )
+    Vector(
+      Vector("--unattended-turns"),
+      Vector("--unattended-turns", "-1"),
+      Vector("--unattended-turns", "fake"),
+      Vector("--inspect", "--unattended-turns", "5")
+    ).foreach(args => assert(CliArgs.parse(args, home, cwd).isLeft, args.toString))
+    assert(CliArgs.usage.contains("--unattended-turns"), CliArgs.usage)
+  }
+
   test("CLI: parse reads --no-memory-calls, which is off by default, and its limits give no summary call") {
     val off = CliArgs.parse(Vector("--no-memory-calls", "/fake/other"), home, cwd)
     assertEquals(off.map(_.memoryCalls), Right(false))
@@ -505,6 +523,26 @@ class CliLaws extends munit.FunSuite:
     finally console.release()
   }
 
+  test("CLI: a message of another session that the limit holds shows the notice, and a message that runs does not") {
+    val report = Logged(
+      1,
+      Meta(1000L, Source.Child(SessionId("s9")), Taint.Trusted, true),
+      Entry.Input(RequestId("r"), "FAKE-REPORT", Map.empty)
+    )
+    val held                                       = SessionState.initial.copy(closed = false, unattended = 8, waiting = 1)
+    def printed(now: SessionState): Vector[String] =
+      val console = RecordingConsole()
+      try
+        Cli.loop(EntriesHandle(Vector(report), now = now), console, script = false, desk = None, home = "/home/a"): Unit
+        console.printed.asScala.toVector
+      finally console.release()
+    val notice = heldText(held).getOrElse(fail("no notice for a message that waits"))
+    assert(printed(held).contains(notice), printed(held).mkString("\n"))
+    val running = held.copy(position = Position.BeforeStep(0))
+    assertEquals(heldText(running), None)
+    assert(!printed(running).exists(_.contains("waits for you")), printed(running).mkString("\n"))
+  }
+
   test("CLI: the live block of a rich console shows the draft of the policy of the handle (CLI_SCREEN.md, 13)") {
     val console = RecordingConsole()
     val open    = Vector(at(1, 1000, Entry.TurnStarted), at(2, 1100, Entry.StepStarted(0)))
@@ -624,14 +662,18 @@ private final class RecordingConsole(lines: Vector[String] = Vector.empty) exten
   def release(): Unit = gate.countDown()
 
 /** A closed session whose feed gives `log` once. With `feedEnds`, the feed then ends. Its draft is `drafted`. */
-private final class EntriesHandle(log: Vector[Logged], feedEnds: Boolean = true, drafted: Option[Draft] = None)
-    extends SessionHandle:
+private final class EntriesHandle(
+    log     : Vector[Logged],
+    feedEnds: Boolean       = true,
+    drafted : Option[Draft] = None,
+    now     : SessionState  = SessionState.initial.copy(closed = true)
+) extends SessionHandle:
   override def draft: Option[Draft]                          = drafted
   def id: SessionId                                          = SessionId("fake-session")
   def send(command: Command): Either[HostError, Unit]        = Right(())
   def run(command: Command): Either[HostError, SessionState] =
     Left(HostError.Rejected(Rejection.TurnOpen))
-  def state: SessionState                 = SessionState.initial.copy(closed = true)
+  def state: SessionState                 = now
   def jobStatus: Map[EffectId, JobStatus] = Map.empty
   def read(after: Long): Vector[Logged]   = log.filter(_.seq > after)
   def subscribe(capacity: Int): Feed      =

@@ -3,7 +3,7 @@ package dspy4s.harness.cli
 import dspy4s.harness.guest.{Access, JobStatus}
 import dspy4s.harness.host.{CatalogRow, ContextUse, ExchangeFile, SessionFile, jobName, jobStatusWords}
 import dspy4s.harness.kernel.{EffectId, EffectResult, Entry, GuardRule, Logged, Position, SessionId, SessionState}
-import dspy4s.harness.kernel.{grouped, limitLines, modeWords, sandboxLines}
+import dspy4s.harness.kernel.{TurnLimit, grouped, limitLines, modeWords, sandboxLines, waitsForPerson}
 import dspy4s.harness.sandbox.SandboxedShell
 
 import java.nio.file.Path
@@ -70,9 +70,24 @@ def pendingCalls(current: SessionState, log: Vector[Logged]): Vector[(Long, Guar
       rule -> seq
   }.groupMapReduce(_._1)(_._2)(_ max _).toVector.map((rule, seq) => seq -> rule).sortBy(_._1)
 
-/** The text of `/status`: the folder of the session, where the turn stands, the reasoning effort, the context of the
-  * model (`context`, with the window of `facts`), the pending calls `calls` with their numbers for `/allow N`, and how
-  * many jobs run. A part with no value does not show.
+/** The notice of a message that waits for the person (8.7), or none when no message waits (`waitsForPerson`). The
+  * session ran its limit of turns in a row with no message of the person, so no turn starts until the person writes.
+  * The notice gives the count and the limit apart, because a restart with a lower limit leaves a count above it.
+  */
+def heldText(s: SessionState): Option[String] =
+  s.config.unattendedLimit match
+    case TurnLimit.AtMost(turns) if waitsForPerson(s) =>
+      Some(
+        s"A message waits for you: the session ran ${grouped(s.unattended.toLong)} turns in a row with no message of " +
+          s"yours, and the limit is ${grouped(turns.toLong)}. Type a message, and the next turn reads it with the " +
+          "messages that wait. --unattended-turns N changes the limit at the next start."
+      )
+    case _ => None
+
+/** The text of `/status`: the folder of the session, where the turn stands, the turns in a row with no message of the
+  * person and the notice of a message that waits (`heldText`), the reasoning effort, the context of the model
+  * (`context`, with the window of `facts`), the pending calls `calls` with their numbers for `/allow N`, and how many
+  * jobs run. A part with no value does not show.
   */
 def statusText(
     current: SessionState,
@@ -89,6 +104,12 @@ def statusText(
     case Position.InCell(i, _, _) => s"Step ${i + 1} of $steps: a cell runs."
     case Position.Answered(_)     => "The turn has its reply, and it ends."
     case Position.Finished(_)     => "The turn has its result, and it ends."
+  val unattended = Option.when(current.unattended > 0) {
+    val count = grouped(current.unattended.toLong)
+    current.config.unattendedLimit match
+      case TurnLimit.AtMost(turns) => s"Turns in a row with no message of yours: $count of ${grouped(turns.toLong)}."
+      case TurnLimit.NoLimit       => s"Turns in a row with no message of yours: $count (no limit)."
+  }
   val stop    = Option.when(current.stopping)("A stop is open.")
   val pending = Option.when(calls.nonEmpty) {
     ("Pending calls. /allow N allows the call N, /allow allows each call, and a message refuses them:" +:
@@ -103,7 +124,8 @@ def statusText(
   val tokens = context.map(use => s"The context: ${Screen.contextWords(use, facts.window, " tokens")}.")
   val closed = Option.when(current.closed)("The session is closed.")
   val folder = s"The folder: ${SandboxedShell.pathOf(current.config.scope)}."
-  (Vector(folder, turn) ++ effort ++ tokens ++ stop ++ pending ++ grants ++ jobs ++ closed).mkString("\n")
+  (Vector(folder, turn) ++ unattended ++ heldText(current) ++ effort ++ tokens ++ stop ++ pending ++ grants ++ jobs ++
+    closed).mkString("\n")
 
 /** One line for each active grant of `current`, with its lifetime in words and its call, for example
   * `  for this session: exec "git push"`. The grants with a shorter lifetime come first (5.5).
@@ -125,7 +147,8 @@ object ClientFacts:
   * model, the mode, the guard, the limits and the sandbox come from the configuration of the last `Activated`
   * (`current.config`), which holds the facts of the host of this activation (`HostFacts`). The grants come from
   * `current`, the context window from `facts`, and the endpoint and the files from `client`. A path in the home folder
-  * `home` starts with `~`. An activation of an older host has no limits and no sandbox, and the text says so.
+  * `home` starts with `~`. An activation of an older host has no limits and no sandbox, and the text says so. Its
+  * limits give the steps of a turn and the limit of the turns with no person of that host (8.7).
   */
 def configText(id: SessionId, current: SessionState, client: ClientFacts, facts: ModelFacts, home: String): String =
   val config                      = current.config
@@ -155,10 +178,11 @@ def configText(id: SessionId, current: SessionState, client: ClientFacts, facts:
     if config.guard.rules.isEmpty then Vector("  rules: none, so each call runs")
     else config.guard.rules.map(rule => s"  ${rule.verdict}: ${callText(rule.rule)}")
   val grants = if current.grants.isEmpty then Vector("  none") else grantLines(current)
-  val limits = lines(Vector(
-    "steps of a turn"      -> grouped(config.steps.toLong),
-    "turns with no person" -> grouped(SessionState.UnattendedTurns.toLong)
-  )) ++ config.host.fold(Vector(noFacts))(host => lines(limitLines(host.limits)))
+  // The facts give the limit of the turns with no person. With no facts, the limit is the limit of an older host.
+  val limits = lines(Vector("steps of a turn" -> grouped(config.steps.toLong))) ++
+    config.host.fold(lines(Vector("turns with no person" -> config.unattendedLimit.words)) :+ noFacts)(host =>
+      lines(limitLines(host.limits))
+    )
   val network = "network" -> (if config.mode.network == Access.Full then "on, for the hosts of the list" else "off")
   val sandbox = config.host.fold(lines(Vector(network)))(host =>
     lines(network +: sandboxLines(host.sandbox, home))
