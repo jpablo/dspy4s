@@ -29,7 +29,7 @@ object Html:
   val kinds: List[String] = caseNames[Entry]
 
   /** The names of the predictors of a work session, and `none` for an exchange outside a predictor. */
-  val predictors: List[String] = List("policy", "compress", "merge", "subQuery", "finisher", "none")
+  val predictors: List[String] = List("policy", "compress", "merge", "shorten", "subQuery", "finisher", "none")
 
   private inline def caseNames[T](using m: Mirror.SumOf[T]): List[String] =
     constValueTuple[m.MirroredElemLabels].toList.map(String.valueOf)
@@ -146,7 +146,7 @@ pre.diff{padding:4px 0}
 .exchange{background:var(--x)}
 .exchange .meta a.kind{color:var(--accent);text-decoration:underline;text-underline-offset:2px}
 .exchange.pred-policy{border-left:3px solid var(--policy)}
-.exchange.pred-compress,.exchange.pred-merge{border-left:3px solid var(--memory)}
+.exchange.pred-compress,.exchange.pred-merge,.exchange.pred-shorten{border-left:3px solid var(--memory)}
 .exchange.pred-subQuery{border-left:3px solid var(--leaf)}
 .exchange.open .kind::after{content:" (open)";color:var(--warn)}
 table{border-collapse:collapse;width:100%;font-size:13px}

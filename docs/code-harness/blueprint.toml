@@ -4143,13 +4143,22 @@ uses = []
 text = "The input of the leaf merge: the lines of two adjacent nodes, oldest first."
 
 [[node]]
+id = "shorten-input"
+group = "memory-tree"
+kind = "data"
+name = "ShortenInput"
+ref = "7.2"
+uses = []
+text = "The input of the leaf shorten: a reply of compress or merge of more than 512 bytes."
+
+[[node]]
 id = "summary"
 group = "memory-tree"
 kind = "data"
 name = "Summary"
 ref = "7.1"
 uses = []
-text = "The output of compress and merge: one summary line."
+text = "The output of compress, merge and shorten: one summary line."
 
 [[node]]
 id = "line-store"
@@ -4198,11 +4207,11 @@ name = "MemoryTree"
 ops = ["update", "project", "zoom", "withLeaves", "room", "render"]
 ref = "7.1"
 spec = true
-uses = ["context-strategy", "predict", "compress-input", "merge-input", "summary", "line-store", "memory-state",
+uses = ["context-strategy", "predict", "compress-input", "merge-input", "shorten-input", "summary", "line-store", "memory-state",
         "runtime-context", "dspy-error", "logged", "projection", "strategy-name", "signature", "policy-runner", "budget", "memory-log", "window",
         "memory-progress"]
 proof_uses = ["budget", "memory", "memory-log", "node-id", "view", "in-batch", "text-prefix"]
-text = "update takes the stand-ins out when the summary budget has a call, appends the new messages, builds each ready node with the store or a leaf through the runner and the summary budget, and advances the view to the last reply. A failed leaf gives the line of the source, for the store. A stop or a spent budget gives a stand-in, and a node above a stand-in is a stand-in with no leaf call. A stand-in never goes to the store. project gives the view its room first, then the open turn as the window gives it. zoom gives a message or the lines of two halves. project gives the view as the field memory, and the history holds only the steps of the open turn. compress and merge keep who wrote each part."
+text = "update takes the stand-ins out when the summary budget has a call, appends the new messages, builds each ready node with the store or a leaf through the runner and the summary budget, and advances the view to the last reply. A failed leaf gives the line of the source, for the store. A stop or a spent budget gives a stand-in, and a node above a stand-in is a stand-in with no leaf call. A stand-in never goes to the store. A reply of compress or merge of more than 512 bytes gets one shorten call through the runner and the budget. A spent budget or a stop of that call gives a stand-in, and a failed call gives the cut of the first reply, for the store. project gives the view its room first, then the open turn as the window gives it. zoom gives a message or the lines of two halves. project gives the view as the field memory, and the history holds only the steps of the open turn. compress, merge and shorten keep who wrote each part."
 
 [[group]]
 id = "file-lines"
@@ -4270,7 +4279,7 @@ kind = "law"
 name = "Memory tree:"
 ref = "7.1"
 uses = ["memory-tree", "line-store", "memory-log", "window"]
-text = "A short message is its own line with no LM call. Two updates give the same state as one. A second tree with the same store makes no LM call, and a line of other messages is not used. A failed leaf gives the line of the source. After a stop or a spent budget, the next update with a budget gives the lines of an update with no stop, and a node above a stand-in makes no leaf call. While the budget is spent, the stand-ins stay with no report. The view has at most high parts, takes its room first and stays the same during a turn. render gives one line for each part. zoom gives a message or two lines. An update with leaf calls reports 0 of their number, each end in order, and the end, also after a failed, a stopped or a broken call. An update with no leaf call reports nothing."
+text = "A short message is its own line with no LM call. Two updates give the same state as one. A second tree with the same store makes no LM call, and a line of other messages is not used. A failed leaf gives the line of the source. After a stop or a spent budget, the next update with a budget gives the lines of an update with no stop, and a node above a stand-in makes no leaf call. While the budget is spent, the stand-ins stay with no report. The view has at most high parts, takes its room first and stays the same during a turn. render gives one line for each part. zoom gives a message or two lines. An update with leaf calls reports 0 of their number, each end in order, and the end, also after a failed, a stopped or a broken call. An update with no leaf call reports nothing. A reply of compress or merge of more than 512 bytes gets one shorten call with the option bag, and the store keeps its line. A long shorten reply is cut, with no second call. The shorten call spends one call of the budget. A failed shorten call gives the cut of the first reply, and a stop or a spent budget gives a stand-in."
 
 [[group]]
 id = "memory-tasks"

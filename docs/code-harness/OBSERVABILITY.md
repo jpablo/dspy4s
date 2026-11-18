@@ -120,7 +120,7 @@ name of a predictor is the `name` of its `Predict`. Each record gets these label
 - `after`: the last `seq` of the journal when the exchange starts. The inspector shows the exchange after that entry.
   For a policy call, it is the `StepStarted` of the step.
 - `predictor`: the name of the predictor that runs on the thread of the call (`RuntimeEnvironment.activePredictor`):
-  `policy`, `compress`, `merge`, `subQuery` or `finisher`. It is empty outside a predictor. `Module` sets the
+  `policy`, `compress`, `merge`, `shorten`, `subQuery` or `finisher`. It is empty outside a predictor. `Module` sets the
   predictor only in the scope of the thread, not in the context of the call, so the sink reads it in `start`.
 - `probe`: the link of a probe (`<caller>.<cell>.<n>`) for each exchange of that probe. The probe adds it to the
   labels.
@@ -381,7 +381,7 @@ The exchange file, in the host:
 
 - **L6. The mask.** No line of the file holds a known secret value or the value of `Authorization`.
 - **L7. The labels.** Each exchange of an activation has its session. A policy exchange has `predictor = policy`, and
-  its `after` is the `seq` of its `StepStarted`. A memory leaf has `compress` or `merge`, and an `llmQuery` has
+  its `after` is the `seq` of its `StepStarted`. A memory leaf has `compress`, `merge` or `shorten`, and an `llmQuery` has
   `subQuery`.
 - **L8. Two threads.** The lines of exchanges on many threads do not mix, and each line is valid JSON.
 - **L9. A late thread.** An exchange that ends after the end of its activation still writes its reply line, with no

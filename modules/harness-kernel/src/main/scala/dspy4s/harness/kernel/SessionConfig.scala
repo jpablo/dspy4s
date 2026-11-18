@@ -94,7 +94,7 @@ final case class HostFacts(limits: Limits, sandbox: SandboxFacts) derives Schema
   * @param modelCalls
   *   the model calls of one turn, with the queries and the children
   * @param summaryCalls
-  *   the calls of `compress` and `merge` of one turn. 0 means no call.
+  *   the calls of `compress`, `merge` and `shorten` of one turn. 0 means no call.
   * @param batch
   *   the queries or children that one batch call runs at the same time
   * @param depth

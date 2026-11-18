@@ -2,6 +2,7 @@ package dspy4s.harness
 
 import dspy4s.core.contracts.{DynamicValues, RuntimeContext}
 import dspy4s.harness.kernel.*
+import dspy4s.lm.contracts.LmRequest
 import zio.blocks.schema.{DynamicValue, PrimitiveValue}
 
 import java.nio.charset.StandardCharsets.UTF_8
@@ -290,6 +291,7 @@ class MemoryTreeLaws extends munit.FunSuite:
   test("Memory tree: the summary instructions keep who wrote each part") {
     assert(MemoryTree.compressInstructions.contains("who wrote"), MemoryTree.compressInstructions)
     assert(MemoryTree.mergeInstructions.contains("who wrote"), MemoryTree.mergeInstructions)
+    assert(MemoryTree.shortenInstructions.contains("who wrote"), MemoryTree.shortenInstructions)
   }
 
   test("Memory tree: the view takes its room of the budget first, in full, also in a long turn") {
@@ -420,6 +422,155 @@ class MemoryTreeLaws extends munit.FunSuite:
       updated(tree, chat(4, output = 700), tree.empty): Unit
     }
     assertEquals(lm.most.get, 3)
+  }
+
+  // ── The limit of a line (7.2, choice 8) ──
+
+  // In the 15-turn live sessions of 2026-11-15, the merge replies had a median of 555 to 591 bytes. The cut of
+  // `MemoryLine.of` removed the end of nearly each line of level 2 and above, so a high line lost its newest messages.
+
+  /** The text of a request, as `RequestLm` gives it to its reply function. */
+  private def textOf(request: LmRequest): String = request.messages.flatMap(_.text).mkString("\n")
+
+  /** True for a request of `compress` or `merge`. Each other request of these laws is a request of `shorten`. */
+  private def leafRequest(text: String): Boolean =
+    text.contains(MemoryTree.compressInstructions) || text.contains(MemoryTree.mergeInstructions)
+
+  /** The line of a compress or a merge request: more than 512 bytes, and a fixed function of the request. */
+  private def longLine(text: String): String = s"L${(text.hashCode & 0x7fffffff) % 100000} " + ("l" * 600)
+
+  /** A summary model with a line of more than 512 bytes for each compress and merge request (`longLine`). `shorter`
+    * gives the line of each other request, or a failure.
+    */
+  private def tooLong(shorter: String => Either[String, String]): RequestLm =
+    RequestLm(text =>
+      (if leafRequest(text) then Right(longLine(text)) else shorter(text))
+        .map(line => s"[[ ## line ## ]]\n$line\n\n[[ ## completed ## ]]")
+    )
+
+  /** The number of the requests that are not a compress or a merge request: the shorten calls. */
+  private def shortenCalls(lm: RequestLm): Int = lm.requests.asScala.count(r => !leafRequest(textOf(r)))
+
+  /** The nodes of `d` with the line of a leaf: each node above level 0, and each message of more than 512 bytes. */
+  private def summarized(d: MemoryState): Vector[NodeId] =
+    d.memory.built.keys.toVector.filter(id =>
+      id.level > 0 || d.memory.log(id.index.toInt).text.getBytes(UTF_8).length > MemoryLine.MaxBytes
+    )
+
+  test("Memory tree: a compress or merge reply of more than 512 bytes gets one shorten call, for the line and store") {
+    val store   = LineStore.inMemory()
+    val reports = Reports()
+    val lm      = tooLong(text => Right(s"short-${(text.hashCode & 0x7fffffff) % 100000}"))
+    Models.withModel(lm) {
+      val tree = MemoryTree.withLeaves(store, high = 40, progress = reports)
+      val d    = updated(tree, chat(3, output = 900), tree.empty)
+      // The 3 long cells give 3 compress calls, and the 9 messages give 7 merge calls.
+      val leaves = calls(lm, MemoryTree.compressInstructions) + calls(lm, MemoryTree.mergeInstructions)
+      assertEquals(leaves, 10)
+      assertEquals(shortenCalls(lm), leaves, "one shorten call for each long reply")
+      assertEquals(summarized(d).size, leaves)
+      summarized(d).foreach { id =>
+        val line = d.memory.built(id)
+        assert(line.text.startsWith("short-"), s"${id.ref}: ${line.text}")
+        assertEquals(Memory.key(d.memory, id).flatMap(store.get), Some(line), id.ref)
+      }
+      // A summary with its shorten call is one summary for the client.
+      assertEquals(reports.all, counted(10))
+    }
+  }
+
+  test("Memory tree: a shorten reply of more than 512 bytes gets the cut of MemoryLine.of, with no second call") {
+    val store = LineStore.inMemory()
+    val long  = "t" * 700
+    val lm    = tooLong(_ => Right(long))
+    Models.withModel(lm) {
+      val tree = MemoryTree.withLeaves(store, high = 40)
+      val d    = updated(tree, chat(3, output = 900), tree.empty)
+      assertEquals(shortenCalls(lm), 10)
+      assertEquals(summarized(d).size, 10)
+      summarized(d).foreach { id =>
+        assertEquals(d.memory.built.get(id), Some(MemoryLine.of(long)), id.ref)
+        assertEquals(Memory.key(d.memory, id).flatMap(store.get), Some(MemoryLine.of(long)), id.ref)
+      }
+    }
+  }
+
+  test("Memory tree: a shorten call spends one call of the summary budget, and with none left the node is a stand-in") {
+    val store   = LineStore.inMemory()
+    val lm      = tooLong(_ => Right("short"))
+    val budget  = AtomicReference(Budget(1))
+    val journal = chat(1, output = 900)
+    val cell    = NodeId(0, 1)
+    Models.withModel(lm) {
+      val tree  = MemoryTree.withLeaves(store, high = 40, summaries = () => budget.get, width = 1)
+      val spent = updated(tree, journal, tree.empty)
+      // The compress call of the long cell 0.1 spends the only call of the budget, so no shorten call comes.
+      assertEquals(lm.requests.size, 1)
+      assert(spent.memory.standIns.contains(cell), spent.memory.standIns.toString)
+      assertEquals(spent.memory.built.get(cell), Some(MemoryLine.of(spent.memory.log(1).text)))
+      assertEquals(Memory.key(spent.memory, cell).flatMap(store.get), None)
+      // The next turn has a new budget, so the compress call comes again, and then its shorten call.
+      budget.set(Budget(Int.MaxValue))
+      val next = updated(tree, journal, spent)
+      assertEquals(next.memory.built.get(cell), Some(MemoryLine.of("short")))
+      assertEquals(Memory.key(next.memory, cell).flatMap(store.get), Some(MemoryLine.of("short")))
+    }
+    // With 2 calls, the compress call and its shorten call spend the budget, so the merge of 1.0 makes no call.
+    val two = tooLong(_ => Right("short"))
+    Models.withModel(two) {
+      val tree = MemoryTree.withLeaves(LineStore.inMemory(), high = 40, summaries = () => Budget(2), width = 1)
+      val d    = updated(tree, journal, tree.empty)
+      assertEquals(two.requests.size, 2)
+      assertEquals(d.memory.built.get(cell), Some(MemoryLine.of("short")))
+      assert(d.memory.standIns.contains(NodeId(1, 0)), d.memory.standIns.toString)
+    }
+  }
+
+  test("Memory tree: a failed shorten call gives the cut of the first reply, for the store, and a stop a stand-in") {
+    val cell  = NodeId(0, 1)
+    val store = LineStore.inMemory()
+    val lm    = tooLong(_ => Left("FAKE-FAILURE"))
+    Models.withModel(lm) {
+      val tree     = MemoryTree.withLeaves(store, high = 40, width = 1)
+      val d        = updated(tree, chat(1, output = 900), tree.empty)
+      val expected = lm.requests.asScala.map(textOf).find(_.contains(MemoryTree.compressInstructions))
+        .map(text => MemoryLine.of(longLine(text)))
+      assert(expected.nonEmpty, "no compress call")
+      assertEquals(shortenCalls(lm), 2)
+      assertEquals(d.memory.built.get(cell), expected)
+      assertEquals(Memory.key(d.memory, cell).flatMap(store.get), expected)
+      assert(!d.memory.standIns.contains(cell), d.memory.standIns.toString)
+    }
+    // The runner runs the compress call of 0.1 and cuts the next call, its shorten call, as a stop does.
+    val made      = AtomicInteger(0)
+    val cutSecond = new PolicyRunner:
+      def run[A](call: () => Either[String, A]): Either[String, A] =
+        if made.incrementAndGet() == 2 then Left(PolicyRunner.Stopped) else call()
+    val other = LineStore.inMemory()
+    Models.withModel(tooLong(_ => Right("short"))) {
+      val tree = MemoryTree.withLeaves(other, high = 40, leafRunner = cutSecond, width = 1)
+      val d    = updated(tree, chat(1, output = 900), tree.empty)
+      assertEquals(made.get, 2)
+      assert(d.memory.standIns.contains(cell), d.memory.standIns.toString)
+      assertEquals(d.memory.built.get(cell), Some(MemoryLine.of(d.memory.log(1).text)))
+      assertEquals(Memory.key(d.memory, cell).flatMap(other.get), None)
+    }
+  }
+
+  test("Memory tree: each shorten request has the option bag of the summaries too") {
+    val options = DynamicValues.record(
+      "chat_template_kwargs" ->
+        DynamicValues.record("enable_thinking" -> DynamicValue.Primitive(PrimitiveValue.Boolean(false)))
+    )
+    val lm = tooLong(_ => Right("short"))
+    Models.withModel(lm) {
+      val tree = MemoryTree.withLeaves(LineStore.inMemory(), high = 40, options = options)
+      updated(tree, chat(1, output = 900), tree.empty): Unit
+    }
+    assert(shortenCalls(lm) > 0, "the update made no shorten call")
+    lm.requests.asScala.foreach(request =>
+      assert(request.options.fields.exists(_._1 == "chat_template_kwargs"), request.options.toString)
+    )
   }
 
   // ── The progress of the summaries for a client (10.6) ──

@@ -67,6 +67,9 @@ Phase 0 "guards".
 | Input | An `Input` entry: a message that enters a session | The values of a program call, which are its input fields |
 | Commit | One atomic write of entries to a journal | A git commit, which is always "git commit" |
 | Catalog | The derived list of the sessions, with one row for each session | The journal |
+| Derivation | A fold of the journal that makes derived data and can call the model, for example the memory tree (7.2) | `Projection`, the input of one step |
+| Builder | The thread of a session that runs its derivations in the background (7.2) | The worker, which runs the turn |
+| Build number | The number of one write of a derivation to its store. The numbers only go up (7.2). | The `seq` of a journal entry |
 | Turn | From `TurnStarted` to `TurnEnded` | One model reply |
 | Step | One policy call and what it starts | The result of `AgentLoop` |
 | Cell | One unit of code that the REPL runs | |
@@ -1321,7 +1324,8 @@ tests that fail until the bodies exist. These choices were made with the user on
   the reply of a turn. The control entries stay out. `MemoryLog.messages` is a fold of the journal, so a longer
   journal gives a longer log with the same start.
 - The strategy builds the summary lines in `update`, before each policy call, with the leaves `compress` and
-  `merge`. No new thread runs. A background builder can come later, if the steps are too slow.
+  `merge`. No new thread runs. A background builder can come later, if the steps are too slow. Choice 20 (7.2)
+  moves the leaf calls to a builder in the background.
 - A cell reads a part of its own session with `zoom(ref)`, a function of `Turn`. So each mode has it, with no new
   capability. `zoom(session, ref)` of `Sessions^` stays for phase 9.
 - The metric uses planted facts: generated long sessions with facts in the early turns, and late questions that need
@@ -1358,7 +1362,8 @@ These points are proposals for the review:
 - The built lines are derived data with a journal of their own (7): the table `memory` of the session file, through
   `LineStore`. A reopen reads them, so it makes no new LM call. A program call keeps them in memory.
 - A program call, a child and a rollout keep the window, so the structure of an optimizer has no summary leaf yet.
-- The leaves `compress` and `merge` use the model of the session. A cheaper model for summaries comes later.
+- The leaves `compress` and `merge`, and `shorten` of 7.2, use the model of the session. A cheaper model for
+  summaries comes later.
 
 **The spec review of the plan (2026-11-10).** A subagent read the plan, and it found 15 problems. These choices were
 made with the user:
@@ -1480,6 +1485,166 @@ off (CLI_SCREEN.md, 14.6). The list of levels of the endpoint gave only `low` an
 - A model with no native reasoning gets no default. Another endpoint can refuse the key, and the store keeps the cut
   message of a failed summary.
 - The law `Work: with native reasoning and no DSPY_SUMMARY_OPTIONS, ...` holds the rule.
+
+### 7.2 The builder (choice 20)
+
+The memory tree of 7.1 builds its lines in `update`, before each policy call, so each step waits for the summary
+calls. [CODE_HARNESS.md](CODE_HARNESS.md), 7.2, has another plan: "One builder runs all derivations of a log in the
+background". Section 7.1 put that plan off until the steps became too slow. The live runs of 2026-11-15 show that they
+are too slow now. These choices were made with the user on 2026-11-15.
+
+**The live comparison (2026-11-15).** 22 live sessions ran on `main` (`cf682a11`) with DeepSeek-V4.1-Flash-1017, half
+with the summary calls and half with `--no-memory-calls`. Each question needed a fact after byte 512 of its message,
+so the cut line of a session with no calls did not show the fact.
+
+| Test | Runs | Right answers: calls, no calls | Time in the turns: calls, no calls |
+|---|---|---|---|
+| Two turns, a fact of the person | 4 and 4 | 4 of 4, 4 of 4 | Turn 1: 4.3 s, 2.9 s. Turn 2: 1.6 s, 1.7 s. |
+| Two turns, a fact of a reply, a new host for turn 2 | 4 and 4 | 4 of 4, 4 of 4 | Turn 1: 9.3 s, 4.2 s. Turn 2: 3.9 s, 2.9 s. |
+| 15 turns, 7 facts, a view with lines of levels 1 to 4 | 3 and 3 | 20 of 21, 21 of 21 | 81.5 s, 35.0 s |
+
+- With no calls, the model read the cut text with `zoom` each time that it needed it.
+- In the 15-turn sessions, the summary calls took 41 to 44 s in each session. That is more than all the policy calls,
+  which took 28 to 39 s. One summary call took 0.4 to 0.8 s, but the rounds of calls run one after the other, before
+  each step.
+- With the calls, one of the three long sessions answered in one step from the lines of the view. The other two used
+  `zoom`, as the sessions with no calls did. In the wrong answer, the model printed only the first 400 characters of a
+  `zoom` text, so it did not see the sum. Then it said that it never gave a sum.
+- `merge` asks for at most 400 characters, but its replies had a median of 555 to 591 bytes, and the longest had about
+  1,070. So `MemoryLine.of` cut nearly each line of level 2, and each line of levels 3 to 5, at 512 bytes. The cut
+  removes the end of a line, so a high line loses the newest messages of its span. For example, the line `4.0` of one
+  session ended with "Team chose 9900 as zulu staging port, not in fi".
+- The view of the last turn showed 4 lines above level 0. These lines and the lines under them need about 26 merges,
+  but each session made 46 to 49.
+- One summary line said "REPL restarted, earlier names lost", but its source said that no names were lost.
+
+**The words.** The user calls these folds projections, as the read models of event sourcing
+([CODE_HARNESS.md](CODE_HARNESS.md), 8.2). In this code, `Projection` is the input of one step, and `project` makes it.
+So this section uses the word derivation, as [CODE_HARNESS.md](CODE_HARNESS.md), 7.2, does. Section 3 has the three
+new words:
+
+- A **derivation** is a fold of the journal that makes derived data, and it can call the model. The memory tree is the
+  first derivation. The graph of phase 10 is the next one, and later derivations can extract other data, with or
+  without an ontology.
+- The **builder** of a session is the thread that runs its derivations in the background.
+- A **build number** is the number of one write of a derivation to its store. The numbers of a store only go up.
+
+**The choices.**
+
+1. **A turn never waits for a derivation.** At the first step of a turn, the strategy reads the lines that the store
+   has. Each node with no line gets the line of its source as a stand-in, as with a spent budget (7.1). So a
+   derivation that is behind gives a worse view for a short time, but it never stops a turn. The live runs show that
+   the model reads a cut line with `zoom`. This choice replaces the rule of [CODE_HARNESS.md](CODE_HARNESS.md), 6.5: "A
+   turn must wait for the nodes that it needs."
+2. **The view stays the same for the whole turn.** The strategy runs `update` one time, at the first step of the turn,
+   and the later steps of the turn use that derived data. A line that the builder stores during the turn comes to the
+   view in the next turn. So the memory field of the prompt does not change during a turn, and the prompt cache keeps
+   it.
+3. **Each turn records what it read.** Before the first policy call of a turn, the harness commits
+   `DerivedRead(derivation, build)` for each derivation that the strategy reads. `build` is the newest build number of
+   the store at that time, and `update` reads only the lines up to it. A later read up to the same number gives the
+   same lines. So `project` still depends only on the journal and the derived data, and a replay or the inspector can
+   make the same prompt again. The fold of the state ignores the entry. The window strategy reads no derivation, so its
+   turns have no such entry.
+4. **The policy call comes first.** The summary calls and the policy calls go to the same endpoint. The builder runs at
+   most `HarnessLimits.batch` leaf calls at the same time. It starts no new leaf call while a policy call of its session
+   waits for its reply, and the calls that already run go on to their end.
+5. **The builder lives as long as the activation.** The host starts the builder after the open of a session, on a
+   virtual thread, as the writer. The builder starts with the whole journal. The store keys each line by its source
+   texts (`LineKey`), so a reopen makes no new call for a line that the store has. After each commit, the writer wakes
+   the builder (`onCommit`). The close of the activation stops the builder and its leaf calls, and the store keeps the
+   lines of the rounds that ended. A stop of a turn does not stop the builder, because no turn waits for it.
+6. **The budget stays for each turn.** `HarnessLimits.summaryCalls` is now the most leaf calls that the builder makes
+   for each turn of the journal. When the budget is spent, the builder waits for the next `TurnStarted`. With
+   `--no-memory-calls`, the limit is 0, so the host starts no builder, and each line is a stand-in, as before.
+7. **`zoom` reads the newest lines.** A cell gets the newest memory of the builder, not the memory of the first step of
+   its turn. The output of the cell goes to the journal in `Observed`, so a replay keeps what `zoom` gave. With no
+   builder, `zoom` reads the derived data of the turn, as before.
+8. **A leaf line keeps its limit.** A reply of `compress` or `merge` of more than 512 bytes of UTF-8 gets one more call
+   to a third leaf, `shorten`, with the long reply as its input. The call spends one call of the budget. When the reply
+   of `shorten` is also too long, `MemoryLine.of` cuts it, as before. The instructions of `compress` and `merge` keep
+   their limit of 400 characters. A spent budget or a stop before the reply of `shorten` gives a stand-in, so a later
+   update makes both calls again. A failed `shorten` call gives the cut of the first reply, and the store keeps it, as
+   a failed leaf gives the line of its source. The progress of a client counts a node with its `shorten` call as one
+   summary.
+9. **The builder makes only the merges that a view needs.** The builder makes a line above level 0 only for a part of
+   the newest view, or for a node under such a part. The newest view is `View.advance(View.empty, m, high, n)` for the
+   `n` messages of the journal, with a stand-in for each node that has no line. Each message of more than 512 bytes
+   gets its `compress` line, because each message is under a part. A `zoom` into a part reads the lines of its halves,
+   and these are under the part, so they have lines too. In the 15-turn sessions, this rule makes about 26 merges in
+   place of 46 to 49.
+
+**The flow of a turn.**
+
+1. The worker commits `TurnStarted` and `StepStarted(0)`.
+2. The effects read the newest build number of each derivation, commit one `DerivedRead` for each, and run `update` up
+   to these numbers. `update` makes no LM call.
+3. `project` makes the input. The builder starts no leaf call until the policy call has its reply.
+4. The later steps of the turn use the derived data of step 2.
+5. Each commit wakes the builder. It builds the nodes that the newest journal needs, between the policy calls and
+   after the turn, and it writes each round to the store with a new build number.
+
+**The parts of the plan.** These names are proposals for the skeleton:
+
+| Part | Types and functions | Laws |
+|---|---|---|
+| The limit of a line | the leaf `shorten`, `ShortenInput`, `MemoryTree.shortenInstructions` | `Memory tree:` |
+| The store | `LineStore.get(key, upTo)`, `LineStore.newest`, `putAll` that gives the build number of the write, the column `build` of the table `memory`, with 0 for a line of an older file | `Memory tree:`, `File:` |
+| The read of a turn | `Entry.DerivedRead`, the last case of `Entry`, and one `update` for each turn in `HarnessEffects` | `Decide:`, `Memory tree:`, `Work:` |
+| The builder | `DerivationName`, `BuiltDerivation` with `build` and `newest`, `MemoryBuilder`, `Builder`, the gate of the policy calls, and the wake in `onCommit` | `Builder:`, `Work:` |
+| The merges that a view needs | `MemoryBuilder.needed`: the parts of the newest view and the nodes under them | `Memory tree:` |
+
+`Derivation.update` of section 7 can call `Predict` leaves. After this choice, `update` makes no LM call, and
+`BuiltDerivation.build` makes them. The builder has the `RuntimeContext` of the activation, so its calls go to the
+exchange file as before, and it reports its summaries through `MemoryProgress`, so the footer of the CLI shows them,
+also between turns.
+
+**The laws.** Each law fails first, and then the code comes:
+
+- `Memory tree:` a reply of `compress` or `merge` of more than 512 bytes gets one `shorten` call, and the store keeps
+  the line of `shorten`. A reply of `shorten` of more than 512 bytes gets the cut of `MemoryLine.of`.
+- `Memory tree:` `update` makes no LM call.
+- `Memory tree:` `update` up to a build number gives the same view after later writes to the store.
+- `Memory tree:` a line that the builder stores during a turn does not change the memory field of a later step of that
+  turn.
+- `Memory tree:` the builder of `n` messages makes a merge only for a part of the newest view or a node under one. A
+  journal of the shape of the 15-turn sessions gives the expected number of merges.
+- `Decide:` `DerivedRead` changes no part of the state.
+- `Work:` a policy call does not wait for a leaf call. A fake model holds each summary reply until the law frees it, and
+  the turn ends first.
+- `Work:` each turn of a session with the memory tree has one `DerivedRead` before its first `Acted`, with the newest
+  build number of the store.
+- `Work:` the builder starts no leaf call while a policy call waits for its reply.
+- `Work:` the builder makes at most `summaryCalls` leaf calls for each turn, and with `summaryCalls` 0 no builder
+  starts.
+- `Work:` the close of a session stops the leaf calls of the builder, and the store keeps the lines of the rounds that
+  ended. A reopen makes no leaf call for a line that the store has.
+- `Work:` `zoom` in a cell reads a line that the builder stored after the first step of the turn.
+- `File:` a session file from before the column `build` opens, and its lines have the build number 0.
+
+**The mutants.** Each one must die: an `update` at each step, a turn that waits for the builder, a read with no limit
+of build number, a builder that does not wait for the policy call, a builder that makes each ready merge, a long reply
+with no `shorten` call, a `shorten` call that spends no budget, and a close that does not stop the builder.
+
+**The order of the work.** Each step ends with all laws green:
+
+1. The limit of a line: `shorten` and its laws. A law fails first, and then a subagent makes the fix.
+2. The build numbers of the store, `DerivedRead`, and one `update` for each turn. In this step, `update` still makes
+   the leaf calls, at the first step of the turn only.
+3. The builder. The leaf calls move to `MemoryBuilder` on the thread of the builder, with the gate and the budget, and
+   `update` makes no LM call.
+4. The merges that a view needs.
+5. The live comparison of this section again, with the same tasks, so that the numbers can be compared.
+
+**Open points.**
+
+- In the script mode of the CLI, the next message comes right after a turn, so the builder has little time between
+  turns, and more lines are stand-ins. A person needs more time to write a message.
+- The gate can hold the builder for a long time in a turn with many short steps. The live comparison of step 5 checks
+  it.
+- The controller has the memory tree too, so it gets the builder too.
+- The graph of phase 10 is the second derivation. Its extraction runs at the end of each turn on the same builder, and
+  phase 10 gives its read functions for a cell.
 
 ## 8. Sessions
 
@@ -2800,6 +2965,7 @@ These choices are new in this document, and all of them are confirmed:
 | 17 | Confirmed on 2026-11-03. A commit does a full flush for the intent of a call that can change something outside the session, for each `Input` and for each `Activated` (4.1, 10.2). A power loss can remove the other commits, and a process crash cannot. | Open question 5 below |
 | 18 | Confirmed on 2026-11-04. A cell runs one call at a time. `llmQueryBatched` and `rlmBatched` are one call each, and the host runs their work at the same time. `parallel` is not in the first version (12). | |
 | 19 | Confirmed on 2026-11-13. A session can run the local git commands. In the scope, only the control paths stay read-only: a class of paths in `Layout` that does not depend on the mode, with entries for git, editors and agents. A nested `.git` is a control path. A backend that cannot close a name keeps all of `.git` read-only. A `Worktree` scope is a local clone, and after each turn the host puts its branch into the repository with a compare-and-swap (`git push --force-with-lease`). The sandbox protects containment and confidentiality, not the honesty of git history (5.4). The code has this choice since 2026-11-14. | The live session 61ee1bb2 (2026-11-12) |
+| 20 | Confirmed on 2026-11-15. One builder for each session runs its derivations in the background, on a virtual thread. A turn never waits for it: the strategy reads the store one time, at the first step of the turn, with a stand-in for each line that is not built, and the turn records the build number that it read (`DerivedRead`). The policy call comes first. A leaf line of more than 512 bytes gets one `shorten` call, and the builder makes only the merges that a view needs (7.2). This choice replaces the rule "A turn must wait for the nodes that it needs" of [CODE_HARNESS.md](CODE_HARNESS.md), 6.5. | |
 
 Open questions:
 
@@ -2831,7 +2997,7 @@ Each phase ends with something that runs.
 | 7. The session host | `harness-host`: the writer, feeds, timers, one SQLite file for each session, the catalog, the path of a hard stop, `StopJobs`, `waitJob`, the message of a job and the job table, crash tests with SIGKILL that also check that no job process stays. `guarded`, and the client side of `Grant`. A source for the task of an `rlm` child and a link from its journal to the journal of its parent (9). The window with the earlier turns of a chat. The wrapper of each `exec` and each job (10.6). `harness-cli`, its JDK and an AOT cache (choice 8). | A coding agent for daily use, one session at a time. |
 | 8. Memory | The memory tree and its metric. | Long sessions that lose no detail. |
 | 9. The controller | `Sessions`, the report pass with a crash test, the ledger, probes, release plans (8.7). | One controller above all sessions. |
-| 10. The graph | The ontology, the extraction leaf at the end of each turn, the graph queries and `Graph` (8.3). | Questions about the history of a session that a graph answers. |
+| 10. The graph | The ontology, the extraction leaf at the end of each turn on the builder of 7.2, the graph queries and `Graph` (8.3). | Questions about the history of a session that a graph answers. |
 | Later | Replay, the reviewer, jobs across a restart, `parallel` if batch calls are not enough, with the conditions of section 6, a container backend, LSP as a guest API, prompt-cache marks. | |
 
 Phase 6 comes before the session host on purpose. The optimizers are what makes this harness different from the

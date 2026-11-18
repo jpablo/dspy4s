@@ -44,10 +44,11 @@ The memory tree builds a binary tree of lines over the log:
 - **Level 1 and higher.** The part `level.index` covers the messages from `index * 2^level` up to
   `(index + 1) * 2^level - 1`. The leaf `merge` writes its line from the lines of its two halves. For example, `1.0`
   covers the messages 0 and 1, and `2.1` covers the messages 4 to 7.
-- **The size of a line.** A line has at most 512 bytes of UTF-8 (`MemoryLine.MaxBytes`). The harness cuts a longer
-  reply of `compress` or `merge` at the end of a character.
+- **The size of a line.** A line has at most 512 bytes of UTF-8 (`MemoryLine.MaxBytes`). When a reply of `compress`
+  or `merge` is longer, the leaf `shorten` gets that reply and writes a shorter line. When the reply of `shorten` is
+  also too long, the harness cuts it at the end of a character.
 
-On this page, a call of `compress` or `merge` is a summary call. The memory tree builds each part whose messages exist,
+On this page, a call of `compress`, `merge` or `shorten` is a summary call. The memory tree builds each part whose messages exist,
 also a part that the view does not show yet.
 
 The lines go to the table `memory` of the session file `<root>/sessions/<id>.db`. The key of a line holds a SHA-256 of
@@ -133,7 +134,7 @@ options of the summary requests. To measure the cost, run the same task with and
 dspy4s-harness --no-memory-calls
 ```
 
-- The memory tree makes no `compress` or `merge` call. A message of more than 512 bytes shows its first 512 bytes in
+- The memory tree makes no summary call. A message of more than 512 bytes shows its first 512 bytes in
   the view. A part above level 0 shows the start of the lines of its two halves.
 - `zoom` still gives the whole text of a message. So the model must use `zoom` to read a fact after byte 512.
 - The store does not keep these lines. A later run without the flag builds the summaries.
@@ -143,7 +144,7 @@ dspy4s-harness --no-memory-calls
 
 ## The options of the summary requests
 
-`DSPY_SUMMARY_OPTIONS` holds a JSON object. Each `compress` and `merge` request sends it as the option bag of the
+`DSPY_SUMMARY_OPTIONS` holds a JSON object. Each summary request sends it as the option bag of the
 provider. The variable can come from the environment or from the file `~/.dspy4s/harness/.env`.
 
 | `DSPY_SUMMARY_OPTIONS` | `DSPY_NATIVE_REASONING` | The options of each summary request |
@@ -196,6 +197,7 @@ export DSPY_SUMMARY_OPTIONS='{"chat_template_kwargs": {"enable_thinking": false}
 3. Compare the two sessions. Look at the time on the end line of each turn, and at the `memory` part of the footer.
 
 4. Run `dspy4s-harness --inspect`, and open the two sessions (see [The inspector](inspector.md)). The first session
-   has exchange rows of `compress` and `merge`. The second session has only exchange rows of `policy`.
+   has exchange rows of `compress` and `merge`, and of `shorten` for a reply that was too long. The second session
+   has only exchange rows of `policy`.
 
 Next: [The inspector](inspector.md).

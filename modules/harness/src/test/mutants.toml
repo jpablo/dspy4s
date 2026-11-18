@@ -758,6 +758,50 @@ file = "MemoryTree.scala"
 old = "Predict(merge, name = Some(\"merge\"), config = options),"
 new = "Predict(merge, name = Some(\"merge\"), config = options.copy(fields = options.fields.take(0))),"
 
+# ── The limit of a line (7.2, choice 8) ──
+
+[[mutant]]
+name = "Mutant: a leaf reply of more than 512 bytes gets no shorten call"
+[[mutant.edit]]
+file = "MemoryTree.scala"
+old = "if text.getBytes(UTF_8).length <= MemoryLine.MaxBytes then kept(MemoryLine.of(text))"
+new = "if text.nonEmpty || text.isEmpty then kept(MemoryLine.of(text))"
+
+[[mutant]]
+name = "Mutant: a shorten call spends no call of the summary budget"
+[[mutant.edit]]
+file = "MemoryTree.scala"
+old = "else if budget.spend().isLeft then standIn"
+new = "else if budget.check().isLeft then standIn"
+
+[[mutant]]
+name = "Mutant: the line of a long leaf reply is the first reply, not the reply of shorten"
+[[mutant.edit]]
+file = "MemoryTree.scala"
+old = "case Right(short)               => kept(MemoryLine.of(short))"
+new = "case Right(short)               => kept(MemoryLine.of(text + short.take(0)))"
+
+[[mutant]]
+name = "Mutant: a failed shorten call gives a stand-in"
+[[mutant.edit]]
+file = "MemoryTree.scala"
+old = "case Left(_)                    => kept(MemoryLine.of(text))"
+new = "case Left(_)                    => standIn"
+
+[[mutant]]
+name = "Mutant: the store keeps the first reply of a shorten call that a stop cut"
+[[mutant.edit]]
+file = "MemoryTree.scala"
+old = "case Left(PolicyRunner.Stopped) => standIn"
+new = "case Left(PolicyRunner.Stopped) => kept(MemoryLine.of(text))"
+
+[[mutant]]
+name = "Mutant: the shorten requests have no summary options"
+[[mutant.edit]]
+file = "MemoryTree.scala"
+old = "Predict(shorten, name = Some(\"shorten\"), config = options),"
+new = "Predict(shorten, name = Some(\"shorten\"), config = options.copy(fields = options.fields.take(0))),"
+
 
 [[mutant]]
 name = "Mutant: a new call to the policy keeps the number of the call before it"

@@ -19,7 +19,16 @@ final case class CompressInput(message: String) derives Schema
 /** The input of the leaf `merge` (6.1): the lines of two adjacent nodes, oldest first. */
 final case class MergeInput(older: String, newer: String) derives Schema
 
-/** The output of `compress` and `merge` (6.1): one summary line. `MemoryLine.of` cuts it to 512 bytes. */
+/** The input of the leaf `shorten` (CODE_HARNESS_DESIGN.md, 7.2, choice 8): a reply of `compress` or `merge` with more
+  * than `MemoryLine.MaxBytes` bytes. `shorten` writes the same content in a shorter line, so the cut of `MemoryLine.of`
+  * does not remove the end of the line, where the newest messages are. The field is not `line`, because a signature
+  * needs a different name for each field, and `line` is the field of the output.
+  */
+final case class ShortenInput(summary: String) derives Schema
+
+/** The output of `compress`, `merge` and `shorten` (6.1): one summary line. A reply of `compress` or `merge` with more
+  * than 512 bytes gets one `shorten` call (7.2, choice 8). `MemoryLine.of` cuts each line to 512 bytes.
+  */
 final case class Summary(line: String) derives Schema
 
 /** The built lines of one session (CODE_HARNESS_DESIGN.md, 7 and 7.1): derived data with a journal of its own. The host
@@ -105,15 +114,20 @@ object MemoryProgress:
   *     at a time. The new lines of each round go to the store with one `putAll`, so a long update keeps the rounds that
   *     it ended.
   *   - A leaf runs through `leafRunner`, so a hard stop cuts it, and each call spends one call of `summaries`, the
-  *     budget of the summaries of the turn, apart from the model calls of the policy. A failed call gives the line of
-  *     the source (`MemoryLine.of` of the message, or of the two lines), and that line goes to the store, so a bad
-  *     message does not block the session. A spent budget or a stop gives the same line as a stand-in
-  *     (`Memory.standIns`). A node with a half that is a stand-in gets the line of its source as a stand-in too, with
-  *     no leaf call. A stand-in never goes to the store, so the next update with a call in its budget builds the node
-  *     again, with a leaf call or from the store.
+  *     budget of the summaries of the turn, apart from the model calls of the policy. A reply of `compress` or `merge`
+  *     with more than `MemoryLine.MaxBytes` bytes gets exactly one call of the third leaf, `shorten`, with the reply as
+  *     its input (7.2, choice 8). The `shorten` call runs in the task of the first call of its node, so the limit
+  *     `width` stays. The reply of `shorten` is the line, and `MemoryLine.of` cuts it if it is still too long. A node
+  *     never gets a second `shorten` call. A failed call gives the line of its source, and that line goes to the store,
+  *     so a bad message does not block the session. The source of `compress` or `merge` is the message or the two
+  *     lines, and the source of `shorten` is the first reply. A spent budget or a stop, also before or during a
+  *     `shorten` call, gives the line of the source of the node as a stand-in (`Memory.standIns`). A node with a half
+  *     that is a stand-in gets the line of its source as a stand-in too, with no leaf call. A stand-in never goes to
+  *     the store, so the next update with a call in its budget builds the node again, with a leaf call or from the
+  *     store.
   *   - Before its first round, `update` counts the leaf calls of its rounds. Then `progress` gets 0 of that total, each
-  *     end of a leaf call, and the end of the update, also after a failed or a stopped call (10.6). An update with no
-  *     leaf call reports nothing.
+  *     end of a leaf call, and the end of the update, also after a failed or a stopped call (10.6). A node with a
+  *     `shorten` call is one summary in this count. An update with no leaf call reports nothing.
   *   - `project` reserves `MemoryTree.room(high)` characters of the budget for the view first, and never cuts or drops
   *     it, so the prompt cache keeps it. The view is the first message of the history, with `render`. The rest of the
   *     budget goes to the open turn, as the window strategy gives it. The view stays the same during a turn.
@@ -123,6 +137,7 @@ object MemoryProgress:
 final class MemoryTree(
     compress  : Predict[CompressInput, Summary],
     merge     : Predict[MergeInput, Summary],
+    shorten   : Predict[ShortenInput, Summary],
     lines     : LineStore,
     high      : Int,
     leafRunner: PolicyRunner,
@@ -228,9 +243,13 @@ final class MemoryTree(
     )
 
   /** The line of a leaf call for `id`, with the entry for the store with `key`, if any. The call spends one call of
-    * `budget`. A failed call gives the line of the source, for the store. A spent budget or a stop gives the line of
-    * the source as a stand-in, not for the store, so the next update tries again. A node with a half that is a stand-in
-    * gives a stand-in with no call and no spend, because the next update builds that half and this node again.
+    * `budget`. A reply of more than `MemoryLine.MaxBytes` bytes gets exactly one `shorten` call with the reply as its
+    * input (`fitted`). The `shorten` call also spends one call of `budget`, and its reply is the line. `MemoryLine.of`
+    * cuts a reply of `shorten` that is still too long, and no second `shorten` call comes. A failed call gives the line
+    * of its source, for the store: the line of the source of the node, or the first reply for a failed `shorten` call.
+    * A spent budget or a stop, also before or during the `shorten` call, gives the line of the source of the node as a
+    * stand-in, not for the store, so the next update tries again with the first call. A node with a half that is a
+    * stand-in gives a stand-in with no call and no spend, because the next update builds that half and this node again.
     */
   private def leafLine(m: Memory, id: NodeId, key: Option[LineKey], budget: Budget)(using
       RuntimeContext
@@ -240,11 +259,27 @@ final class MemoryTree(
     if Memory.onStandIn(m, id) || budget.spend().isLeft then cut
     else
       summarize(m, id) match
-        case Right(text) =>
-          val line = MemoryLine.of(text)
-          MemoryTree.Made(line, key.map(_ -> line), standIn = false)
+        case Right(text)                => fitted(text, key, budget, cut)
         case Left(PolicyRunner.Stopped) => cut
         case Left(_)                    => MemoryTree.Made(fallback, key.map(_ -> fallback), standIn = false)
+
+  /** The line of `text`, the reply of a `compress` or `merge` call, with the entry for the store with `key`, if any. A
+    * reply of `MemoryLine.MaxBytes` bytes or less is the line. A longer reply gets one `shorten` call with `text` as
+    * its input, in the task of the first call, and the call spends one call of `budget`. `MemoryLine.of` of the reply
+    * of `shorten` is the line, with no second call. A failed `shorten` call gives `MemoryLine.of(text)`, for the store.
+    * A spent budget or a stop gives `standIn`, the line of the source of the node as a stand-in.
+    */
+  private def fitted(text: String, key: Option[LineKey], budget: Budget, standIn: MemoryTree.Made)(using
+      RuntimeContext
+  ): MemoryTree.Made =
+    def kept(line: MemoryLine) = MemoryTree.Made(line, key.map(_ -> line), standIn = false)
+    if text.getBytes(UTF_8).length <= MemoryLine.MaxBytes then kept(MemoryLine.of(text))
+    else if budget.spend().isLeft then standIn
+    else
+      leafRunner.run(() => shorten(ShortenInput(text)).left.map(_.message)).map(_.output.line) match
+        case Right(short)               => kept(MemoryLine.of(short))
+        case Left(PolicyRunner.Stopped) => standIn
+        case Left(_)                    => kept(MemoryLine.of(text))
 
   /** The text of a node with no leaf: its message, or the lines of its two halves. */
   private def sourceText(m: Memory, id: NodeId): String =
@@ -311,7 +346,12 @@ object MemoryTree:
     "Merge the two summary lines, the older one first, into one line of at most 400 characters. Keep who wrote each " +
       "part, and each name, number, path, decision and error that a later step can need."
 
-  /** A memory tree with the two leaves of these instructions, the store `lines`, a view of at most `high` parts, the
+  /** The instructions of `shorten` (7.2, choice 8). Its input is a reply of `compress` or `merge` that is too long. */
+  val shortenInstructions: String =
+    "Write the same content as the summary in one line of at most 400 characters. Keep who wrote each part, and " +
+      "each name, number, path, decision and error."
+
+  /** A memory tree with the three leaves of these instructions, the store `lines`, a view of at most `high` parts, the
     * runner of the activation, the budget of the summaries of the turn, and at most `width` leaf calls at a time. A
     * program call has `PolicyRunner.Direct`. Each leaf request has the option bag `options` of the provider, for
     * example `{"chat_template_kwargs": {"enable_thinking": false}}` for a model of vLLM that reasons: a summary needs
@@ -328,9 +368,11 @@ object MemoryTree:
   ): MemoryTree =
     val compress = Signature.derived[CompressInput, Summary]("compress", compressInstructions)
     val merge    = Signature.derived[MergeInput, Summary]("merge", mergeInstructions)
+    val shorten  = Signature.derived[ShortenInput, Summary]("shorten", shortenInstructions)
     MemoryTree(
       Predict(compress, name = Some("compress"), config = options),
       Predict(merge, name = Some("merge"), config = options),
+      Predict(shorten, name = Some("shorten"), config = options),
       lines,
       high,
       leafRunner,

@@ -124,7 +124,7 @@ dspy4s-harness [--root DIR] --inspect [--port N]
 | `--inspect` | Serves the inspector of the root on `127.0.0.1` until Ctrl-C. | off |
 | `--port N` | The port of the inspector. `0` takes a free port. | `7411` |
 | `--script` | Reads plain lines from the standard input. Each line waits for the end of the turn before it. | off |
-| `--no-memory-calls` | The memory makes no `compress` or `merge` call. Each message of the memory shows its first 512 bytes. | the calls run |
+| `--no-memory-calls` | The memory makes no summary call (`compress`, `merge` or `shorten`). Each message of the memory shows its first 512 bytes. | the calls run |
 | `--cell-wall-minutes N` | The wall time of one cell in minutes, with its guest API calls. `0` gives no limit. Long work goes in a job (`spawn` and `waitJob`). | `15` |
 | `--unattended-turns N` | The turns in a row that a session runs with no message of yours. After them, a message of another session, of the harness or of a job waits for your next message. `0` gives no limit. | `8` |
 

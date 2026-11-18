@@ -16,7 +16,7 @@ Each session has its exchange file next to its journal:
 ```
 
 The default root is `~/.dspy4s/harness`, and `--root DIR` gives another root. The file holds each model call of each
-activation of the session. These are the calls of the policy, the summary calls `compress` and `merge`, the calls of
+activation of the session. These are the calls of the policy, the summary calls `compress`, `merge` and `shorten`, the calls of
 `llmQuery` (the predictor `subQuery`), and the probes. Each exchange has two JSON lines with the same `id`:
 
 - The `request` line, which the host writes when the exchange starts. It holds `session`, `after` (the last `seq` of

@@ -50,8 +50,8 @@ object HarnessEnv:
   * @param batch
   *   the most queries or children that one batch call runs at the same time (6)
   * @param summaryCalls
-  *   the calls of the leaves `compress` and `merge` of the memory tree in one turn (7.1), apart from `modelCalls`.
-  *   After them, a node gets the line of its source, and a later turn builds it again.
+  *   the calls of the leaves `compress`, `merge` and `shorten` of the memory tree in one turn (7.1), apart from
+  *   `modelCalls`. After them, a node gets the line of its source, and a later turn builds it again.
   * @param callsPerCell
   *   the guest API calls of one cell. After them, each later call of the cell fails at once (`ScalaRepl`).
   * @param cellWallTime
