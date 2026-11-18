@@ -39,7 +39,8 @@ class DeskLaws extends munit.FunSuite:
       Vector(s"/fake/wt/f$n"),
       2,
       None,
-      None
+      None,
+      "off"
     )
 
   /** A desk with the cards of `s2`, which the client shows first, `s3` and `s4`, and with the controller. As the desk

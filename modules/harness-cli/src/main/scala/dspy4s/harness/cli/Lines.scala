@@ -48,6 +48,9 @@ enum Line derives CanEqual:
     */
   case Effort(level: Option[String])
 
+  /** `/goal`, `/goal on [N]`, `/goal off` and `/goal set TEXT`: the goal and the goal loop of the session (8.5). */
+  case Goal(goal: GoalLine)
+
   /** `/help`: the commands, one line each. */
   case Help
 
@@ -82,6 +85,22 @@ enum Line derives CanEqual:
   /** A line that starts with `/` and is not a command. */
   case Unknown(text: String)
 
+/** The words after `/goal` (CODE_HARNESS_DESIGN.md, 8.5). */
+enum GoalLine derives CanEqual:
+
+  /** `/goal`: the client shows the goal and the state of the loop. */
+  case Show
+
+  /** `/goal on [N]`: the start of a loop of at most `limit` turns with no person. With no N, `SessionState.LoopTurns`.
+    */
+  case On(limit: Int)
+
+  /** `/goal off`: the end of the loop. */
+  case Off
+
+  /** `/goal set TEXT`: the new goal `text`. */
+  case Change(text: String)
+
 /** How much of the reasoning of a step the client shows (`/reasoning`). `Line` is one line with the size of the
   * reasoning, the default of the line editor. `Short` is the start of the reasoning, the default of the plain lines.
   */
@@ -108,6 +127,7 @@ private def command(words: List[String]): Option[Line] =
     case List("/config")          => Some(Line.Config)
     case List("/show", id)        => Some(Line.Show(id))
     case List("/help")            => Some(Line.Help)
+    case "/goal" :: rest          => goal(rest)
     case List("/reasoning", view) => ReasoningView.values.find(_.toString.equalsIgnoreCase(view)).map(Line.Reasoning(_))
     case List("/effort")          => Some(Line.Effort(None))
     case List("/effort", level)   => Some(Line.Effort(Some(level)))
@@ -119,6 +139,19 @@ private def command(words: List[String]): Option[Line] =
     case List("/quit")            => Some(Line.Quit)
     case List("/wait", seconds)   => seconds.toIntOption.filter(_ >= 0).map(Line.Wait(_))
     case _                        => None
+
+/** The words after `/goal` (8.5): none gives `Show`, `on` with an optional N of 1 or more gives `On`, `off` gives
+  * `Off`, and `set` with a text gives `Change`. Another word, an N below 1 and `set` with no text give none.
+  */
+private def goal(words: List[String]): Option[Line] =
+  val line = words match
+    case Nil                            => Some(GoalLine.Show)
+    case List("on")                     => Some(GoalLine.On(SessionState.LoopTurns))
+    case List("on", n)                  => n.toIntOption.filter(_ >= 1).map(GoalLine.On(_))
+    case List("off")                    => Some(GoalLine.Off)
+    case "set" :: text if text.nonEmpty => Some(GoalLine.Change(text.mkString(" ")))
+    case _                              => None
+  line.map(Line.Goal(_))
 
 /** The words after `/close`: no word or `parked` gives `Parked`, `merged` gives `Merged`, `abandoned REASON` gives
   * `Abandoned(REASON)`, and `replaced ID` gives `Replaced(ID)` (8.7).
@@ -174,6 +207,10 @@ val commandHelp: Vector[(String, String)] = Vector(
   "/reasoning off|line|short|full" -> "set how much of the reasoning of a step the client shows",
   "/effort [LEVEL]"                -> "show the reasoning effort and its levels, or set the effort of the next steps",
   "/show ID"                       -> "show the cell ID or the call ID of the session in full, for example 12 or 12.0",
+  "/goal"                          -> "show the goal and the goal loop",
+  "/goal on [N]"                   -> "let the session go on by itself until its goal is met, at most N turns (50)",
+  "/goal off"                      -> "end the goal loop",
+  "/goal set TEXT"                 -> "set the goal of the session",
   "/wait SECONDS"                  -> "wait before the next line, for a script",
   "/help"                          -> "show this text",
   "/close"                         -> "end the session as parked; with --controller, show and run its release plan",
@@ -211,6 +248,8 @@ def jobOrder(state: SessionState): Vector[EffectId] = state.jobs.keys.toVector.s
   *   - `Close` gives `Close` with its outcome and its reason. A client with a desk runs the release instead (8.7).
   *   - `Effort` with a level of `choices`, the levels of the model, gives `ChangeModel` with the model of `current` and
   *     that effort (CLI_SCREEN.md, 14.4). Another level gives an error with the levels.
+  *   - `Goal` gives `StartLoop` for `/goal on`, `StopLoop` for `/goal off` and `ChangeGoal` for `/goal set` (8.5).
+  *     `/goal` with no word gives no command, because it only shows the loop.
   *   - `Jobs`, `Status`, `Reasoning`, `Show`, `Help`, `Quit`, `Wait`, `Sessions`, `Open`, `Reopen`, `Controller` and
   *     `Effort` with no level give no command, because they change only the client. The client runs `Sessions`, `Open`,
   *     `Reopen` and `Controller` through its desk. `Unknown` gives an error that points to `/help`.
@@ -253,12 +292,16 @@ def commandsFor(
     case Line.Effort(Some(level))    =>
       if choices.contains(level) then Right(Vector(Command.ChangeModel(Effort.set(current.config.model, level))))
       else Left(s"The model has no effort $level. Its levels are ${listWords(choices)}.")
-    case Line.Unknown(text) => Left(s"$text is not a command. /help lists the commands.")
+    case Line.Goal(GoalLine.On(limit))  => Right(Vector(Command.StartLoop(limit)))
+    case Line.Goal(GoalLine.Off)        => Right(Vector(Command.StopLoop))
+    case Line.Goal(GoalLine.Change(go)) => Right(Vector(Command.ChangeGoal(go)))
+    case Line.Unknown(text)             => Left(s"$text is not a command. /help lists the commands.")
     // These lines change only the client.
     case Line.Jobs | Line.Status | Line.Config | Line.Reasoning(_) | Line.Show(_) | Line.Help | Line.Quit | Line.Wait(
           _
         ) |
-        Line.Sessions | Line.Open(_) | Line.Controller | Line.Reopen(_) | Line.Effort(None) => Right(Vector.empty)
+        Line.Sessions | Line.Open(_) | Line.Controller | Line.Reopen(_) | Line.Effort(None) |
+        Line.Goal(GoalLine.Show) => Right(Vector.empty)
 
 /** The text of `/effort` with no level: the effort of the model of `current`, and the levels `choices` of the model
   * (CLI_SCREEN.md, 14.4).

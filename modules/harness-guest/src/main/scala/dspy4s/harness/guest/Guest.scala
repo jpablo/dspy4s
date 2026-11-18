@@ -59,9 +59,10 @@ import caps.assumeSafe
   update def tell(session: SessionRef, message: String): Delivery
 
   /** Starts a session in the background. Its report comes back as a message that starts a turn. The scope is a
-    * `Scratch`, a `Worktree` or a `Directory`, as `api.start` tells. A `Home` or a `Fork` scope gives an error.
+    * `Scratch`, a `Worktree` or a `Directory`, as `api.start` tells. A `Home` or a `Fork` scope gives an error. A
+    * `loop` above 0 gives the new session a goal loop of that many turns from the loop of this session.
     */
-  update def start(goal: String, scope: Scope, strategy: StrategyName): SessionRef
+  update def start(goal: String, scope: Scope, strategy: StrategyName, loop: Int): SessionRef
 
   /** A read-only `rlm` with the journal of that session as an input. It changes nothing in that session. */
   def observe(session: SessionRef, question: String)(using Llm^): String
@@ -231,9 +232,13 @@ final case class NeedsApproval(op: String, argument: String)
     *     first.
     *
     * `start` refuses a `Home` and a `Fork` scope.
+    *
+    * With `loop` above 0, the new session goes on by itself until its goal is met, for at most `loop` turns. The turns
+    * come from the goal loop of this session, which the person turned on: `start` refuses more turns than that loop
+    * has left.
     */
-  def start(goal: String, scope: Scope, strategy: StrategyName)(using s: Sessions^): SessionRef =
-    s.start(goal, scope, strategy)
+  def start(goal: String, scope: Scope, strategy: StrategyName, loop: Int = 0)(using s: Sessions^): SessionRef =
+    s.start(goal, scope, strategy, loop)
 
   /** Runs a child with `task`, and gives the value of its `submit`. Each input is a `String` val of the child. The
     * prompt of the child shows only the start of an input, so give a long text as an input, not in the task.

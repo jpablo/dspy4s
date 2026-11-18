@@ -267,6 +267,8 @@ class DecideLaws extends ScalaCheckSuite:
     forAll(schedules)(run => assertEquals(grammar(append(run.journal, repair(state(run.journal)))), Vector.empty))
   }
 
-  property("Rest: with no open turn, no input waits") {
-    forAll(states)(s => if s.position == Position.NoTurn then assertEquals(s.waiting, 0))
+  property(
+    "Rest: with no open turn, no input waits, apart from a message that the limit of the unattended turns holds"
+  ) {
+    forAll(states)(s => if s.position == Position.NoTurn && !held(s) then assertEquals(s.waiting, 0))
   }

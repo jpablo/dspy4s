@@ -64,7 +64,9 @@ import caps.assumeSafe
   *
   * The goal is empty for a session with no goal, and the scope is none before the session starts. From the ledger:
   * `read` is the number of the files that the session read, `made` the paths that it wrote or edited, `commands` the
-  * number of its commands, and `head` and `clean` the state of its scope after its last turn.
+  * number of its commands, and `head` and `clean` the state of its scope after its last turn. `loop` is the goal loop
+  * of the session: `on 12/50` while it runs, with the turns used and the limit, else how the last loop ended (`met`,
+  * `blocked`, `limit`, `off`, `stopped` or `restarted`), or `off`.
   */
 final case class SessionCard(
     session : SessionRef,
@@ -78,5 +80,6 @@ final case class SessionCard(
     made    : Vector[String],
     commands: Int,
     head    : Option[String],
-    clean   : Option[Boolean]
+    clean   : Option[Boolean],
+    loop    : String
 ) derives CanEqual

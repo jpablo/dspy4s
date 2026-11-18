@@ -128,7 +128,8 @@ final class FakeSessions extends Sessions:
     made = Vector("build.sbt"),
     commands = 2,
     head = Some("abc1234"),
-    clean = Some(true)
+    clean = Some(true),
+    loop = "off"
   )
 
   def list(): Vector[SessionCard] = Vector(card)
@@ -137,7 +138,7 @@ final class FakeSessions extends Sessions:
     told = told :+ (session -> message)
     Delivery.InTurn
 
-  def start(goal: String, scope: Scope, strategy: StrategyName): SessionRef =
+  def start(goal: String, scope: Scope, strategy: StrategyName, loop: Int): SessionRef =
     goals = goals :+ goal
     SessionRef(s"s-${goals.size + 1}")
 

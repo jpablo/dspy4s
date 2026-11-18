@@ -78,8 +78,8 @@ new = "if shown.isEmpty then"
 name = "Mutant: a Session grant stays after an Activated"
 [[mutant.edit]]
 file = "SessionState.scala"
-old = "closed = false, grants = s.grants.filterNot(_.lifetime == GrantLifetime.Session))"
-new = "closed = false)"
+old = "grants = s.grants.filterNot(_.lifetime == GrantLifetime.Session),"
+new = "grants = s.grants,"
 
 [[mutant]]
 name = "Mutant: an Abort stops jobs"
@@ -164,8 +164,8 @@ new = "case Command.Grant(request, _, _) if s.requests(request) && request.value
 name = "Mutant: an answer to a pending call gives no Input"
 [[mutant.edit]]
 file = "Decide.scala"
-old = "if !s.pending.exists(rule.covers) then Right(Vector(granted))"
-new = "if s.pending.isEmpty || s.pending.nonEmpty then Right(Vector(granted))"
+old = "      if !s.pending.exists(rule.covers) then\n"
+new = "      if s.pending.isEmpty || s.pending.nonEmpty then\n"
 
 [[mutant]]
 name = "Mutant: a report debt never closes"
@@ -207,8 +207,8 @@ new = "if rule.rule.matches(op, args) && found == Verdict.Allow then rule.verdic
 name = "Mutant: a goal check while a pending call waits"
 [[mutant.edit]]
 file = "Approvals.scala"
-old = "!s.closed && s.position == Position.NoTurn && s.waiting == 0 && s.pending.isEmpty"
-new = "!s.closed && s.position == Position.NoTurn && s.waiting == 0"
+old = "s.pending.isEmpty && (s.waiting == 0 || held(s))"
+new = "(s.waiting == 0 || held(s))"
 
 # ── The values of the inputs ──
 
@@ -230,8 +230,8 @@ new = "inputs = s.inputs ++ values, store = s.store ++ values,"
 name = "Mutant: a fork loses the values of the inputs"
 [[mutant.edit]]
 file = "SessionState.scala"
-old = "state(prefix).copy(grants = Set.empty, pending = Set.empty, jobs = Map.empty)"
-new = "state(prefix).copy(grants = Set.empty, pending = Set.empty, jobs = Map.empty, inputs = Map.empty)"
+old = "state(prefix).copy(grants = Set.empty, pending = Set.empty, jobs = Map.empty, loop = None)"
+new = "state(prefix).copy(grants = Set.empty, pending = Set.empty, jobs = Map.empty, loop = None, inputs = Map.empty)"
 
 # ── The model of a session (CLI_SCREEN.md, 14.4) ──
 
@@ -304,8 +304,8 @@ new = "    case Entry.ScopeRecorded(_, _) | Entry.JobEnded(_, _) => !s.closed"
 name = "Mutant: held ignores the limit of the activation"
 [[mutant.edit]]
 file = "Decide.scala"
-old = "      case TurnLimit.AtMost(turns) => s.unattended >= turns"
-new = "      case TurnLimit.AtMost(_) => s.unattended >= SessionState.UnattendedTurns"
+old = "      case TurnLimit.AtMost(turns) => unattendedUsed(s) >= turns"
+new = "      case TurnLimit.AtMost(_) => unattendedUsed(s) >= SessionState.UnattendedTurns"
 
 [[mutant]]
 name = "Mutant: NoLimit holds a message after 8 turns"
@@ -334,3 +334,140 @@ name = "Mutant: waitsForPerson holds with no message that waits"
 file = "Decide.scala"
 old = "  !s.closed && s.position == Position.NoTurn && s.waiting > 0 && !s.releasing && held(s)"
 new = "  !s.closed && s.position == Position.NoTurn && !s.releasing && held(s)"
+
+# ── The goal loop (8.5) ──
+
+[[mutant]]
+name = "Mutant: a goal loop starts from each sender"
+[[mutant.edit]]
+file = "Decide.scala"
+old = "case Command.StartLoop(_) if sender != Source.User            => Left(Rejection.NotPerson)"
+new = "case Command.StartLoop(_) if sender == Source.Policy          => Left(Rejection.NotPerson)"
+
+[[mutant]]
+name = "Mutant: an Activate keeps the goal loop"
+[[mutant.edit]]
+file = "Decide.scala"
+old = "val ended     = if s.loop.isDefined then Vector(Entry.GoalLoopEnded(LoopEnd.Restarted)) else Vector.empty"
+new = "val ended     = Vector.empty[Entry]"
+[[mutant.edit]]
+file = "SessionState.scala"
+old = """        grants = s.grants.filterNot(_.lifetime == GrantLifetime.Session),
+        loop = None"""
+new = """        grants = s.grants.filterNot(_.lifetime == GrantLifetime.Session),
+        loop = s.loop"""
+
+[[mutant]]
+name = "Mutant: a stop of the harness ends the goal loop"
+[[mutant.edit]]
+file = "Decide.scala"
+old = "if sender == Source.User && s.loop.isDefined then Vector(Entry.GoalLoopEnded(LoopEnd.Stopped))"
+new = "if s.loop.isDefined then Vector(Entry.GoalLoopEnded(LoopEnd.Stopped))"
+
+[[mutant]]
+name = "Mutant: the goal check runs while a message can start a turn"
+[[mutant.edit]]
+file = "Approvals.scala"
+old = "s.pending.isEmpty && (s.waiting == 0 || held(s))"
+new = "s.pending.isEmpty"
+
+[[mutant]]
+name = "Mutant: the same blocker does not add to its count"
+[[mutant.edit]]
+file = "Goal.scala"
+old = "else if check.same && loop.blocked > 0 then loop.blocked + 1"
+new = "else if check.same && loop.blocked > 0 then 1"
+
+[[mutant]]
+name = "Mutant: a new blocker adds to the count of the last one"
+[[mutant.edit]]
+file = "Goal.scala"
+old = "else if check.same && loop.blocked > 0 then loop.blocked + 1"
+new = "else if loop.blocked > 0 then loop.blocked + 1"
+
+[[mutant]]
+name = "Mutant: a check at the limit sends a goal message"
+[[mutant.edit]]
+file = "Decide.scala"
+old = "    else if unattendedUsed(now) >= loop.limit then Some(LoopEnd.Limit)\n"
+new = ""
+
+[[mutant]]
+name = "Mutant: a goal loop keeps the limit of 8"
+[[mutant.edit]]
+file = "Goal.scala"
+old = "s.loop.fold(s.config.unattendedLimit)(loop => TurnLimit.AtMost(loop.limit))"
+new = "s.loop.fold(s.config.unattendedLimit)(_ => s.config.unattendedLimit)"
+
+[[mutant]]
+name = "Mutant: the turns that a session gave do not count"
+[[mutant.edit]]
+file = "SessionState.scala"
+old = "s.loop.map(l => l.copy(gave = l.gave + loopOf(call.args)))"
+new = "s.loop"
+
+[[mutant]]
+name = "Mutant: a message of the person keeps the turns that the loop gave"
+[[mutant.edit]]
+file = "SessionState.scala"
+old = "loop = if s.personWaits then s.loop.map(_.copy(gave = 0)) else s.loop"
+new = "loop = s.loop"
+
+[[mutant]]
+name = "Mutant: Ended keeps the goal loop"
+[[mutant.edit]]
+file = "SessionState.scala"
+old = """        releasing = false,
+        loop = None"""
+new = """        releasing = false,
+        loop = s.loop"""
+
+[[mutant]]
+name = "Mutant: a journal fork keeps the goal loop"
+[[mutant.edit]]
+file = "SessionState.scala"
+old = "state(prefix).copy(grants = Set.empty, pending = Set.empty, jobs = Map.empty, loop = None)"
+new = "state(prefix).copy(grants = Set.empty, pending = Set.empty, jobs = Map.empty)"
+
+[[mutant]]
+name = "Mutant: a turn of a goal loop gives a report"
+[[mutant.edit]]
+file = "Reports.scala"
+old = "case Entry.TurnEnded(outcome) if debt.looping      =>"
+new = "case Entry.TurnEnded(outcome) if debt.looping && !debt.open =>"
+
+[[mutant]]
+name = "Mutant: the end of a goal loop with no debt gives no report"
+[[mutant.edit]]
+file = "Reports.scala"
+old = "case Entry.GoalLoopEnded(_)   => debt.copy(looping = false, due = debt.due :+ (logged -> debt.last))"
+new = "case Entry.GoalLoopEnded(_)   => debt.copy(looping = false, due = if debt.open then debt.due :+ (logged -> debt.last) else debt.due)"
+
+[[mutant]]
+name = "Mutant: the end of a goal loop starts the turn of a message that waits"
+[[mutant.edit]]
+file = "SessionState.scala"
+old = "base.copy(loop = None, loopEnd = Some(end), afterLoop = s.waiting > 0)"
+new = "base.copy(loop = None, loopEnd = Some(end), afterLoop = false)"
+
+[[mutant]]
+name = "Mutant: a new goal loop does not free a message that waits"
+[[mutant.edit]]
+file = "Decide.scala"
+old = "      Right(if starts then Vector(started, Entry.TurnStarted) else Vector(started))"
+new = "      Right(if starts && false then Vector(started, Entry.TurnStarted) else Vector(started))"
+
+[[mutant]]
+name = "Mutant: a turn keeps the hold of a restart"
+[[mutant.edit]]
+file = "SessionState.scala"
+old = """        loop = if s.personWaits then s.loop.map(_.copy(gave = 0)) else s.loop,
+        afterLoop = false"""
+new = """        loop = if s.personWaits then s.loop.map(_.copy(gave = 0)) else s.loop"""
+
+[[mutant]]
+name = "Mutant: a grant with no pending call leaves a freed message with no turn"
+[[mutant.edit]]
+file = "Decide.scala"
+old = "        Right(if starts then Vector(granted, Entry.TurnStarted) else Vector(granted))"
+new = "        Right(if starts && false then Vector(granted, Entry.TurnStarted) else Vector(granted))"

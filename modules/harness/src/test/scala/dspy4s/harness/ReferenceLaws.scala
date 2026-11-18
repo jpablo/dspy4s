@@ -167,11 +167,11 @@ object ReferenceLaws:
       def load[A: Data](key : String): Option[A]      = ???
       def store[A: Data](key: String, value: A): Unit = ???),
     sessions = Some(new Sessions:
-      def list(): Vector[SessionCard]                                                       = ???
-      def tell(session   : SessionRef, message : String): Delivery                          = ???
-      def start(goal     : String, scope       : Scope, strategy: StrategyName): SessionRef = ???
-      def observe(session: SessionRef, question: String)(using Llm): String                 = ???
-      def zoom(session   : SessionRef, ref     : String): String                            = ???),
+      def list(): Vector[SessionCard]                                                                  = ???
+      def tell(session   : SessionRef, message : String): Delivery                                     = ???
+      def start(goal     : String, scope       : Scope, strategy: StrategyName, loop: Int): SessionRef = ???
+      def observe(session: SessionRef, question: String)(using Llm): String                            = ???
+      def zoom(session   : SessionRef, ref     : String): String                                       = ???),
     children = Some(new Children:
       def rlm[A: Data](task        : String, inputs: Map[String, String]): A           = ???
       def rlmBatched[A: Data](tasks: Vector[(String, Map[String, String])]): Vector[A] = ???)

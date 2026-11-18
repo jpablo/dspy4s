@@ -147,7 +147,7 @@ A line that starts with `/` is a command. Each other line is a message to the se
 
 | Command | Help text | Notes |
 |---|---|---|
-| `/stop` | stop the turn (Ctrl-C on an empty line does the same during a turn) | With no open turn, it does nothing. |
+| `/stop` | stop the turn (Ctrl-C on an empty line does the same during a turn) | With no open turn, it does nothing, apart from the end of a goal loop. Ctrl-C also ends a goal loop between two turns. |
 | `/stopall` | stop the turn and each job of the turn | With no open turn, it stops the jobs of the last turn. |
 | `/allow [N] [once|turn|session]` | allow each pending call, or only the call N of the prompt and of /status | The lifetime is `once` when you give none. |
 | `/jobs` | list the jobs of the session | One line for each job, for example `2.1 runs: "sbt ~test"`. |
@@ -157,6 +157,10 @@ A line that starts with `/` is a command. Each other line is a message to the se
 | `/reasoning off|line|short|full` | set how much of the reasoning of a step the client shows | The history keeps the rows that it printed. |
 | `/effort [LEVEL]` | show the reasoning effort and its levels, or set the effort of the next steps | The level must be one of the levels of the model. |
 | `/show ID` | show the cell ID or the call ID of the session in full, for example 12 or 12.0 | A cell shows its full form. A call shows all of its result. |
+| `/goal` | show the goal and the goal loop | `/status` shows the same lines when the session has a goal or a loop. |
+| `/goal on [N]` | let the session go on by itself until its goal is met, at most N turns (50) | N must be 1 or more. A restart ends the loop. [Sessions](sessions.md#the-goal-loop) tells more. |
+| `/goal off` | end the goal loop | |
+| `/goal set TEXT` | set the goal of the session | A reopen keeps the goal. |
 | `/wait SECONDS` | wait before the next line, for a script | A whole number, 0 or more. |
 | `/help` | show this text | |
 | `/close` | end the session as parked; with --controller, show and run its release plan | `/close parked` is the same. Give it when no turn is open. |
@@ -217,6 +221,7 @@ An example of the last parts in a work session, with some lines cut:
 Limits
   steps of a turn: 10
   turns with no person: 8
+  goal loop: off
   model calls of a turn: 60
   time of the guest code of a cell: 30 s
   wall time of a cell: 15 min

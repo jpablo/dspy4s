@@ -72,7 +72,7 @@ class ApiReferenceLaws extends munit.FunSuite:
       ).reverse.takeWhile(line => !line.trim.startsWith("def ") && line.trim.nonEmpty).reverse.mkString(" ")
     val zoom = docOf("def zoom(session: SessionRef, ref: String)")
     assert(zoom.contains("memory") && zoom.contains("level.index") && !zoom.contains("journal"), zoom)
-    val start = docOf("def start(goal: String, scope: Scope, strategy: StrategyName)")
+    val start = docOf("def start(goal: String, scope: Scope, strategy: StrategyName, loop: Int = 0)")
     Vector("Scratch", "Worktree", "Directory", "Home", "Fork").foreach(word => assert(start.contains(word), start))
   }
 

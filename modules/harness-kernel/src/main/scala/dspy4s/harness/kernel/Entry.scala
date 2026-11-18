@@ -129,14 +129,72 @@ enum JobEnd derives Schema, CanEqual:
   case Exited(code: Int)
   case Stopped
 
+/** The answer of the `goal` leaf in the journal (8.5).
+  *
+  * @param met
+  *   true when the goal is met now
+  * @param reason
+  *   why the goal is met or not met, in one or two sentences
+  * @param blocker
+  *   what stops the work now, or an empty text when nothing stops it
+  * @param same
+  *   true when `blocker` is the blocker of the last check
+  */
+final case class GoalCheck(met: Boolean, reason: String, blocker: String, same: Boolean) derives Schema, CanEqual
+
+/** Why a goal loop ended (8.5). */
+enum LoopEnd derives Schema, CanEqual:
+
+  /** A check says that the goal is met. */
+  case Met(reason: String)
+
+  /** Three checks in a row have the same blocker. */
+  case Blocked(blocker: String)
+
+  /** The count of the unattended turns is at the limit of the loop, and the goal is not met. */
+  case Limit
+
+  /** `/goal off`, or the end of the loop of the owner. */
+  case Off
+
+  /** A stop of the person: `/stop`, `/stopall` or Ctrl-C. */
+  case Stopped
+
+  /** An `Activate`: a restart takes the permission back. */
+  case Restarted
+
+  /** One word for the card of a session and for `/goal`: `met`, `blocked`, `limit`, `off`, `stopped` or `restarted`.
+    */
+  def words: String =
+    this match
+      case Met(_)     => "met"
+      case Blocked(_) => "blocked"
+      case Limit      => "limit"
+      case Off        => "off"
+      case Stopped    => "stopped"
+      case Restarted  => "restarted"
+
+  /** The first line of the report to the owner at the end of the loop (8.5). The owner reads it with a model, so it
+    * gives the end in words, and not as a Scala value.
+    */
+  def report: String =
+    this match
+      case Met(reason)      => s"The goal loop ended: the goal is met. $reason"
+      case Blocked(blocker) => s"The goal loop ended: the work is blocked: $blocker"
+      case Limit            => "The goal loop ended: it used all its turns, and the goal is not met."
+      case Off              => "The goal loop ended: the person or the owner turned it off."
+      case Stopped          => "The goal loop ended: the person stopped the session."
+      case Restarted        => "The goal loop ended: the host started again."
+
 /** The entries of a journal (4.1). The entries of one turn form a small language:
   * {{{
   * Turn ::= TurnStarted Step* TurnEnded
   * Step ::= StepStarted [ Acted [ Cell ] ]
   * Cell ::= ( EffectStarted | EffectDone )* Observed
   * }}}
-  * `Input`, `StopRequested`, `JobsStopRequested`, `JobEnded`, `Granted`, `ScopeRecorded` and `ModelChanged` can occur
-  * at any place. `Releasing` occurs only with no open turn, and each `Released` comes after it (8.7):
+  * `Input`, `StopRequested`, `JobsStopRequested`, `JobEnded`, `Granted`, `ScopeRecorded`, `ModelChanged` and the
+  * entries of the goal loop (`GoalChanged`, `GoalLoopStarted`, `GoalChecked` and `GoalLoopEnded`, 8.5) can occur at any
+  * place. `Releasing` occurs only with no open turn, and each `Released` comes after it (8.7):
   * {{{
   * Release ::= Releasing JobsStopRequested? Released* Ended
   * }}}
@@ -201,6 +259,20 @@ enum Entry derives Schema, CanEqual:
     * the status of the job and not `Lost`. The fold puts the end in the record of the job.
     */
   case JobEnded(job: EffectId, end: JobEnd)
+
+  /** The new goal of the session (8.5). The fold puts it in the configuration, as `ModelChanged` does with the model,
+    * so a reopen keeps it.
+    */
+  case GoalChanged(goal: String)
+
+  /** The start of a goal loop with the limit `limit` (8.5). Only the person starts it, or the owner in `Begin`. */
+  case GoalLoopStarted(limit: Int)
+
+  /** The answer of the goal leaf after a turn (8.5). */
+  case GoalChecked(check: GoalCheck)
+
+  /** The end of the goal loop (8.5). */
+  case GoalLoopEnded(end: LoopEnd)
 
 /** One line of the journal: an entry with its `seq` and its meta (4.1). */
 final case class Logged(seq: Long, meta: Meta, entry: Entry) derives Schema, CanEqual

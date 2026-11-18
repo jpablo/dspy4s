@@ -34,7 +34,9 @@ object Controller:
       "sessions() to see the sessions, tell(session, message) to send a message to a session, observe(session, " +
       "question) to ask about a session, and zoom(session, ref) to read a part of its memory. A report of a session " +
       "comes to you as a message. A session stays open after its turn ends. To give a session more work or a " +
-      "change, use tell(session, message). Start a new session only for new work. At each step, give a short text " +
+      "change, use tell(session, message). Start a new session only for new work. When the person turned on your " +
+      "goal loop, start(goal, scope, strategy, loop = k) lets a long session go on by itself for at most k turns, " +
+      "and its report comes at the end of its loop. At each step, give a short text " +
       "and the code of one cell, or only a text. A step with no code ends the turn, and its text is the reply to the " +
       "person."
 
@@ -78,6 +80,10 @@ object Controller:
       "/reasoning off|line|short|full sets how much of the reasoning of a step the client shows.\n" +
       "/effort [LEVEL] shows the reasoning effort and its levels, or sets the effort of the next steps.\n" +
       "/show ID shows the cell ID or the call ID of the session in full.\n" +
+      "/goal shows the goal and the goal loop. /goal set TEXT sets the goal. /goal on [N] lets the session go on by " +
+      "itself until its goal is met, for at most N turns with no message of the person (50 with no N). /goal off " +
+      "ends the loop. In the controller, /goal on lets the reports of the sessions start turns, and it gives turns " +
+      "for start(goal, scope, strategy, loop = k). A restart of the host ends each loop.\n" +
       "/wait SECONDS waits before the next line of a script.\n" +
       "/help shows the commands.\n" +
       "/sessions lists the sessions. /open ID shows the session ID. /reopen ID opens again the session ID, which " +

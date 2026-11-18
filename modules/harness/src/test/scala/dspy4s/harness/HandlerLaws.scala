@@ -193,15 +193,16 @@ class HandlerLaws extends FunSuite:
       Vector.empty,
       0,
       None,
-      None
+      None,
+      "off"
     )
     val waits = Delivery.WaitsForPerson(8, 8)
     val inner = new Sessions:
-      def list(): Vector[SessionCard]                                                       = Vector(card)
-      def tell(session   : SessionRef, message : String): Delivery                          = waits
-      def start(goal     : String, scope       : Scope, strategy: StrategyName): SessionRef = SessionRef("s3")
-      def observe(session: SessionRef, question: String)(using Llm): String                 = "an answer"
-      def zoom(session   : SessionRef, ref     : String): String                            = "a line"
+      def list(): Vector[SessionCard]                                                                  = Vector(card)
+      def tell(session   : SessionRef, message : String): Delivery                                     = waits
+      def start(goal     : String, scope       : Scope, strategy: StrategyName, loop: Int): SessionRef = SessionRef("s3")
+      def observe(session: SessionRef, question: String)(using Llm): String                            = "an answer"
+      def zoom(session   : SessionRef, ref     : String): String                                       = "a line"
     val llm = new Llm:
       def query(prompt        : String): String                 = ""
       def queryBatched(prompts: Vector[String]): Vector[String] = prompts
@@ -209,7 +210,7 @@ class HandlerLaws extends FunSuite:
     bound.sessions.foreach { s =>
       assertEquals(s.list(), Vector(card))
       assertEquals(s.tell(SessionRef("s2"), "go on"), waits)
-      assertEquals(s.start("fix", Scope.Directory("/w"), StrategyName.Window), SessionRef("s3"))
+      assertEquals(s.start("fix", Scope.Directory("/w"), StrategyName.Window, 4), SessionRef("s3"))
       assertEquals(s.observe(SessionRef("s2"), "why?")(using llm), "an answer")
       assertEquals(s.zoom(SessionRef("s2"), "1.0"), "a line")
     }
@@ -221,8 +222,11 @@ class HandlerLaws extends FunSuite:
     assertEquals(zoomArgs, Set("session", "ref"))
     // The arguments of start hold the kind of its scope, so the guard of the controller can ask for a Directory.
     started(2)._2 match
-      case Json.Object(fields) => assert(fields.contains(("kind", Json.String("Directory"))), fields.toString)
-      case other               => fail(s"the arguments of start are $other")
+      case Json.Object(fields) =>
+        assert(fields.contains(("kind", Json.String("Directory"))), fields.toString)
+        // The turns of the loop are in the intent, so the fold of the controller counts them (8.5).
+        assert(fields.contains(("loop", Json.Number(4))), fields.toString)
+      case other => fail(s"the arguments of start are $other")
     assert(needsFlush(Entry.EffectStarted(EffectId(cell, 1), "tell", Json.Null)))
     assert(needsFlush(Entry.EffectStarted(EffectId(cell, 2), "start", Json.Null)))
     val done = effects(j).collect { case Entry.EffectDone(_, EffectResult.Value(json, _)) => json }

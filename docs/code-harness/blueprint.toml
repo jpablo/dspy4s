@@ -503,7 +503,7 @@ kind = "data"
 name = "Entry"
 ref = "4.1"
 spec = true
-uses = ["versions", "session-config", "request-id", "json", "effect-id", "effect-result", "cell-outcome", "job-selector", "guard-rule", "grant-lifetime", "turn-outcome", "session-outcome", "release-step", "job-end"]
+uses = ["versions", "session-config", "request-id", "json", "effect-id", "effect-result", "cell-outcome", "job-selector", "guard-rule", "grant-lifetime", "turn-outcome", "session-outcome", "release-step", "job-end", "goal-check", "loop-end"]
 text = "The 18 kinds of entry. The entries of one turn form the small language of 4.1. Releasing and Released come with phase 9 (8.7). ModelChanged changes the model of the configuration, for example its reasoning effort (CLI_SCREEN.md, 14.4). JobEnded records the end of a job, so a later host gives its status and not Lost (10.3, 2026-11-15)."
 
 [[node]]
@@ -575,7 +575,7 @@ name = "SessionState"
 ops = ["initial"]
 ref = "4.2"
 uses = ["session-config", "position", "effect-id", "open-call", "json", "request-id", "active-grant", "guard-rule",
-        "job-record"]
+        "job-record", "goal-loop", "loop-end"]
 
 [[node]]
 id = "evolve"
@@ -583,7 +583,7 @@ group = "state"
 kind = "function"
 name = "evolve"
 ref = "4.2"
-uses = ["session-state", "logged"]
+uses = ["session-state", "logged", "goal-loop"]
 proof_uses = ["guard-rule"]
 text = "The only place where state changes. Total and pure."
 
@@ -650,6 +650,7 @@ kind = "function"
 name = "next"
 ref = "4.3"
 uses = ["session-state", "next-step"]
+proof_uses = ["goal-check-due"]
 
 # ── Phase 1: the repair (4.4) ───────────────────────────────────────────────────────────────────────────────────────
 
@@ -692,9 +693,9 @@ group = "commands"
 kind = "data"
 name = "Command"
 ref = "4.5"
-spec = true
 uses = ["versions", "session-config", "request-id", "json", "entry", "job-selector", "guard-rule", "grant-lifetime",
-        "session-outcome", "job-end"]
+        "session-outcome", "job-end", "goal-check"]
+spec = true
 
 [[node]]
 id = "rejection"
@@ -722,8 +723,8 @@ group = "decide"
 kind = "function"
 name = "decide"
 ref = "4.5"
-uses = ["command", "session-state", "rejection", "entry", "repair", "approved-text"]
-proof_uses = ["evolve", "guard-rule"]
+uses = ["command", "session-state", "rejection", "entry", "repair", "approved-text", "goal-check", "goal-loop", "loop-end"]
+proof_uses = ["evolve", "guard-rule", "goal-check-due", "goal-text"]
 text = "Says which entries a command can commit. It keeps each journal inside the language of 4.1. ChangeModel gives ModelChanged in an open session, also during a turn. The model of the session gives nothing, and a session that has ended gives SessionClosed (CLI_SCREEN.md, 14.4). RecordJobEnd gives one JobEnded for each job of the session, also with no turn, and a session that has ended gives SessionClosed (10.3). StopJobs of one job that has ended gives the rejection JobEnded, and OfLastTurn and All stay valid (10.3, 2026-11-16)."
 
 [[node]]
@@ -777,9 +778,9 @@ id = "goal-check-due"
 group = "approvals"
 kind = "function"
 name = "goalCheckDue"
-ref = "5.5"
+ref = "8.5"
 uses = ["session-state"]
-text = "The goal check runs after a turn, except while a question waits for a person."
+text = "The goal check runs after a turn while a loop is on and the session has a goal. It does not run while a question waits for a person, during a turn, or while a turn can start."
 
 # ── Phase 1: the reports (8.6) ──────────────────────────────────────────────────────────────────────────────────────
 
@@ -834,7 +835,7 @@ group = "schedules"
 kind = "function"
 name = "schedules"
 ref = "12"
-uses = ["command", "decide", "evolve", "next", "repair", "guard-check", "logged", "needs-flush", "source-of"]
+uses = ["command", "decide", "evolve", "next", "repair", "guard-check", "logged", "needs-flush", "source-of", "goal-check"]
 proof_uses = ["state"]
 text = "The generator of random schedules for the properties: crashes, stops, late messages, grants, jobs and power losses."
 
@@ -963,7 +964,7 @@ name = "Rest:"
 ref = "4.7"
 spec = true
 uses = ["schedules"]
-text = "With no open turn, no input waits."
+text = "With no open turn, no input waits, apart from a message that the limit of the unattended turns holds (8.7, 8.5)."
 
 [[group]]
 id = "next-laws"
@@ -2188,7 +2189,7 @@ group = "worker"
 kind = "data"
 name = "TurnEffects"
 ref = "4.6"
-uses = ["policy-reply", "cell-result"]
+uses = ["policy-reply", "cell-result", "goal-check"]
 text = "The effects of a turn: callPolicy and runCell. A test gives a script, and a harness gives its policy leaf and a REPL."
 
 [[node]]
@@ -2249,7 +2250,7 @@ name = "Secrets"
 ops = ["maskText", "mask", "known"]
 ref = "5.6"
 spec = true
-uses = ["entry", "release-step"]
+uses = ["entry", "release-step", "loop-end"]
 text = "The known secret values, by name: the values of the secret-like variables of the harness process and the values behind secretHeaders. mask replaces each one in each string of an entry with «secret:NAME», a longer value first. A proposal: a value shorter than 8 characters, or a part of a mask, is not a known value. The options of the model of a ModelChanged get the mask too."
 
 # ── Phase 4: the handlers of a call (5.3) ─────────────────────────────────────────────────────────────────────────
@@ -2500,9 +2501,9 @@ ops = ["callPolicy", "runCell"]
 ref = "4.6"
 uses = ["turn-effects", "predict", "policy-input", "policy-step", "context-strategy", "journal-trait", "scala-repl",
         "recorder", "snapshot-store", "harness-limits", "runtime-context", "session-state", "budget", "host-threads",
-        "policy-runner", "zoom-source", "memory-progress", "drafts"]
+        "policy-runner", "zoom-source", "memory-progress", "drafts", "goal-answer", "goal-check", "goal-question"]
 proof_uses = ["cell-result", "policy-reply", "window", "recorder", "snapshot-store", "lost-names", "budget",
-              "host-threads", "zoom-source", "memory-progress", "policy-stream"]
+              "host-threads", "zoom-source", "memory-progress", "policy-stream", "turn-text"]
 text = "callPolicy projects the log with the strategy, spends one call of the budget, and calls the policy leaf through the PolicyRunner, so the trace reaches the RuntimeContext. A spent budget fails the call, and the turn ends Failed. runCell starts the calls of the cell, takes the snapshot of the store, runs the code in the REPL, and joins the trace of the host threads. After the error of the compiler defect, it starts a new REPL and adds the note of the lost names. With drafts, the call to the policy streams its draft through a PolicyStream, and the step does not change. Each call to the policy has the options of the model of the session in the state of the journal, so a ModelChanged of the activation applies to the next call, and the progress gets the tokens of its last model call (CLI_SCREEN.md, 14.4)."
 
 [[group]]
@@ -3121,8 +3122,8 @@ kind = "function"
 name = "catalogRow"
 ref = "10.2"
 spec = true
-uses = ["session-id", "fold", "logged", "catalog-row", "ledger-state"]
-proof_uses = ["sandboxed-shell", "cut-end", "ledger-fold"]
+uses = ["session-id", "fold", "logged", "catalog-row", "ledger-state", "session-state"]
+proof_uses = ["sandboxed-shell", "cut-end", "ledger-fold", "evolve", "loop-words"]
 text = "The row of a session as a fold of its journal, so a lost row comes back from the journal."
 
 [[node]]
@@ -3234,7 +3235,7 @@ ref = "10.2"
 spec = true
 uses = ["session-host", "session-runtime", "secrets", "host-limits", "catalog", "timers", "session-handle", "catalog-row", "host-error", "session-config", "session-id", "peers", "git-scopes", "scopes", "host-hooks", "release-item", "release-step", "scope-state", "release-plans", "session-outcome", "scope", "command", "source", "session-state", "logged", "layout"]
 proof_uses = ["writer", "writer-journal", "session-file", "feeds", "drive", "next", "job-table", "catalog-row-fold", "rebuilt", "catalog", "report-pass", "release-plan", "irreversible", "ledger-fold", "memory-tree", "file-lines", "controller", "state", "job-status-words", "job-name"]
-text = "One writer and one file for each session, with an exclusive lock for a second host. open repairs an open turn, keeps the configuration of the journal with None, and refuses a mode above the ceiling. Each activation gets a new ticket and its WriterJournal. After StopRequested, Activation.stop, and a timer calls Writer.expire with the turn of the stop. The catalog gets the row after a turn ends. An open of a session whose release moved its Scratch folder to the archive moves the folder back before the Activate (7.9, 2026-11-16)."
+text = "One writer and one file for each session, with an exclusive lock for a second host. open repairs an open turn, keeps the configuration of the journal with None, and refuses a mode above the ceiling. Each activation gets a new ticket and its WriterJournal. After StopRequested, Activation.stop, and a timer calls Writer.expire with the turn of the stop. The catalog gets the row after a turn ends. An open of a session whose release moved its Scratch folder to the archive moves the folder back before the Activate (7.9, 2026-11-16). The close of a session fences the ticket of its activation, and of an activation that starts, before the activation closes. So the worker commits nothing after the close starts, and the reopen ends the open turn Crashed (2026-11-17)."
 
 [[node]]
 id = "job-status-words"
@@ -3317,7 +3318,7 @@ name = "WorkRuntime"
 ops = ["activate", "defaultGuard", "config", "forWork", "taskOf", "shellWords", "ownedConfig", "forHost"]
 ref = "8.1"
 spec = true
-uses = ["work-env", "harness-limits", "predict", "policy-input", "policy-step", "sub-query", "sub-answer", "runtime-context", "session-runtime", "session-id", "session-config", "journal-trait", "job-table", "activation", "mode", "guard", "access", "harness", "line-store", "file-lines", "memory-tree", "session-file", "peers", "host-sessions", "harness-probe", "scope", "strategy-name", "activity", "memory-progress", "memory-use", "drafts", "draft", "context-use", "project-files"]
+uses = ["work-env", "harness-limits", "predict", "policy-input", "policy-step", "sub-query", "sub-answer", "runtime-context", "session-runtime", "session-id", "session-config", "journal-trait", "job-table", "activation", "mode", "guard", "access", "harness", "line-store", "file-lines", "memory-tree", "session-file", "peers", "host-sessions", "harness-probe", "scope", "strategy-name", "activity", "memory-progress", "memory-use", "drafts", "draft", "context-use", "project-files", "goal-answer", "goal-question"]
 proof_uses = ["harness-effects", "recorded", "recorder", "guarded", "window", "scala-repl", "job-shell", "sandboxed-shell", "leaf-llm", "budget", "local-files", "snapshot-store", "journal-turn", "preamble", "memory-tree", "controller", "project-files", "layout"]
 text = "A chat turn of the user with the effects of a harness: the policy leaf, the window with the earlier turns, a REPL for the activation, the handlers of workMode through recorded and guarded, and JobShell. workMode is local mode with no Sessions^ and no Children^, so a work session has no rlm. Each turn gets a new budget of model calls. The first rules of 5.5: git push gets Ask in a mode with Network^. The task of a session with a shell gives the words of the profile of its activation (shellWords), and tells the model to tell the person when a task needs a write that the shell refuses. config takes the option bag of the model, and contextUse gives the tokens of the last call to the policy (CLI_SCREEN.md, 14.4). The task of a work session also holds the files of the project (ProjectFiles), read once at each activation. The task holds no instructions: they come one time, in the system message. The layout of an activation holds the hooks folder of the scope (Layout.hooksFolder, choice 19)."
 
@@ -3438,7 +3439,7 @@ group = "lines"
 kind = "function"
 name = "parseLine"
 ref = "10.3"
-uses = ["line", "reasoning-view", "effect-id", "session-id", "session-outcome"]
+uses = ["line", "reasoning-view", "effect-id", "session-id", "session-outcome", "session-state"]
 text = "The line of a text. A text that does not start with / is a message."
 
 [[node]]
@@ -4487,8 +4488,8 @@ ops = ["list", "tell", "start", "observe", "zoom", "cardOf", "requestOf", "deliv
 ref = "8.7"
 spec = true
 uses = ["sessions", "peers", "session-id", "session-config", "journal-trait", "probe", "budget", "runtime-context", "session-card", "session-ref", "scope", "strategy-name", "llm", "catalog-row", "effect-id", "request-id", "command", "logged", "session-state", "source", "delivery"]
-proof_uses = ["controller", "owner", "session-status", "host-error"]
-text = "list gives the cards of the other rows, with the owner and the status in words (cardOf). tell sends through runAs with the request id of its effect, and refuses a session that has ended. It gives the Delivery of the state after the commit of the receiver (deliveryOf): WaitsForPerson with the count and the limit while the limit of the turns with no person holds the message (8.7), else InTurn. start makes the scope and opens the session with ownedConfig and its task in one commit. An error of the host in tell and start gives its words (HostError.words). observe asks the probe with the budget of the turn. zoom reads the memory of that session."
+proof_uses = ["controller", "owner", "session-status", "host-error", "loop-left"]
+text = "list gives the cards of the other rows, with the owner and the status in words (cardOf). tell sends through runAs with the request id of its effect, and refuses a session that has ended. It gives the Delivery of the state after the commit of the receiver (deliveryOf): WaitsForPerson with the count and the limit while the limit of the turns with no person holds the message (8.7), or the N of a goal loop (8.5), else InTurn. start makes the scope and opens the session with ownedConfig and its task in one commit. An error of the host in tell and start gives its words (HostError.words). observe asks the probe with the budget of the turn. zoom reads the memory of that session."
 
 [[group]]
 id = "scopes"
@@ -4981,3 +4982,239 @@ name = "Draft:"
 ref = "10.6"
 uses = ["draft", "drafts", "harness-effects"]
 text = "The text of a whole reply is the text of the step that the policy parses from it, in each form of PolicyAdapter.values and of the chat format. No part of a reply shows a part of a marker, of a fence or of the code, and the text of a part is a part of the text of the whole reply. The reasoning is the native reasoning, else the section of reasoning. Drafts give no draft outside a model call, a new model call drops the draft before it, and a call that ended or that a later call replaced changes nothing. callPolicy with drafts shows the reasoning and the text while the model writes, and none after. It gives the same step as with no drafts, also with the call of the fallback adapter and with a model that does not stream."
+
+# ── Phase 9: the goal loop (8.5, the choices of 2026-11-17) ─────────────────────────────────────────────────────────
+
+[[group]]
+id = "goal"
+phase = "p1"
+module = "harness-kernel"
+file = "Goal.scala"
+title = "The goal loop: the goal message, the turns left, the words of the card and the pool"
+
+[[node]]
+id = "goal-check"
+group = "journal"
+kind = "data"
+name = "GoalCheck"
+ref = "8.5"
+spec = true
+uses = []
+text = "The answer of the goal leaf in the journal: met, the reason, the blocker (empty when none), and same, which is true when the blocker is the blocker of the last check."
+
+[[node]]
+id = "loop-end"
+group = "journal"
+kind = "data"
+name = "LoopEnd"
+ops = ["words", "report"]
+ref = "8.5"
+spec = true
+uses = []
+text = "Why a loop ended: Met, Blocked, Limit, Off, Stopped or Restarted. words gives one word for the card, and report gives the first line of the report to the owner."
+
+[[node]]
+id = "goal-loop"
+group = "state"
+kind = "data"
+name = "GoalLoop"
+ref = "8.5"
+uses = ["goal-check"]
+text = "The live loop in the state: the limit N, the turns that the session gave, the count of the same blocker, the last blocker, and the last check."
+
+[[node]]
+id = "goal-text"
+group = "goal"
+kind = "function"
+name = "goalText"
+ref = "8.5"
+uses = ["goal-check"]
+text = "The text of the goal message: the goal, the reason of the check, the blocker if any, and Go on with the work. The kernel writes it, so a client cannot put words in it."
+
+[[node]]
+id = "loop-left"
+group = "goal"
+kind = "function"
+name = "loopLeft"
+ref = "8.5"
+uses = ["session-state"]
+text = "The turns that the loop of a session has left: N, minus the count of its unattended turns, minus the turns that it gave. A session with no loop has 0."
+
+[[node]]
+id = "loop-words"
+group = "goal"
+kind = "function"
+name = "loopWords"
+ref = "8.5"
+uses = ["session-state"]
+text = "The loop of the card: on 12/50 while it is on, else the words of the last end, or off for a session with no loop."
+
+[[node]]
+id = "loop-children"
+group = "goal"
+kind = "function"
+name = "loopChildren"
+ref = "8.5"
+uses = ["logged", "session-id"]
+text = "The sessions that got turns from the current loop of a journal: each start with a loop above 0 and an outcome with a value, after the last GoalLoopStarted."
+
+[[group]]
+id = "goal-laws"
+phase = "p1"
+module = "harness-kernel"
+file = "GoalLaws.scala"
+where = "tests"
+title = "The kernel laws of the goal loop"
+
+[[node]]
+id = "law-loop"
+group = "goal-laws"
+kind = "law"
+name = "Loop:"
+ref = "4.7"
+spec = true
+uses = ["decide", "evolve", "goal-loop"]
+text = "Only StartLoop from the person and Begin with a loop start a loop, and N is 1 or more. While a loop is on, its N is the limit of the unattended turns, and the turns that the session gave count. Activate ends a loop with Restarted. The end of a loop starts no turn: a message that waits then waits for the person. StartLoop starts the turn of a message that it frees. A stop of the person ends a loop with Stopped, a stop of the harness keeps it, and no loop stays after Ended. A journal fork starts with no loop. GoalChanged puts the goal in the configuration."
+
+[[node]]
+id = "law-goal-check"
+group = "goal-laws"
+kind = "law"
+name = "Goal check:"
+ref = "4.7"
+spec = true
+uses = ["next", "decide", "goal-check-due", "goal-text"]
+text = "next gives CheckGoal only with a loop, a goal, no open turn, no pending call and no turn that can start, and once after each TurnEnded. A check with not met gives one goal message from the harness, which starts a turn, or one end. A check after the end of its loop commits nothing."
+
+[[node]]
+id = "law-blocked"
+group = "goal-laws"
+kind = "law"
+name = "Blocked:"
+ref = "4.7"
+spec = true
+uses = ["decide", "evolve", "goal-loop"]
+text = "The count of the blocker is the number of checks in a row with a blocker, from the first new one. At 3 the loop ends with Blocked."
+
+[[node]]
+id = "law-loop-report"
+group = "goal-laws"
+kind = "law"
+name = "Loop report:"
+ref = "4.7"
+spec = true
+uses = ["reports", "loop-end"]
+text = "While a loop is on, a TurnEnded gives no report, and each GoalLoopEnded of a session with an owner session gives exactly one, with the end and the outcome of the last turn."
+
+[[node]]
+id = "law-pool"
+group = "goal-laws"
+kind = "law"
+name = "Pool:"
+ref = "4.7"
+spec = true
+uses = ["loop-left", "loop-children", "evolve"]
+text = "The turns that a session gave count after the outcome of each start with a loop, and a message of the person sets them to 0. loopLeft never goes below 0, and loopChildren gives each session that got turns from the current loop."
+
+[[group]]
+id = "goal-leaf"
+phase = "p4"
+module = "harness"
+file = "GoalLeaf.scala"
+title = "The goal leaf and the text of the last turn"
+
+[[node]]
+id = "goal-question"
+group = "goal-leaf"
+kind = "data"
+name = "GoalQuestion"
+ref = "8.5"
+uses = []
+text = "The input of the goal leaf: the goal, the text of the last turn, and lastBlocker, the blocker of the last check."
+
+[[node]]
+id = "goal-answer"
+group = "goal-leaf"
+kind = "data"
+name = "GoalAnswer"
+ref = "8.5"
+uses = ["goal-check"]
+text = "The output of the goal leaf: met, the reason, the blocker, and same."
+
+[[node]]
+id = "turn-text"
+group = "goal-leaf"
+kind = "function"
+name = "turnText"
+ref = "8.5"
+uses = ["logged"]
+proof_uses = ["text-suffix"]
+text = "The text of the last turn of a journal: its first message, the text and the code of each step, the output of each cell, and the outcome. A long text keeps its end, up to a budget."
+
+[[group]]
+id = "goal-leaf-laws"
+phase = "p4"
+module = "harness"
+file = "GoalLeafLaws.scala"
+where = "tests"
+title = "The laws of the goal leaf and of the check in the worker"
+
+[[node]]
+id = "law-goal-leaf"
+group = "goal-leaf-laws"
+kind = "law"
+name = "Goal leaf:"
+ref = "8.5"
+uses = ["turn-text", "drive", "turn-effects"]
+text = "turnText gives the last turn and keeps its end. drive runs the check of next and commits its answer. A failed check gives not met with the error as the blocker, so three failed checks end the loop as blocked. A loop of more than 8 turns with no message of the person reaches its goal."
+
+[[group]]
+id = "goal-host-laws"
+phase = "p9"
+module = "harness-host"
+file = "GoalHostLaws.scala"
+where = "tests"
+title = "The host laws of the goal loop"
+
+[[node]]
+id = "law-goal-host"
+group = "goal-host-laws"
+kind = "law"
+name = "Goal host:"
+ref = "8.5"
+uses = ["local-host", "host-sessions", "catalog-row"]
+text = "A session with a loop and a goal goes on for more than 8 turns with no message of the person, and its loop ends as met. A restart of the host ends the loop. start refuses a loop above the turns left, and /goal off in the controller ends the loop of each session that got turns from it. The card gives the loop. A close of the host during a loop turn commits no goal check and no goal message."
+
+[[group]]
+id = "close-laws"
+phase = "p9"
+module = "harness-host"
+file = "CloseLaws.scala"
+where = "tests"
+title = "The laws of the close of a session by the host"
+
+[[node]]
+id = "law-host-close"
+group = "close-laws"
+kind = "law"
+name = "Host close:"
+ref = "10.2"
+uses = ["local-host"]
+text = "A close of the host while the activation of a turn starts runs no step on that activation, and a start that fails after the close starts does not end the turn Failed. The reopen ends the turn Crashed."
+
+[[group]]
+id = "goal-cli-laws"
+phase = "p9"
+module = "harness-cli"
+file = "GoalCliLaws.scala"
+where = "tests"
+title = "The client laws of the goal loop"
+
+[[node]]
+id = "law-goal-cli"
+group = "goal-cli-laws"
+kind = "law"
+name = "Goal client:"
+ref = "8.5"
+uses = ["parse-line", "commands-for", "status-text"]
+text = "/goal, /goal on [N], /goal off and /goal set TEXT parse, and N must be 1 or more. Each one gives its command. /status, a bare /goal and /config give the state of the loop."

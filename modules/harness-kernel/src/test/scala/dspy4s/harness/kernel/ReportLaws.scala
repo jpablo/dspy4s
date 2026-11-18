@@ -85,9 +85,10 @@ class ReportLaws extends ScalaCheckSuite:
     assertEquals(owes(owner, stopped), false)
   }
 
-  property("Report: a TurnEnded gives a report exactly when the journal before it owes one, or a step saw no Input") {
+  property("Report: a TurnEnded gives a report exactly when the journal before it owes one and no goal loop is on") {
     // `owes` counts an Input of the owner that no step or stop saw yet, because the next step sees it. A TurnEnded
-    // that comes before such a step gives no report for that Input, so the law skips that case.
+    // that comes before such a step gives no report for that Input, so the law skips that case. While a goal loop is
+    // on, a TurnEnded gives no report (8.5).
     def seen(entry: Entry): Boolean =
       entry match
         case Entry.StepStarted(_) | Entry.StopRequested(_) => true
@@ -102,9 +103,10 @@ class ReportLaws extends ScalaCheckSuite:
       run.journal.indices.forall { i =>
         run.journal(i).entry match
           case Entry.TurnEnded(_) =>
-            val before = run.journal.take(i)
-            val sent   = reports(session, owner, run.journal.take(i + 1)).size > reports(session, owner, before).size
-            unseen(before) || sent == owes(owner, before)
+            val before  = run.journal.take(i)
+            val sent    = reports(session, owner, run.journal.take(i + 1)).size > reports(session, owner, before).size
+            val looping = state(before).loop.isDefined
+            unseen(before) || sent == (owes(owner, before) && !looping)
           case _ => true
       }
     }

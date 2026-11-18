@@ -1,10 +1,11 @@
 package dspy4s.harness
 
-import dspy4s.harness.kernel.{CellOutcome, Command, Entry, Logged, Next, Rejection, SessionState, Source, TurnOutcome}
-import dspy4s.harness.kernel.{closing, next}
+import dspy4s.harness.kernel.{CellOutcome, Command, Entry, GoalCheck, Logged, Next, Rejection, SessionState, Source}
+import dspy4s.harness.kernel.{TurnOutcome, closing, next}
 import zio.blocks.schema.json.Json
 
 import scala.annotation.tailrec
+import scala.util.Try
 
 /** The reply of the policy for one step (CODE_HARNESS_DESIGN.md, 4.6): the thought, the text, and the code of a cell,
   * if any.
@@ -24,6 +25,13 @@ final case class CellResult(output: String, outcome: CellOutcome, writes: Map[St
 trait TurnEffects:
   def callPolicy(mustAnswer: Boolean): Either[String, PolicyReply]
   def runCell(cell         : Long, code: String): CellResult
+
+  /** The answer of the `goal` leaf about `goal` after the last turn, with `blocker`, the blocker of the last check
+    * (8.5). Effects with no leaf give an error, so the check counts as failed.
+    */
+  def checkGoal(goal: String, blocker: String): Either[String, GoalCheck] =
+    val _ = (goal, blocker)
+    Left("this session has no goal leaf")
 
 /** A journal (4.6): the committed entries and their fold. `run` commits the entries that `decide` gives for a command.
   *
@@ -47,6 +55,9 @@ trait Journal:
   *     fails during a stop: then `next` ends the turn `Aborted`.
   *   - `RunCell`: the cell, then `EffectDone(Unknown)` for each effect that a stop left open, and `Observed`.
   *   - `End`: the entries of `closing`, and `TurnEnded`.
+  *   - `CheckGoal`: the answer of `checkGoal` as `RecordGoalCheck` (8.5). A failed check, also one that throws, gives
+  *     the answer of `GoalLeaf.failed`, so three failed checks end the loop as blocked. The journal must accept the
+  *     check, else `drive` throws, because a new round would ask the leaf again.
   *
   * An exception of `effects` goes on to the caller, and the turn stays open, as after a crash. The next `Activate`
   * repairs it (4.4).
@@ -80,6 +91,13 @@ def drive(journal: Journal, effects: TurnEffects): SessionState =
       drive(journal, effects)
     case Next.End(outcome) =>
       accepted(journal.commit((closing(journal.state) :+ Entry.TurnEnded(outcome))*), "the end of the turn")
+      drive(journal, effects)
+    case Next.CheckGoal(goal, blocker) =>
+      // An exception of the leaf is a failed check, so a leaf that always throws ends the loop as blocked.
+      val asked =
+        Try(effects.checkGoal(goal, blocker)).toEither.left.map(e => Option(e.getMessage).getOrElse(e.toString))
+      val check = asked.flatten.fold(GoalLeaf.failed(_, blocker), identity)
+      accepted(journal.run(Command.RecordGoalCheck(check), Source.Harness), "the goal check")
       drive(journal, effects)
 
 /** Throws when the journal refused entries that the worker must commit. The message gives the refusal in words

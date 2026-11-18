@@ -193,6 +193,11 @@ object Screen:
         )
       case Entry.ModelChanged(model) =>
         (screen, Vector(Row.of(s"  ${g.arrow} ${printable(changedText(model))}", Tone.Dim)))
+      case Entry.GoalChanged(goal) =>
+        (screen, Vector(Row.of(s"  ${g.arrow} ${printable(s"The goal of the session: $goal")}", Tone.Dim)))
+      case Entry.GoalLoopStarted(limit) =>
+        (screen, Vector(Row.of(s"  ${g.arrow} ${printable(loopStartText(limit))}", Tone.Dim)))
+      case Entry.GoalLoopEnded(why)     => (screen, marked(g.reply, Tone.Accent, why.report))
       case Entry.Ended(outcome, reason) => (screen, marked(g.reply, Tone.Accent, outcome.report(reason)))
       case _                            => (screen, Vector.empty)
 

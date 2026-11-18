@@ -75,6 +75,20 @@ class SecretLaws extends ScalaCheckSuite:
     assertEquals(known.mask(Entry.TurnEnded(TurnOutcome.Replied(v))), Entry.TurnEnded(TurnOutcome.Replied(m)))
   }
 
+  test("Secret: the mask reaches the goal, the check and the end of a goal loop (8.5)") {
+    val v     = "fake-secret-value-4"
+    val known = Secrets(Map("FAKE_KEY" -> v))
+    val m     = "«secret:FAKE_KEY»"
+    assertEquals(known.mask(Entry.GoalChanged(s"use $v")), Entry.GoalChanged(s"use $m"))
+    assertEquals(
+      known.mask(Entry.GoalChecked(GoalCheck(met = false, s"saw $v", s"no $v", same = true))),
+      Entry.GoalChecked(GoalCheck(met = false, s"saw $m", s"no $m", same = true))
+    )
+    assertEquals(known.mask(Entry.GoalLoopEnded(LoopEnd.Met(v))), Entry.GoalLoopEnded(LoopEnd.Met(m)))
+    assertEquals(known.mask(Entry.GoalLoopEnded(LoopEnd.Blocked(v))), Entry.GoalLoopEnded(LoopEnd.Blocked(m)))
+    assertEquals(known.mask(Entry.GoalLoopStarted(5)), Entry.GoalLoopStarted(5))
+  }
+
   test("Secret: the mask reaches the options of the model of a ModelChanged, as of an Activated") {
     // A person changes the options of the model during a session (CLI_SCREEN.md, 14.4).
     val v     = "fake-secret-value-3"

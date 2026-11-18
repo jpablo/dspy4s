@@ -4,7 +4,7 @@ import dspy4s.core.contracts.RuntimeContext
 import dspy4s.harness.{Budget, Journal}
 import dspy4s.harness.guest.{Delivery, Llm, Scope, SessionCard, SessionRef, Sessions, StrategyName}
 import dspy4s.harness.kernel.{Command, EffectId, RequestId, SessionConfig, SessionId, SessionState, TurnLimit}
-import dspy4s.harness.kernel.waitsForPerson
+import dspy4s.harness.kernel.{loopLeft, unattendedLimit, unattendedUsed, waitsForPerson}
 
 import java.util.UUID
 
@@ -23,7 +23,9 @@ import java.util.UUID
   *     configuration of `configure` for that scope and the goal as its task, in one commit (`Peers.openWith`). The
   *     runtime gives `WorkRuntime.ownedConfig` as `configure`. A crash before the commit leaves the effect `Unknown`,
   *     and a second call makes another session. The request id of the task holds `caller` and the open `start` effect.
-  *     It gives the ref of the new session.
+  *     It gives the ref of the new session. A `loop` above 0 gives the new session a goal loop of `loop` turns from the
+  *     loop of `caller` (8.5): a negative loop, and a loop above the turns that the loop of `caller` has left
+  *     (`loopLeft`), make the call fail before the host makes a folder.
   *   - `observe` gives the answer of `probe` about the journal of that session, with the budget of the current turn of
   *     `caller`, the link of the open `observe` effect, and the context of the runtime. It changes nothing in that
   *     session.
@@ -52,11 +54,14 @@ final class HostSessions(
       HostSessions.deliveryOf
     )
 
-  def start(goal: String, scope: Scope, strategy: StrategyName): SessionRef =
+  def start(goal: String, scope: Scope, strategy: StrategyName, loop: Int): SessionRef =
+    HostSessions.loopFault(loop, loopLeft(journal.state)).foreach(fault =>
+      throw IllegalArgumentException(s"start: $fault")
+    )
     val id   = SessionId(UUID.randomUUID().toString)
     val made = peers.make(scope, id).fold(error => throw IllegalArgumentException(s"start: $error"), identity)
     val task = new Command.Send(HostSessions.requestOf("start", caller, effect("start")), goal, Map.empty)
-    peers.openWith(id, configure(goal, made, strategy), task, Controller.messageSource(caller)).left
+    peers.openWith(id, configure(goal, made, strategy), task, Controller.messageSource(caller), loop).left
       .foreach(error => throw IllegalStateException(s"start: the session did not open: ${error.words}"))
     SessionRef(id.value)
 
@@ -86,8 +91,8 @@ object HostSessions:
 
   /** The card of a row of the catalog (8.7): the id, the goal or an empty text, the scope, the owner in words
     * (`Owner.words`), the parent, the status in words (`SessionStatus.words`), the last `seq`, the paths that the
-    * session made, the number of its commands, and its head. The controller reads the card with a model, so it holds no
-    * Scala value.
+    * session made, the number of its commands, its head, and its goal loop in words (8.5). The controller reads the
+    * card with a model, so it holds no Scala value.
     */
   def cardOf(row: CatalogRow): SessionCard =
     SessionCard(
@@ -102,18 +107,33 @@ object HostSessions:
       row.ledger.made,
       row.ledger.commands,
       row.ledger.head,
-      row.ledger.clean
+      row.ledger.clean,
+      row.loop
     )
 
   /** What `tell` gives for `receiver`, the state of the receiver after the commit of the message (8.7).
-    * `WaitsForPerson` holds the count of the unattended turns and the limit of the activation, when the message waits
-    * for the person (`waitsForPerson`). Each other state gives `InTurn`: a turn started for the message, a turn runs,
-    * or no message waits. `NoLimit` never holds a message, so it always gives `InTurn`.
+    * `WaitsForPerson` holds the turns that count against the limit and the limit, when the message waits for the person
+    * (`waitsForPerson`). While a goal loop is on, these are the turns of the loop and its N (8.5). After the end of a
+    * loop, a message can wait below the limit (`afterLoop`): then `turns` is below `limit`, and with no limit, `limit`
+    * is `turns`. Each other state gives `InTurn`: a turn started for the message, a turn runs, or no message waits.
     */
   def deliveryOf(receiver: SessionState): Delivery =
-    receiver.config.unattendedLimit match
-      case TurnLimit.AtMost(limit) if waitsForPerson(receiver) => Delivery.WaitsForPerson(receiver.unattended, limit)
-      case _                                                   => Delivery.InTurn
+    if !waitsForPerson(receiver) then Delivery.InTurn
+    else
+      val turns = unattendedUsed(receiver)
+      unattendedLimit(receiver) match
+        case TurnLimit.AtMost(limit) => Delivery.WaitsForPerson(turns, limit)
+        case TurnLimit.NoLimit       => Delivery.WaitsForPerson(turns, turns)
+
+  /** Why `start` refuses a loop of `loop` turns when the loop of the caller has `left` turns (8.5), or none. */
+  def loopFault(loop: Int, left: Int): Option[String] =
+    if loop < 0 then Some(s"the loop must be 0 or more, not $loop")
+    else if loop > left then
+      Some(
+        s"the loop of $loop turns is more than the $left turns that the goal loop of this session has left. " +
+          "The person turns on that loop with /goal on N."
+      )
+    else None
 
   /** The request id of the operation `op` of `caller` in its effect `effect`: `op:<caller>:<cell>.<n>` (8.6). */
   def requestOf(op: String, caller: SessionId, effect: EffectId): RequestId =

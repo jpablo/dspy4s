@@ -41,7 +41,8 @@ object EntryViews:
       case Entry.Activated(_, _) | Entry.Input(_, _, _) | Entry.TurnStarted | Entry.TurnEnded(_) | Entry.Ended(_, _) |
           Entry.Releasing(_) | Entry.Released(_) => 0
       case Entry.StepStarted(_) | Entry.StopRequested(_) | Entry.JobsStopRequested(_, _) | Entry.Granted(_, _, _) |
-          Entry.ScopeRecorded(_, _) | Entry.ModelChanged(_) | Entry.JobEnded(_, _) => 1
+          Entry.ScopeRecorded(_, _) | Entry.ModelChanged(_) | Entry.JobEnded(_, _) | Entry.GoalChanged(_) |
+          Entry.GoalLoopStarted(_) | Entry.GoalChecked(_) | Entry.GoalLoopEnded(_) => 1
       case Entry.Acted(_, _, _) | Entry.EffectStarted(_, _, _) | Entry.EffectDone(_, _) | Entry.Observed(_, _, _) => 2
 
   /** The card of an entry. The `match` covers each case of `Entry`, so a new case does not compile until it has a card.
@@ -104,6 +105,13 @@ object EntryViews:
       case Entry.TurnEnded(outcome)     => paragraph(outcome.report)
       case Entry.Ended(outcome, reason) => paragraph(outcome.report(reason))
       case Entry.JobEnded(job, end)     => paragraph(s"The job ${jobName(job)} ${jobStatusWords(jobStatusOf(end))}.")
+      case Entry.GoalChanged(goal)      => paragraph(s"The goal of the session: $goal")
+      case Entry.GoalLoopStarted(limit) => paragraph(s"A goal loop starts, with at most $limit turns with no person.")
+      case Entry.GoalChecked(check)     =>
+        val blocker = if check.blocker.isEmpty then "" else s" The blocker: ${check.blocker}"
+        paragraph(s"The goal check: ${if check.met then "met" else "not met"}. ${check.reason}$blocker") +
+          note(if check.same then "the same blocker as the last check" else "")
+      case Entry.GoalLoopEnded(why) => paragraph(why.report)
 
   /** The HTML of a row: its meta line, the buttons of its views, and its three views. A row that does not decode has
     * the kind `Undecoded`, and its card holds the error.

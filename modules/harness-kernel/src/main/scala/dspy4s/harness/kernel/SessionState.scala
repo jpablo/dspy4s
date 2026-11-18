@@ -25,6 +25,36 @@ enum Position derives CanEqual:
   case Answered(text: String)
   case Finished(value: Json)
 
+/** The live goal loop of a session (8.5). Only the fold makes it, and an `Activate` ends it.
+  *
+  * @param limit
+  *   N: the most turns in a row that no message of the person starts while the loop is on
+  * @param gave
+  *   the turns that this session gave to the sessions that it started, since the start of the loop or the last message
+  *   of the person
+  * @param blocked
+  *   the count of the checks in a row with the same blocker
+  * @param blocker
+  *   the blocker of the last check, or an empty text
+  * @param last
+  *   the last check of this loop
+  */
+final case class GoalLoop(
+    limit  : Int,
+    gave   : Int,
+    blocked: Int,
+    blocker: String,
+    last   : Option[GoalCheck]
+) derives CanEqual
+
+object GoalLoop:
+
+  /** A loop with the limit `limit` at its start. */
+  def start(limit: Int): GoalLoop = GoalLoop(limit, 0, 0, "", None)
+
+  /** The most checks in a row with the same blocker. At this count the loop ends with `Blocked` (8.5). */
+  val BlockedChecks: Int = 3
+
 /** The state of a session: a fold of its journal (4.2). */
 final case class SessionState(
     config     : SessionConfig,
@@ -42,9 +72,12 @@ final case class SessionState(
     pending    : Set[GuardRule], // the pending calls, which wait for a person (5.5)
     lastTurn   : Long, // the `seq` of the last `TurnStarted`
     jobs       : Map[EffectId, JobRecord], // each `spawn` that has an intent
-    releasing  : Boolean = false, // a `Releasing` came, so the session runs its release plan (8.7)
-    unattended : Int     = 0,     // the turns in a row that no message of the person started (8.7)
-    personWaits: Boolean = false  // a message or a grant of the person came since the last `TurnStarted`
+    releasing  : Boolean          = false, // a `Releasing` came, so the session runs its release plan (8.7)
+    unattended : Int              = 0,     // the turns in a row that no message of the person started (8.7)
+    personWaits: Boolean          = false, // a message or a grant of the person came since the last `TurnStarted`
+    loop       : Option[GoalLoop] = None,  // the live goal loop (8.5)
+    loopEnd    : Option[LoopEnd]  = None,  // the end of the last goal loop (8.5)
+    afterLoop  : Boolean          = false  // a goal loop ended while a message waited, and no turn started since (8.5)
 ) derives CanEqual
 
 object SessionState:
@@ -55,6 +88,9 @@ object SessionState:
     * messages to each other with no end, and the start of a host does not go on with them.
     */
   val UnattendedTurns: Int = TurnLimit.DefaultTurns
+
+  /** The limit of a goal loop that `/goal on` gives with no number (8.5). */
+  val LoopTurns: Int = 50
 
   /** The state before the first entry: a closed session with no turn. The first entry of a journal is an `Activated`
     * with the real configuration, so nothing reads this one. It has the least authority.
@@ -99,7 +135,13 @@ def evolve(s: SessionState, logged: Logged): SessionState =
   logged.entry match
     case Entry.Activated(_, config) =>
       // A new activation ends the `Session` grants (5.5): a person gives them again after a quit or a restart.
-      base.copy(config = config, closed = false, grants = s.grants.filterNot(_.lifetime == GrantLifetime.Session))
+      // It ends the goal loop too (8.5): a person gives the permission again after a restart.
+      base.copy(
+        config = config,
+        closed = false,
+        grants = s.grants.filterNot(_.lifetime == GrantLifetime.Session),
+        loop = None
+      )
     case Entry.Input(request, _, values) => base.copy(
         requests = s.requests + request,
         waiting = s.waiting + 1,
@@ -109,12 +151,15 @@ def evolve(s: SessionState, logged: Logged): SessionState =
     case Entry.TurnStarted =>
       // A new turn closes the old questions: the model asks again if it still needs the call. A turn that a message
       // or a grant of the person starts sets the count of the unattended turns to 0, and each other turn adds 1 (8.7).
+      // Such a turn also fills the pool of the loop again: the turns that the session gave go to 0 (8.5).
       base.copy(
         position = Position.BeforeStep(0),
         lastTurn = logged.seq,
         pending = Set.empty,
         unattended = if s.personWaits then 0 else s.unattended + 1,
-        personWaits = false
+        personWaits = false,
+        loop = if s.personWaits then s.loop.map(_.copy(gave = 0)) else s.loop,
+        afterLoop = false
       )
     case Entry.StepStarted(step)    => base.copy(position = Position.InPolicy(step), waiting = 0)
     case Entry.Acted(_, text, code) =>
@@ -134,7 +179,12 @@ def evolve(s: SessionState, logged: Logged): SessionState =
       val pending = result match
         case EffectResult.NeedsApproval(rule) if !s.grants.exists(_.rule.covers(rule)) => s.pending + rule
         case _                                                                         => s.pending
-      base.copy(open = s.open - id, grants = grants, pending = pending)
+      // A `start` with a value gave the turns of its `loop` from the pool of the loop (8.5).
+      val loop = (s.open.get(id), result) match
+        case (Some(call), EffectResult.Value(_, _)) if call.op == startOp =>
+          s.loop.map(l => l.copy(gave = l.gave + loopOf(call.args)))
+        case _ => s.loop
+      base.copy(open = s.open - id, grants = grants, pending = pending, loop = loop)
     case Entry.Observed(_, outcome, writes) =>
       val position = (s.position, outcome) match
         case (_, CellOutcome.Submitted(value)) => Position.Finished(value)
@@ -164,12 +214,20 @@ def evolve(s: SessionState, logged: Logged): SessionState =
         grants = Set.empty,
         pending = Set.empty,
         jobs = stopJobs(s, JobSelector.All),
-        releasing = false
+        releasing = false,
+        loop = None
       )
     case Entry.ModelChanged(model) => base.copy(config = s.config.copy(model = model))
     case Entry.JobEnded(job, end)  =>
       // The end of a job that the state does not have changes no job. A stop mark stays with the end.
       base.copy(jobs = s.jobs.updatedWith(job)(_.map(_.copy(end = Some(end)))))
+    case Entry.GoalChanged(goal)      => base.copy(config = s.config.copy(goal = Some(goal)))
+    case Entry.GoalLoopStarted(limit) =>
+      base.copy(loop = Some(GoalLoop.start(limit)), unattended = 0, afterLoop = false)
+    case Entry.GoalChecked(check) => base.copy(loop = s.loop.map(afterCheck(_, check)))
+    case Entry.GoalLoopEnded(end) =>
+      // The end of a loop starts no turn by itself: a message that waits then waits for the person (8.5).
+      base.copy(loop = None, loopEnd = Some(end), afterLoop = s.waiting > 0)
 
 /** The operation that starts a job (10.3). */
 private val spawnOp = "spawn"
@@ -191,8 +249,8 @@ private def usedUp(op: String, args: Json)(grant: ActiveGrant): Boolean =
 /** The state after a journal: `journal.foldLeft(SessionState.initial)(evolve)` (4.2). */
 def state(journal: Vector[Logged]): SessionState = journal.foldLeft(SessionState.initial)(evolve)
 
-/** The state of a journal fork at the end of a prefix of its parent (5.5). It has no grants, no pending calls and no
-  * jobs, and it keeps the inputs.
+/** The state of a journal fork at the end of a prefix of its parent (5.5). It has no grants, no pending calls, no jobs
+  * and no goal loop (8.5), and it keeps the inputs.
   */
 def forked(prefix: Vector[Logged]): SessionState =
-  state(prefix).copy(grants = Set.empty, pending = Set.empty, jobs = Map.empty)
+  state(prefix).copy(grants = Set.empty, pending = Set.empty, jobs = Map.empty, loop = None)
