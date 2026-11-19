@@ -1657,7 +1657,7 @@ kind = "law"
 name = "Echo:"
 ref = "6"
 uses = ["scala-repl"]
-text = "The echo of a long val is cut to a few hundred characters, and println keeps its whole text."
+text = "The type in the echo of a val has no capture set, no refinement of the capture checker and no flexible type. The echo of a long val is cut to a few hundred characters, and println keeps its whole text."
 
 [[node]]
 id = "law-trace"

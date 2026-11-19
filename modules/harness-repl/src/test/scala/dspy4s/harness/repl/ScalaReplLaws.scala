@@ -685,6 +685,50 @@ class ScalaReplLaws extends munit.FunSuite:
     finally r.close()
   }
 
+  // In the live runs of 2026-11-10 to 2026-11-19, the echo of a val showed the marks of the capture checker and of
+  // explicit nulls: `SessionRef^{}`, `((Array[(String)?]^{}))?^{}` and
+  // `Vector[String]{val prefix1: Array[Object^{}]^}`. The model reads each echo, and it cannot write these marks in a
+  // cell.
+  test("Echo: the type of a val shows no capture set, no refinement of the capture checker and no flexible type") {
+    val r = repl()
+    try
+      def echo(code: String): String =
+        val run = r.run(code)
+        assertEquals(run.outcome, CellOutcome.Ok, run.toString)
+        run.output.trim
+      assertEquals(echo("val n = 3"), "val n: Int = 3")
+      assertEquals(echo("val lines = \"a,b\".split(\",\")"), "val lines: Array[String] = Array(\"a\", \"b\")")
+      assertEquals(echo("val v = Vector(\"a\")"), "val v: Vector[String] = Vector(\"a\")")
+      assertEquals(echo("val o = Option(Map(\"k\" -> 1))"), "val o: Option[Map[String, Int]] = Some(Map(\"k\" -> 1))")
+      // A type that the cell writes stays, also with Null.
+      assertEquals(echo("val m: String | Null = null"), "val m: String | Null = null")
+    finally r.close()
+    val c = controllerRepl()
+    try
+      val run = c.run("val s = SessionRef(\"s-1\")")
+      assertEquals(run.output.trim, "val s: SessionRef = SessionRef(\"s-1\")", run.toString)
+    finally c.close()
+  }
+
+  // The plain type keeps the types that a cell can write. A function that captures a capability shows `=>`, and a pure
+  // function shows `->`. A refinement of a tracked field comes from the typer and not from the capture checker.
+  test("Echo: the plain type keeps the arrow of a function, a tracked refinement and the form of a lazy val") {
+    val r = repl()
+    try
+      def declaration(code: String): String =
+        val run = r.run(code)
+        assertEquals(run.outcome, CellOutcome.Ok, run.toString)
+        val text = run.output.trim
+        if text.contains(" = ") then text.substring(0, text.lastIndexOf(" = ")) else text
+      assertEquals(declaration("val g: Int => Int = x => x"), "val g: Int => Int")
+      assertEquals(declaration("val h = (x: Int) => x + 1"), "val h: (x: Int) -> Int")
+      assertEquals(declaration("val k: () ->{files} Unit = () => ()"), "val k: () => Unit")
+      assertEquals(declaration("class T(tracked val n: Int)"), "// defined class T")
+      assertEquals(declaration("val t = T(1)"), "val t: T{val n: 1}")
+      assertEquals(declaration("lazy val z = 4"), "lazy val z: Int")
+    finally r.close()
+  }
+
   // The REPL shows the value of each val that a cell defines. A long value then fills the observation a second time.
   test("Echo: a long val gets a short echo, and println shows its whole text") {
     val r = repl()
