@@ -1132,7 +1132,7 @@ the journal does not hold it. A function that `Classified.map` runs can leak a b
 | "Maximal number of successive inlines (32) exceeded" | A type that the inline derivation of `Data` cannot end on | `given Data[T] = Data.derived` |
 | "Mutable variable n is defined in a class that does not extend `Stateful`" | A top-level `var`, which capture checking refuses in a cell | A `val`, or the `var` in a block |
 | "is not included in the allowed capture set" after the second try | A capability in a place that must be pure | The name of the capability |
-| "Found: (x$1: (String, Vector[String]{val prefix1: ..." | A `Vector` in a pair, for example `groupBy(f).map { case (k, v) => ... }` | `.view.mapValues`, `groupMapReduce` or `.toList` |
+| "cannot flow into capture set {} of value", with "in the type of value prefix1" | A lambda that splits a pair with a `Vector` into two names, for example `{ case (k, v) => ... }` after `groupBy`. It is a defect of the compiler in safe mode, and a plain compile gives it too (found on 2026-11-19 in 3.10.0, 3.10.1 and two nightlies): safe mode treats an `Array` as mutable, and a `Vector` keeps its elements in the `Array` field `prefix1`. The old hint found only `Vector[String]`, and its advice `.toList` after `groupBy` does not compile | One name for the pair, for example `foreach(p => ...)`, or `.toList` before `groupBy` |
 | "Found: ((Array[(String)?]^{any.rd}))?^{x1.rd}" | `case Array(x, y)` inside `collect` | `.toList`, and then `case List(x, y)` |
 | "Line 1: empty quoted identifier" | A Markdown fence ```` ```scala ```` around the code, which the harness did not remove (9) | The code field holds only Scala code, with no ```` ``` ```` fence |
 | "Cannot refer to method error in package object sys from safe code" | `sys.error("...")`, which safe mode refuses. A model uses it to fail a cell with a message. | `throw IllegalStateException("the reason")`, which fails the cell with the message |
@@ -1518,6 +1518,31 @@ so the cut line of a session with no calls did not show the fact.
   but each session made 46 to 49.
 - One summary line said "REPL restarted, earlier names lost", but its source said that no names were lost.
 
+**UniiChat (2026-11-19).** UniiChat ([CODE_HARNESS.md](CODE_HARNESS.md), 2.3) has the same memory tree, but its turns
+do not wait as the turns of this harness do. A read of its code (`Memory.ts`, `Server.ts`, `Agent.ts` and `Config.ts`)
+gives these differences:
+
+| Topic | UniiChat | This harness before choice 20 |
+|---|---|---|
+| The start of a summary | When its message goes into the log (`Memory.push`, then `pump`). The tool results of a turn go into the log during the turn, so their summaries start during the turn. | In `update`, before each policy call |
+| The calls at the same time | At most 64 (`JOBS`), in the order of the messages | At most 4 (`width`), in rounds one after the other |
+| What a turn waits for | At the start of a turn, the level-0 lines of the messages before the new messages (`Memory.settle`). A turn never waits for a merge. | Each step waits for each node that can build, the merges too, also nodes that the view does not show |
+| The steps of a turn | One agent call. Its tool steps run inside the call, with one fixed view. | One `update` before each step |
+| The size of the view | 64 to 128 KB of lines (`HIGH`) | 24 parts, about 13,000 characters |
+| A merge | Only when the view passes 128 KB. A pair joins only when the line of its parent is ready, so the view never waits for a merge. | Each node that can merge gets its merge at once |
+| The summary model | A cheaper model, Haiku 5.5 by default (`COMPACTOR`) | The model of the session, with no reasoning |
+| A line that is too long | A new call with a note that gives its size and the cut point, at most 5 calls, and the shortest line stays. The task shows a ruler of 512 dashes. | One `shorten` call (choice 8) |
+| The input of a summary | The system prompt of a turn and a view of 16 to 32 KB of its own, so the prompt cache holds most of the input. A merge can read the messages of its span in that view. | A small call with its own instructions |
+
+- The size of the view makes the largest difference. The 15-turn sessions of the live comparison had 45 to 50
+  messages. Their lines fit in about 25 KB, so UniiChat makes no merge for them. This harness made 46 to 49 merges.
+  UniiChat starts to merge after about 250 to 400 messages.
+- A turn of UniiChat can still wait. When a long message goes into the log at the end of a turn, and the next message
+  comes at once, the next turn waits for its `compress` call.
+- Choices 2 and 5 do what UniiChat does. Choice 1 goes further: a turn of this harness waits for no line, and it shows
+  a stand-in. Choice 9 makes fewer merges than before, but UniiChat makes a merge only when the view is too large. The
+  open points give the other ideas of UniiChat as proposals.
+
 **The words.** The user calls these folds projections, as the read models of event sourcing
 ([CODE_HARNESS.md](CODE_HARNESS.md), 8.2). In this code, `Projection` is the input of one step, and `project` makes it.
 So this section uses the word derivation, as [CODE_HARNESS.md](CODE_HARNESS.md), 7.2, does. Section 3 has the three
@@ -1628,7 +1653,8 @@ with no `shorten` call, a `shorten` call that spends no budget, and a close that
 
 **The order of the work.** Each step ends with all laws green:
 
-1. The limit of a line: `shorten` and its laws. A law fails first, and then a subagent makes the fix.
+1. The limit of a line: `shorten` and its laws. A law fails first, and then a subagent makes the fix. Done on
+   2026-11-18.
 2. The build numbers of the store, `DerivedRead`, and one `update` for each turn. In this step, `update` still makes
    the leaf calls, at the first step of the turn only.
 3. The builder. The leaf calls move to `MemoryBuilder` on the thread of the builder, with the gate and the budget, and
@@ -1639,7 +1665,19 @@ with no `shorten` call, a `shorten` call that spends no budget, and a close that
 **Open points.**
 
 - In the script mode of the CLI, the next message comes right after a turn, so the builder has little time between
-  turns, and more lines are stand-ins. A person needs more time to write a message.
+  turns, and more lines are stand-ins. A person needs more time to write a message. So the script of step 5 must wait
+  between the messages. Without the wait, it measures only the stand-ins.
+- The live comparison did not show that the summaries give better answers. Its sessions had at most 15 turns. A longer
+  comparison, with 50 turns or more, can show whether the summaries help when the view has many old lines.
+- These ideas come from UniiChat. They are proposals, not choices:
+  - A view that counts bytes, with a much larger limit. With a limit near that of UniiChat, the sessions of the live
+    comparison make no merge. The budget of the input, 40,000 characters now, must grow too. This change does not
+    need the builder.
+  - A cheaper model for the summaries. Section 7.1 says that it comes later.
+  - A merge only when the view passes its limit. This rule makes fewer merges than choice 9.
+  - New calls with the cut point in place of `shorten`, and a ruler in the task.
+  - A summary input with the system prompt and a view, so the prompt cache holds most of it, and a merge reads more
+    detail.
 - The gate can hold the builder for a long time in a turn with many short steps. The live comparison of step 5 checks
   it.
 - The controller has the memory tree too, so it gets the builder too.
