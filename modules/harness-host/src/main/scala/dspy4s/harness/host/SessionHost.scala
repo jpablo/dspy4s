@@ -86,7 +86,7 @@ trait SessionHandle:
   */
 trait Peers:
 
-  /** The rows of the catalog. */
+  /** The rows of the catalog, the newest first (`CatalogRow.newestFirst`). */
   def rows: Vector[CatalogRow]
 
   /** Opens the session `id`, as `SessionHost.open` does. A session that is open gives its handle. */
@@ -324,8 +324,8 @@ final class LocalHost private (
     */
   private def afterOpen(id: SessionId): Unit = reportTo(id): Unit
 
-  /** The rows of the catalog. */
-  def list: Vector[CatalogRow] = catalog.rows
+  /** The rows of the catalog, the newest first (`CatalogRow.newestFirst`). `rows` gives the same list. */
+  def list: Vector[CatalogRow] = catalog.rows.sorted(using CatalogRow.newestFirst)
 
   def rows: Vector[CatalogRow] = list
 

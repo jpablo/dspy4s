@@ -34,6 +34,7 @@ trait Desk:
 /** The desk of a `LocalHost`. `controller` opens `Controller.id` with `config`. */
 final class HostDesk(host: LocalHost, config: SessionConfig) extends Desk:
 
+  /** The cards of the sessions of the host, the newest first (`LocalHost.list`). */
   def cards: Vector[SessionCard] = host.list.map(HostSessions.cardOf)
 
   def open(id: SessionId): Either[HostError, SessionHandle] =

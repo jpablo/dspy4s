@@ -78,6 +78,13 @@ final case class CatalogRow(
 ) derives Schema,
       CanEqual
 
+object CatalogRow:
+
+  /** The order of a list of sessions: the newest first by `lastAt`, and by the session id for the same time. `--list`,
+    * `/sessions` and `sessions()` of the controller give their sessions in this order.
+    */
+  val newestFirst: Ordering[CatalogRow] = Ordering.by((row: CatalogRow) => (-row.lastAt, row.session.value))
+
 /** The most characters of `CatalogRow.firstMessage`. A character is one code point. */
 val FirstMessageLength = 80
 

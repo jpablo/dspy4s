@@ -167,7 +167,7 @@ A line that starts with `/` is a command. Each other line is a message to the se
 | `/close merged` | end the session as merged | |
 | `/close abandoned REASON` | end the session as abandoned, with the reason | |
 | `/close replaced ID` | end the session as replaced by the session ID | |
-| `/sessions` | list the sessions of the host (with --controller) | |
+| `/sessions` | list the sessions of the host (with --controller) | The newest session comes first. |
 | `/open ID` | show the session ID (with --controller) | For a session that has ended, it names `/reopen ID`. The start of the id is enough when only one session has it. |
 | `/reopen ID` | open again the session ID, which has ended (with --controller) | The start of the id is enough when only one session has it. |
 | `/controller` | show the controller again (with --controller) | |

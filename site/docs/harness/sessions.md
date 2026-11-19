@@ -79,7 +79,7 @@ The mode of the controller gives `Files` (read only), `Llm^`, `Sessions^` and `S
 | Function | What it does |
 |---|---|
 | `start(goal, scope, strategy, loop = 0): SessionRef` | It starts a work session in the background, with `goal` as its first message. With `loop` above 0, the session gets a goal loop of that many turns from the loop of the controller (see [The goal loop](#the-goal-loop)). |
-| `sessions(): Vector[SessionCard]` | It gives the card of each other session of the host. |
+| `sessions(): Vector[SessionCard]` | It gives the card of each other session of the host, the newest first. |
 | `tell(session, message): Delivery` | It sends a message, and it returns after the session keeps it. It gives `InTurn` when a turn of that session reads the message, and `WaitsForPerson(turns, limit)` when the message waits for the person of that session. A session that has ended gives an error. |
 | `observe(session, question): String` | A probe: a read-only program reads the journal of the session and answers. |
 | `zoom(session, ref): String` | It gives a part of the memory of the session. See [Memory](memory.md). |
@@ -199,7 +199,8 @@ The text gives the outcome in words, for example `The turn ended with a reply: <
 
 ## The session card
 
-`sessions()` gives a `SessionCard` for each other session, and `/sessions` prints one line for each card.
+`sessions()` gives a `SessionCard` for each other session, and `/sessions` prints one line for each card. Both give
+the newest session first, as `--list` does.
 
 | Field | Value |
 |---|---|

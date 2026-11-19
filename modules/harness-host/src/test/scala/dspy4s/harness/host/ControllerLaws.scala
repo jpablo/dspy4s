@@ -321,6 +321,11 @@ class ControllerLaws extends munit.FunSuite:
     assert(!Harness.apiReference(WorkRuntime.workMode).contains("Delivery"))
   }
 
+  test("Controller: the API reference says that sessions() gives the other sessions, the newest first") {
+    val reference = Harness.apiReference(Controller.mode)
+    assert(reference.contains("The cards of the other sessions of the host, the newest first."), reference)
+  }
+
   test(
     "Sessions: tell to a session whose row has ended or that the catalog does not have fails, and it sends nothing"
   ) {

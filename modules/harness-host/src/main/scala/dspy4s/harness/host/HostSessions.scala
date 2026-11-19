@@ -13,7 +13,8 @@ import java.util.UUID
   * words (`HostError.words`) and not a Scala value. Each id of a `SessionRef` must be `SessionId.valid` and have a row
   * in the catalog, else the call fails before it reaches the host.
   *
-  *   - `list` gives the card of each row of the catalog (`cardOf`), apart from the row of `caller`.
+  *   - `list` gives the card of each row of the catalog (`cardOf`), apart from the row of `caller`. The cards come in
+  *     the order of `Peers.rows`, the newest first.
   *   - `tell` sends the message to the session with the source `Controller.messageSource(caller)` through
   *     `Peers.runAs`, so it returns after the receiver commits (8.6). The request id holds `caller` and the open `tell`
   *     effect of `journal`, so a second send after a crash commits nothing. It gives the `Delivery` of the state of the

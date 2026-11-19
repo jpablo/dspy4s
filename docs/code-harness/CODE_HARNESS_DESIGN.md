@@ -1961,6 +1961,9 @@ These points are proposals for the review:
   it writes nothing there, and `git status` of a home can take a long time.
 - The catalog row holds the goal, the scope and the ledger, so `list` reads no journal. The host puts the row when
   its status or its ledger changes.
+- `list`, `/sessions` and `--list` give the newest session first: by the time of the last entry, then by the id
+  (decided on 2026-11-19). Before, `list` and `/sessions` gave the order of the ids, which is random for a UUID, and
+  the cut of the cell output could hide the newest session of a root with many sessions.
 - The journal of a probe goes to `<root>/probes/<caller>.<cell>.<n>.db`, so `list` does not show it, and its name
   links it to the `observe` call. The top session of a harness call has no source of a parent, so the name holds the
   link.

@@ -4486,7 +4486,7 @@ ref = "8.7"
 spec = true
 uses = ["catalog-row", "session-id", "session-config", "host-error", "session-handle", "command", "source",
         "session-state", "logged", "scope"]
-text = "What the handler of Sessions needs of its host: the rows, open, openWith with Activated and the task in one commit, runAs that waits for the commit, the journal, zoomInto with no LM call, and make of a scope. Peers.none refuses each call."
+text = "What the handler of Sessions needs of its host: the rows with the newest first (2026-11-19), open, openWith with Activated and the task in one commit, runAs that waits for the commit, the journal, zoomInto with no LM call, and make of a scope. Peers.none refuses each call."
 
 [[node]]
 id = "host-sessions"
@@ -4498,7 +4498,7 @@ ref = "8.7"
 spec = true
 uses = ["sessions", "peers", "session-id", "session-config", "journal-trait", "probe", "budget", "runtime-context", "session-card", "session-ref", "scope", "strategy-name", "llm", "catalog-row", "effect-id", "request-id", "command", "logged", "session-state", "source", "delivery"]
 proof_uses = ["controller", "owner", "session-status", "host-error", "loop-left"]
-text = "list gives the cards of the other rows, with the owner and the status in words (cardOf). tell sends through runAs with the request id of its effect, and refuses a session that has ended. It gives the Delivery of the state after the commit of the receiver (deliveryOf): WaitsForPerson with the count and the limit while the limit of the turns with no person holds the message (8.7), or the N of a goal loop (8.5), else InTurn. start makes the scope and opens the session with ownedConfig and its task in one commit. An error of the host in tell and start gives its words (HostError.words). observe asks the probe with the budget of the turn. zoom reads the memory of that session."
+text = "list gives the cards of the other rows, the newest first, with the owner and the status in words (cardOf). tell sends through runAs with the request id of its effect, and refuses a session that has ended. It gives the Delivery of the state after the commit of the receiver (deliveryOf): WaitsForPerson with the count and the limit while the limit of the turns with no person holds the message (8.7), or the N of a goal loop (8.5), else InTurn. start makes the scope and opens the session with ownedConfig and its task in one commit. An error of the host in tell and start gives its words (HostError.words). observe asks the probe with the budget of the turn. zoom reads the memory of that session."
 
 [[group]]
 id = "scopes"

@@ -243,15 +243,15 @@ def configText(id: SessionId, current: SessionState, client: ClientFacts, facts:
     "Files"   -> files
   ).flatMap((head, body) => head +: body).mkString("\n")
 
-/** The text of `--list` (10.2): the sessions of `rows`, the newest first. Each session has one line with its id, its
-  * status in words (`SessionStatus.words`, as the card of the controller), the time of its last entry in `zone` and its
-  * folder. A second line has its first message.
+/** The text of `--list` (10.2): the sessions of `rows`, the newest first (`CatalogRow.newestFirst`). Each session has
+  * one line with its id, its status in words (`SessionStatus.words`, as the card of the controller), the time of its
+  * last entry in `zone` and its folder. A second line has its first message.
   */
 def sessionsText(rows: Vector[CatalogRow], zone: ZoneId): String =
   if rows.isEmpty then "The root has no session."
   else
     val time = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm").withZone(zone)
-    rows.sortBy(row => (-row.lastAt, row.session.value)).map { row =>
+    rows.sorted(using CatalogRow.newestFirst).map { row =>
       // A file name, a folder and a message can hold a new line, so each shows on one line with its escapes.
       val at   = time.format(Instant.ofEpochMilli(row.lastAt))
       val head = s"${visible(row.session.value)}  ${row.status.words}  $at  ${visible(row.folder)}"

@@ -50,7 +50,7 @@ import caps.assumeSafe
   * folder of the journals is closed to `Files`, so `zoom` and `observe` are the only ways to read another session.
   */
 @assumeSafe trait Sessions extends Cap:
-  /** The cards of the sessions of the host. */
+  /** The cards of the other sessions of the host, the newest first. */
   def list(): Vector[SessionCard]
 
   /** Sends `message` to that session. It returns after the session keeps the message, and its value tells whether a
@@ -198,7 +198,7 @@ final case class NeedsApproval(op: String, argument: String)
     */
   def store[A: Data](key: String, value: A)(using s: Store^): Unit                 = s.store(key, value)
 
-  /** The cards of the sessions of the host. */
+  /** The cards of the other sessions of the host, the newest first. */
   def sessions()(using s: Sessions): Vector[SessionCard]                           = s.list()
 
   /** Sends `message` to `session`. The call returns after the session keeps the message. Its value tells whether a

@@ -304,6 +304,23 @@ class HostLaws extends munit.FunSuite:
     }
   }
 
+  // On 2026-11-19, the root of the person had 62 sessions. sessions() of the controller and /sessions gave them in the
+  // order of their ids, which is random for a UUID, and the cut of the cell output could hide the newest session.
+  test("Host: list gives the newest session first, as --list does, and a session with the same time by its id") {
+    withRoot { root =>
+      withHost(root, scripted(answer("hi"))) { host =>
+        val two = Vector(id(1), id(2), id(3)).map(opened(host, _))(1)
+        assertEquals(two.send(message("m1")), Right(()))
+        assert(eventually()(outcomes(two).nonEmpty))
+        assert(eventually()(host.list.exists(r => r.session == id(2) && r.lastSeq == two.state.nextSeq - 1)))
+        val rows = host.list
+        assertEquals(rows.map(_.session).headOption, Some(id(2)), rows.toString)
+        assertEquals(rows, rows.sortBy(row => (-row.lastAt, row.session.value)))
+        assertEquals(host.rows, rows)
+      }
+    }
+  }
+
   test("Host: run gives a refusal of decide to the client, and the session goes on") {
     withRoot { root =>
       val released = CountDownLatch(1)
