@@ -40,23 +40,28 @@ object Controller:
       "and the code of one cell, or only a text. A step with no code ends the turn, and its text is the reply to the " +
       "person."
 
-  /** The task of each turn of the controller of the person with the home `home`: the home, then how the person answers
-    * a call that needs an approval, then `commands`. `instructions` are the instructions of the policy of the
-    * controller (`WorkRuntime.activate`), so they come one time, in the system message.
+  /** The task of each turn of the controller of the person with the home `home`: the home, then `approvalRule`, then
+    * `commands`. `instructions` are the instructions of the policy of the controller (`WorkRuntime.activate`), so they
+    * come one time, in the system message. The guard of the controller always has an `Ask` rule (`guard`), so its task
+    * always has `approvalRule`. The task is the same at each turn of an activation, so the prompt cache stays valid.
+    */
+  def task(home: Path): String = s"The home of the person: $home. $approvalRule\n\n$commands"
+
+  /** How the person answers a call that needs an approval, in words for the model. The task of the controller has it,
+    * and the task of a work session has it when a rule of its guard can ask (`WorkRuntime.taskOf`).
     *
     * The person answers an approval in the terminal client: `/allow` grants the call, and a message starts a new turn,
-    * which clears the pending calls. These are facts of the client, and an optimizer can change `instructions`, so they
-    * go in the task. In the live session of 2026-11-15, the controller told the person to approve a call in a "host
-    * UI", and the question of the person refused the call. The task is the same at each turn of an activation, so the
-    * prompt cache stays valid.
+    * which clears the pending calls. These are facts of the client, and an optimizer can change the instructions of a
+    * policy, so they go in the task. In the live session of 2026-11-15, the controller told the person to approve a
+    * call in a "host UI", and the question of the person refused the call.
     *
     * In the live session of 2026-11-16, the model told the person to type `/allow 1 turn` for the call 71. The model
-    * does not know the number of a call, and `/allow` with no number allows each call that waits, so the task asks for
+    * does not know the number of a call, and `/allow` with no number allows each call that waits, so the text asks for
     * no number.
     */
-  def task(home: Path): String =
-    s"The home of the person: $home. When a call needs an approval, end the turn and tell the person to type " +
-      s"/allow, with no number. A message of the person instead of /allow refuses the call.\n\n$commands"
+  val approvalRule: String =
+    "When a call needs an approval, end the turn and tell the person to type /allow, with no number. A message of " +
+      "the person instead of /allow refuses the call."
 
   /** The commands of the terminal client, in words for the model: what the person can type, and what each command does.
     * Only the person types a command, so the model tells the person which command to type. In the live session of

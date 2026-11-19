@@ -400,15 +400,22 @@ object WorkRuntime:
     if session == Controller.id then policy.copy(signature = policy.signature.withInstructions(Controller.instructions))
     else policy
 
-  /** The task of each chat turn of a work session in the folder `scope`: the folder, the words of its shell `shell`
-    * (`shellWords`), and the section `project` of the files of the project (`ProjectFiles.section`), when it is not
-    * empty. The instructions are the instructions of the policy signature, so they come one time, in the system
-    * message. A chat turn ends with a step with no code, and its text is the reply. So the task has no text about input
-    * fields and no text about `submit`. The task of a program call (`Harness.task`) has both.
+  /** The task of each chat turn of a work session in the folder `scope`: the folder, `Controller.approvalRule` when
+    * `asks` is true, the words of its shell `shell` (`shellWords`), and the section `project` of the files of the
+    * project (`ProjectFiles.section`), when it is not empty. The instructions are the instructions of the policy
+    * signature, so they come one time, in the system message. A chat turn ends with a step with no code, and its text
+    * is the reply. So the task has no text about input fields and no text about `submit`. The task of a program call
+    * (`Harness.task`) has both.
+    *
+    * `asks` is true when a rule of the guard of the session can ask (`taskOf`). The default guard of a work session
+    * asks for no call (`defaultGuard`), so its task has no `approvalRule`, and that text costs no tokens. The guard of
+    * a session does not change during an activation, so the task is the same at each turn, and the prompt cache stays
+    * valid.
     */
-  def chatTask(scope: Path, shell: String, project: String = ""): String =
-    val files = if project.isEmpty then "" else s"\n\n$project"
-    s"The folder of the session: $scope.\n\n$shell$files"
+  def chatTask(scope: Path, shell: String, project: String = "", asks: Boolean = false): String =
+    val files    = if project.isEmpty then "" else s"\n\n$project"
+    val approval = if asks then s" ${Controller.approvalRule}" else ""
+    s"The folder of the session: $scope.$approval\n\n$shell$files"
 
   /** What the model does when the shell refuses a write. In the live session 00429ec8, each `git worktree add` failed
     * with "Operation not permitted", and the model used three steps to find the cause. It never told the person.
@@ -429,7 +436,8 @@ object WorkRuntime:
     * the controller (`Controller.id`), the goal of a session whose owner is a session, and `chatTask` for a session of
     * the person. `shell` is the text of the shell of the session (`shellWords`), and `project` the section of its files
     * (`ProjectFiles.section`), for each task apart from the task of the controller. The files come after the shell
-    * rules and before the goal.
+    * rules and before the goal. Each task apart from the task of the controller has `Controller.approvalRule` only when
+    * a rule of the guard of `config` gives `Ask` (`chatTask`).
     *
     * `owes` is true when the step owes the owner a report (`owes` of the kernel, after the journal so far). Then the
     * task of a session with a goal has the rule to end the work with a cell that calls `submit(...)`. After the debt
@@ -456,13 +464,14 @@ object WorkRuntime:
   ): String =
     if session == Controller.id then Controller.task(scope)
     else
+      val chat = chatTask(scope, shell, project, asks = config.guard.rules.exists(_.verdict == Verdict.Ask))
       (config.owner, config.goal) match
         case (Owner.Session(_), Some(goal)) if looping =>
           val owner =
             "Another session started this session, and it gets a report when the goal loop of this session ends. " +
               s"$LoopRule When you complete the goal, write a cell that calls submit with the result as one String, " +
               "for example submit(\"The file has 42 lines.\")."
-          s"${chatTask(scope, shell, project)}\n\nThe goal of the session: $goal\n\n$owner"
+          s"$chat\n\nThe goal of the session: $goal\n\n$owner"
         case (Owner.Session(_), Some(goal)) =>
           val owner =
             if owes then
@@ -472,11 +481,11 @@ object WorkRuntime:
             else
               "Another session started this session. It does not wait for a result now, so this turn gives it no " +
                 "report. A step with no code ends the turn, and its text is the reply to the person."
-          s"${chatTask(scope, shell, project)}\n\nThe goal of the session: $goal\n\n$owner"
+          s"$chat\n\nThe goal of the session: $goal\n\n$owner"
         case (_, Some(goal)) =>
           val loop = if looping then s"\n\n$LoopRule" else ""
-          s"${chatTask(scope, shell, project)}\n\nThe goal of the session: $goal$loop"
-        case _ => chatTask(scope, shell, project)
+          s"$chat\n\nThe goal of the session: $goal$loop"
+        case _ => chat
 
   /** The rule of a goal loop in the task (8.5). */
   val LoopRule: String =

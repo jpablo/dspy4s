@@ -4,7 +4,7 @@ import dspy4s.core.contracts.{DynamicValues, RuntimeContext}
 import dspy4s.core.runtime.RuntimeEnvironment
 import dspy4s.harness.{HarnessLimits, Models, Place, PolicyRunner, RequestLm, Secrets, StreamLm}
 import dspy4s.harness.Models.policy
-import dspy4s.harness.guest.{JobStatus, Mode, Scope, StrategyName}
+import dspy4s.harness.guest.{Access, JobStatus, Mode, Scope, StrategyName}
 import dspy4s.harness.kernel.*
 import dspy4s.harness.host.HostSupport.*
 import dspy4s.harness.sandbox.{Backends, HostList}
@@ -67,6 +67,42 @@ class WorkLaws extends munit.FunSuite:
   private def sandboxed(): Unit = assume(Backends.detect().nonEmpty, "no OS sandbox works on this host")
 
   // ── The configuration ──
+
+  // In the live session of 2026-11-15, the controller did not know /allow, so it told the person to use a "host UI".
+  // A fix gave the task of the controller the answer of an approval. The task of a work session still had no such
+  // text, and only its instructions said "end the turn and ask". An optimizer can change the instructions.
+  // The task of a work session has the text only when a rule of its guard can ask. The default guard of a work session
+  // asks for no call, and the text costs tokens at each turn.
+  test("Work: a task says that the person types /allow when the guard of the session can ask, as the controller says") {
+    val rule = "When a call needs an approval, end the turn and tell the person to type /allow, with no number. " +
+      "A message of the person instead of /allow refuses the call."
+    def count(task: String): Int = task.split(java.util.regex.Pattern.quote(rule), -1).length - 1
+
+    val scope = Path.of("/tmp/fake-scope")
+    val mine  = WorkRuntime.config(scope, "fake-model", limits)
+    val asks  = mine.copy(guard = WorkRuntime.defaultGuard(Mode.local.copy(network = Access.Full)))
+    val owned = asks.copy(owner = Owner.Session(Controller.id), goal = Some("Fix the fake build"))
+    val once  = Vector(
+      WorkRuntime.taskOf(id(1), asks, scope, "FAKE-SHELL"),
+      WorkRuntime.taskOf(id(1), asks.copy(goal = Some("Fix the fake build")), scope, "FAKE-SHELL", looping = true),
+      WorkRuntime.taskOf(id(2), owned, scope, "FAKE-SHELL", owes = true),
+      WorkRuntime.taskOf(id(2), owned, scope, "FAKE-SHELL", owes = false),
+      WorkRuntime.taskOf(id(2), owned, scope, "FAKE-SHELL", looping = true),
+      Controller.task(Path.of("/tmp/fake-home"))
+    )
+    once.foreach(task => assertEquals(count(task), 1, task))
+    val never = Vector(
+      WorkRuntime.taskOf(id(1), mine, scope, "FAKE-SHELL"),
+      WorkRuntime.taskOf(
+        id(2),
+        mine.copy(owner = Owner.Session(Controller.id), goal = Some("Fix the fake build")),
+        scope,
+        "FAKE-SHELL",
+        owes = true
+      )
+    )
+    never.foreach(task => assertEquals(count(task), 0, task))
+  }
 
   test("Work: the task of an owned session asks for the call submit(...) in a cell at the end of the work") {
     val owned = WorkRuntime.config(Path.of("/tmp/fake-scope"), "fake-model", limits)

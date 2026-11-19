@@ -133,7 +133,7 @@ command has no network in each mode.
 The task of each turn starts with the folder of the session and the rules of its shell. The rules come from the profile
 of the sandbox, so they agree with the host. The task holds the rules in one paragraph, and here each part has its own
 line. On Linux, the list of control paths holds only the paths that exist at the open. The example is for a folder
-with `.git` and no other control path.
+with `.git` and no other control path, and for a guard with no `Ask` rule ([Approvals](#approvals)).
 
 === "macOS"
 
@@ -172,8 +172,10 @@ cannot open what the sandbox closes.
 
 A call with `Ask` and no grant does not run. The cell gets a `NeedsApproval` error with the text
 `<op>(<arguments>) needs an approval. End the turn and ask the person.` The journal keeps the call as a pending call,
-so a `catch` in the cell cannot hide it. The model ends its turn and asks you. The screen shows the cell and a card
-with the number of the call:
+so a `catch` in the cell cannot hide it. The model ends its turn and asks you. When a rule of the guard can ask, the
+task of each turn tells the model that you type `/allow`, with no number, and that a message refuses the call. The
+task of the controller always has this text, because the guard of the controller has an `Ask` rule. The screen shows
+the cell and a card with the number of the call:
 
 ```text
   I push the branch.

@@ -2612,9 +2612,10 @@ These points are proposals for the review:
 - A work session reuses `HarnessEffects`. The REPL lives as long as the activation, so a value of a turn stays for
   the next turns.
 - A chat turn has its own task, `WorkRuntime.chatTask`: the folder of the session, the rules of its shell and the
-  files of the project. The instructions of the policy come one time, in the system message, so the task does not
-  repeat them (2026-11-12). The controller gets its own instructions as the instructions of its policy
-  (`WorkRuntime.policyOf`), and its task holds only the home folder.
+  files of the project. When a rule of the guard of the session can ask, the task also has `Controller.approvalRule`:
+  the person types `/allow`, and a message refuses the call (2026-11-19). The instructions of the policy come one time,
+  in the system message, so the task does not repeat them (2026-11-12). The controller gets its own instructions as
+  the instructions of its policy (`WorkRuntime.policyOf`), and its task holds only the home folder.
   A chat turn ends with a step with no code, so the task has no text about input fields and no text about `submit`.
   Before this rule, a chat turn had the task of a program call, which told the model to give the result with
   `submit`. The live sessions of 2026-11-10 gave this rule.
