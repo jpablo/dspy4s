@@ -108,7 +108,7 @@ A cell can also go down the tree, and then search the whole text of a message:
 ```
 
 In the terminal client, each `zoom` call of a cell has a line such as `zoom 0.0`, and the summary of the cell says
-`Read the memory`.
+`Read the memory`. A zoom of the controller into another session also names that session, for example `zoom s-1: 0.0`.
 
 ## When the summary calls run
 

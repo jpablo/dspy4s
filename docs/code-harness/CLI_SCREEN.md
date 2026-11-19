@@ -156,7 +156,7 @@ its time.
 | `llmQuery`, `llmQueryBatched` | `ask the model · 3 questions` | asked the model N questions |
 | `rlm`, `rlmBatched` | `run a sub-program: <first line of the task>` | ran N sub-programs |
 | `load`, `store`, `keys` | `load plan`, `store plan`, `keys of the store` | read or wrote the store |
-| `zoom` | `zoom 3.5` | read the memory |
+| `zoom` | `zoom 3.5`, and `zoom <session>: 3.5` for a zoom into another session | read the memory |
 | `sessions` | `list the sessions` | listed the sessions |
 | `tell` | `tell <session>: <first line of the message>` | sent N messages |
 | `start` | `start a session: <first line of the goal>` | started N sessions |

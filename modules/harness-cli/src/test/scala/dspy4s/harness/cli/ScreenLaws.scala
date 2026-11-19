@@ -188,6 +188,22 @@ class ScreenLaws extends munit.FunSuite:
     )
   }
 
+  // In the live session of 2026-11-15, the controller zoomed into a work session, and the screen showed "zoom 40". The
+  // line did not show which session the controller read.
+  test("Screen: a zoom into another session names that session, and a zoom of this session shows only the reference") {
+    val calls = Vector(
+      call(3, 0, "zoom", "ref"     -> text("3.5")),
+      call(3, 1, "zoom", "session" -> text("s-1"), "ref" -> text("0.0"))
+    )
+    val log =
+      Vector(at(1, 0, Entry.TurnStarted), at(2, 0, Entry.StepStarted(0)), at(3, 0, Entry.Acted("", "", Some("x")))) ++
+        calls.zipWithIndex.flatMap((c, i) => Vector(at(4L + 2 * i, 0, c), at(5L + 2 * i, 0, done(3, i, "ok")))) :+
+        at(30, 1_000, Entry.Observed("", CellOutcome.Ok, Map.empty))
+    val rows = printed(log, look.copy(detail = Detail.Full))
+    Vector("    ✓ zoom 3.5 ·", "    ✓ zoom s-1: 0.0 ·")
+      .foreach(start => assert(rows.exists(_.startsWith(start)), s"no row [$start] in\n${rows.mkString("\n")}"))
+  }
+
   test("Screen: with the full detail, a finished cell prints its code, each call with its result, and its output") {
     val rows = printed(turn.take(6), look.copy(detail = Detail.Full)).drop(2)
     assertEquals(

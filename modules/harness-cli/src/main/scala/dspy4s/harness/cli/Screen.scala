@@ -524,7 +524,9 @@ object Screen:
       case _                   => 1
 
   /** What a call does, on one line. A call with no label of its own shows its name, and its arguments as JSON when it
-    * has arguments. So a call with no arguments, for example `now()`, shows no `null`.
+    * has arguments. So a call with no arguments, for example `now()`, shows no `null`. A zoom into another session
+    * names that session as `tell` and `observe` do, for example `zoom s-1: 0.0`. A zoom of this session shows only the
+    * reference, for example `zoom 3.5`.
     */
   private def callLine(call: CallView, g: Glyphs): String =
     def field(name: String): String =
@@ -545,7 +547,7 @@ object Screen:
       case "load"            => s"load ${arg("key")}"
       case "store"           => s"store ${arg("key")}"
       case "keys"            => "keys of the store"
-      case "zoom"            => s"zoom ${arg("ref")}"
+      case "zoom"            => Vector(arg("session"), arg("ref")).filter(_.nonEmpty).mkString("zoom ", ": ", "")
       case "stopJob"         => "stop a job"
       case "jobOutput"       => "read the output of a job"
       case "sessions"        => "list the sessions"
