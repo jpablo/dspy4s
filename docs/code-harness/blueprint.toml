@@ -2470,11 +2470,11 @@ id = "window"
 group = "window"
 kind = "data"
 name = "Window"
-ops = ["update", "project", "cut", "cellNote"]
+ops = ["update", "project", "cut", "cellNote", "leftOutNote"]
 ref = "7"
 uses = ["context-strategy"]
 proof_uses = ["status", "turn-times", "projection", "state", "text-prefix", "turn-outcome"]
-text = "No derived data, and the last steps of the open turn that fit the budget, oldest first. The last observation is always in it, cut to half of the budget, with a note of the rest. An earlier turn of a chat with no reply has the text of its report (TurnOutcome.report). The first step of a chat turn whose start cleared pending calls names each refused call in its observation (RefusedCallNote, 2026-11-16), and the memory tree gets the note through openTurn. A proposal: the budget counts characters."
+text = "No derived data, and the last steps of the open turn that fit the budget, oldest first. The last observation is always in it, cut to half of the budget, with a note of the rest. An earlier turn of a chat with no reply has the text of its report (TurnOutcome.report). The first step of a chat turn whose start cleared pending calls names each refused call in its observation (RefusedCallNote, 2026-11-16), and the memory tree gets the note through openTurn. In a chat, the newest step comes first, then each step that heard a message, newest first, whole or in a short form with leftOutNote in place of the cell output, so a long turn keeps the question of the person (2026-11-19). Then the other steps and the earlier turns come, newest first. A proposal: the budget counts characters."
 
 # ── Phase 4: the harness (9) ──────────────────────────────────────────────────────────────────────────────────────
 
@@ -3653,7 +3653,7 @@ name = "Chat window:"
 ref = "7"
 spec = true
 uses = ["window"]
-text = "A step sees each earlier turn as its message and its reply, oldest first, and the message of the open turn. An earlier turn with no reply shows the text of its report, with no Scala value. With a small budget, the oldest turns go first. One open turn has no earlier turn."
+text = "A step sees each earlier turn as its message and its reply, oldest first, and the message of the open turn. An earlier turn with no reply shows the text of its report, with no Scala value. With a small budget, the oldest turns go first. One open turn has no earlier turn. In a long turn, the projection keeps each message of the open turn and the newest step: a step with a message comes whole or in its short form, a step that fits in no form stays out and an older one comes, and when the messages alone do not fit, the newest stay."
 
 [[group]]
 id = "link-laws"

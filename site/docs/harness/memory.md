@@ -12,7 +12,7 @@ text with `zoom`, and what the summary calls cost.
 
 | Strategy | Sessions | The earlier turns in the projection |
 |---|---|---|
-| Window | a program call (by default), a child of `rlm`, and a session whose configuration has the strategy `Window` | one message for each earlier turn, with its messages and its reply. The newest messages that fit the budget stay. |
+| Window | a program call (by default), a child of `rlm`, and a session whose configuration has the strategy `Window` | one message for each earlier turn, with its messages and its reply. The newest messages that fit the budget stay, but the steps of the open turn that heard a message come first, so a long turn keeps its question. |
 | Memory tree | each new session of the terminal client, and the controller | a view of summary lines, oldest first. `zoom(ref)` gives the full text of a part. |
 
 Both strategies cut a long output, text or code with no model call. They add a note with the number of characters

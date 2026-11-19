@@ -7,7 +7,7 @@ import zio.blocks.schema.DynamicValue
 
 import scala.annotation.tailrec
 
-/** The window strategy (CODE_HARNESS_DESIGN.md, 7): no derived data, and the last steps of the open turn that fit the
+/** The window strategy (CODE_HARNESS_DESIGN.md, 7): no derived data, and the steps of the open turn that fit the
   * budget, oldest first. The last step is always in it, and a long observation, text or code is cut with no LM call
   * (cheap steps first), with a note of the rest. A child and a rollout use it.
   *
@@ -19,7 +19,10 @@ import scala.annotation.tailrec
   *   - the history: one message for each earlier step with an `Acted`. A message holds the input field `observation`,
   *     the output before that step, and the output fields `text` and `code` of the step. Each of the three is cut to an
   *     eighth of the budget, so the last step fits when the status is short (9). The output field `reasoning` is empty.
-  *     The newest messages that fit the rest of the budget stay, oldest first.
+  *   - the choice of the messages: the messages that fit the rest of the budget stay, oldest first. The newest step
+  *     comes first. In a chat, each step that heard a message comes next, newest first, so a long turn keeps the
+  *     question of the person (`chat`). Then the other steps come, newest first, until one does not fit. So, of the
+  *     other steps, the oldest go first.
   *
   * The output of each cell ends with its time on its own line, for example `The cell took 12.3 s.` (`cellNote`). The
   * time of a cell is the time of its `Observed` minus the time of its `Acted`. The note comes after the cut of the
@@ -57,7 +60,11 @@ object Window extends ContextStrategy:
     val messages = steps.zipWithIndex.map { (step, k) =>
       message(seen(before(k), Vector.empty, budget / 8), step.text, step.code, budget / 8)
     }
-    Projection(status, observation, History(newest(messages, budget - status.length - observation.length)))
+    Projection(
+      status,
+      observation,
+      History(newest(messages, budget - status.length - observation.length)(Projection.text))
+    )
 
   /** The first `max` characters of `text`, and a note with the number of characters that the cut removed. A text of
     * `max` characters or less stays as it is.
@@ -103,7 +110,16 @@ object Window extends ContextStrategy:
     *   - An earlier turn is a message whose observation holds all its messages, and whose text is its reply: the text
     *     of `Replied`, or the text of the report of another outcome (`TurnOutcome.report`) and then the last text of
     *     the turn. So the model reads the outcome in words, and not as a Scala value.
-    *   - The newest messages that fit the rest of the budget stay, oldest first, so the oldest turns go first.
+    *   - The history holds the messages that fit the rest of the budget, in the order of the journal, oldest first. The
+    *     message of the newest step comes first. Then the message of each step that heard a message comes, newest
+    *     first: from the person, another session or the harness. Then the other steps and the earlier turns come,
+    *     newest first, until one does not fit. So the oldest turns go first, and the messages of the open turn go last.
+    *   - When the whole message of a step that heard a message does not fit, its short form comes in its place. The
+    *     observation of the short form has a note in place of the output of the cell (`leftOutNote`), then the time
+    *     note and the messages of the step. A step that fits in neither form stays out, but an older step that fits
+    *     comes. So when the messages of the open turn alone do not fit, the newest messages stay.
+    *   - In a live run of 2026-11-19, a turn ran 9 steps with large outputs. The question of the person was in the
+    *     first step, and it went out of the history at step 8. The model then answered only 7 of its 10 questions.
     */
   private def chat(journal: Vector[Logged], status: String, budget: Int, earlier: Boolean): Projection =
     val (turns, open) = chatTurns(journal)
@@ -113,14 +129,56 @@ object Window extends ContextStrategy:
     val notes         = (NewReplNote.afterActivation(journal) ++ RefusedCallNote.afterTurnStart(journal)).toVector
     val observation   = seen(acted.flatMap(_.cell).lastOption, notes ++ heardNow, budget / 2)
     val before        = None +: acted.map(_.cell)
-    val stepMessages  = acted.zipWithIndex.map { (step, k) =>
-      message(seen(before(k), step.heard, budget / 8), step.text, step.code, budget / 8)
-    }
-    val turnMessages =
+    val max           = budget / 8
+    val turnParts     =
       if !earlier then Vector.empty
-      else turns.map(turn => message(seen(None, turn.heard, budget / 8), turn.reply, None, budget / 8))
-    val history = newest(turnMessages ++ stepMessages, budget - status.length - observation.length)
+      else
+        turns.zipWithIndex.map { (turn, i) =>
+          Part(i, heard = false, message(seen(None, turn.heard, max), turn.reply, None, max), None)
+        }
+    val stepParts = acted.zipWithIndex.map { (step, k) =>
+      val whole = message(seen(before(k), step.heard, max), step.text, step.code, max)
+      // The short form has a note in place of the output of the cell, and keeps the messages that the step heard.
+      val short = before(k).filter(cell => step.heard.nonEmpty && cell.output.nonEmpty).map { cell =>
+        val noted = cell.copy(output = leftOutNote(cell.output.length))
+        message(seen(Some(noted), step.heard, max), step.text, step.code, max)
+      }
+      Part(turnParts.size + k, step.heard.nonEmpty, whole, short)
+    }
+    val history = fitted(turnParts, stepParts, budget - status.length - observation.length)
     Projection(status, observation, History(history))
+
+  /** The note in place of the output of a cell, in the short form of a step message (`chat`). The note gives the number
+    * of characters that the short form left out.
+    */
+  def leftOutNote(chars: Int): String =
+    s"[The $chars characters of the output were left out, so that the messages of the turn fit.]"
+
+  /** A message of the history of a chat at the place `order`, oldest first, and its short form, if any. `heard` is true
+    * for a step that heard one or more messages.
+    */
+  private final case class Part(
+      order: Int,
+      heard: Boolean,
+      whole: DynamicValue.Record,
+      short: Option[DynamicValue.Record]
+  )
+
+  /** The messages of a chat history that fit `room`, oldest first. The newest step comes first. Then each other step
+    * that heard a message comes, newest first, in the first of its two forms that fits. A step that fits in neither
+    * form stays out, and an older step can come. Then the other steps and the earlier turns come whole, newest first,
+    * until one does not fit.
+    */
+  private def fitted(turns: Vector[Part], steps: Vector[Part], room: Int): Vector[DynamicValue.Record] =
+    val older        = steps.dropRight(1)
+    val first        = steps.takeRight(1) ++ older.filter(_.heard).reverse
+    val (left, kept) = first.foldLeft((room, Vector.empty[(Int, DynamicValue.Record)])) { case ((free, chosen), part) =>
+      (part.whole +: part.short.toVector).find(Projection.text(_) <= free) match
+        case Some(m) => (free - Projection.text(m), chosen :+ (part.order -> m))
+        case None    => (free, chosen)
+    }
+    val rest = newest(turns ++ older.filterNot(_.heard), left)(p => Projection.text(p.whole))
+    (kept ++ rest.map(p => p.order -> p.whole)).sortBy(_._1).map(_._2)
 
   /** The projection of the open turn of a chat in `budget`, with no earlier turn: the part of the memory tree (7.1).
     * The view of the memory tree holds the earlier turns. A program call gives its one turn, as `project` does.
@@ -222,11 +280,13 @@ object Window extends ContextStrategy:
       code.map(c => "code" -> cut(c, max))
     DynamicValues.record(fields.map((key, value) => key -> DynamicValues.string(value))*)
 
-  /** The newest messages whose characters fit `room`, in their order. */
-  private def newest(messages: Vector[DynamicValue.Record], room: Int): Vector[DynamicValue.Record] =
+  /** The newest messages whose characters (`size`) fit `room`, in their order. The first message that does not fit ends
+    * the list, so the oldest messages go first.
+    */
+  private def newest[A](messages: Vector[A], room: Int)(size: A => Int): Vector[A] =
     @tailrec
-    def take(rest: List[DynamicValue.Record], left: Int, kept: List[DynamicValue.Record]): Vector[DynamicValue.Record] =
+    def take(rest: List[A], left: Int, kept: List[A]): Vector[A] =
       rest match
-        case m :: older if Projection.text(m) <= left => take(older, left - Projection.text(m), m :: kept)
-        case _                                        => kept.toVector
+        case m :: older if size(m) <= left => take(older, left - size(m), m :: kept)
+        case _                             => kept.toVector
     take(messages.reverse.toList, room, Nil)

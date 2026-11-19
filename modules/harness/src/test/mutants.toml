@@ -758,6 +758,33 @@ file = "MemoryTree.scala"
 old = "Predict(merge, name = Some(\"merge\"), config = options),"
 new = "Predict(merge, name = Some(\"merge\"), config = options.copy(fields = options.fields.take(0))),"
 
+# ── The messages of a long turn (the 50-turn live pilot of 2026-11-19) ──
+
+[[mutant]]
+name = "Mutant: the steps that heard a message get no place before the other steps"
+[[mutant.edit]]
+file = "Window.scala"
+old = "steps.takeRight(1) ++ older.filter(_.heard).reverse"
+new = "steps.takeRight(1) ++ older.filter(_ => false)"
+[[mutant.edit]]
+file = "Window.scala"
+old = "newest(turns ++ older.filterNot(_.heard), left)"
+new = "newest(turns ++ older, left)"
+
+[[mutant]]
+name = "Mutant: a step that heard a message has no short form"
+[[mutant.edit]]
+file = "Window.scala"
+old = "(part.whole +: part.short.toVector)"
+new = "(part.whole +: part.short.toVector.take(0))"
+
+[[mutant]]
+name = "Mutant: a step with a message that fits in no form ends the choice"
+[[mutant.edit]]
+file = "Window.scala"
+old = "case None    => (free, chosen)"
+new = "case None    => (0, chosen)"
+
 # ── The limit of a line (7.2, choice 8) ──
 
 [[mutant]]

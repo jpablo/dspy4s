@@ -1306,6 +1306,20 @@ final case class PolicyStep(text: String, code: Option[String])
   `steps`, it says "The last step: answer with no code." A program call has no step that only answers, so its last
   step says only "Step n of n." The live sessions of 2026-11-10 gave this rule: the model read "Step 10 of 10" as the
   last step, answered with no code one step early, and lost a step that could run a cell.
+- **The messages of a long turn.** In the 50-turn live pilot of 2026-11-19, the last turn ran 9 steps with large
+  `zoom` outputs. The history kept only the newest steps that fit, so at step 8 the question of the person went out of
+  the prompt, and the model answered only 7 of its 10 questions. Now the history of a chat step takes its messages in
+  this order, for the window and for the open turn of the memory tree (`Window.openTurn`):
+  1. The message of the newest step.
+  2. Each step that heard a message (from the person, another session or the harness), newest first: the whole
+     message, or else its short form. The short form has a note in place of the output of the cell
+     (`Window.leftOutNote`), then the time note and the messages of the step. A step that fits in neither form stays
+     out, and an older step that fits comes.
+  3. The other steps and the earlier turns, newest first, until one does not fit, as before.
+
+  The kept messages stay in the order of the journal, and the projection never passes the budget. A defect stays
+  open: `seen` cuts a cell output and the messages after it as one text, so an output longer than the cut removes a
+  message that came during that cell.
 - **Laws.** `project` depends only on the journal and the derived data. Two updates give the same structure as one
   update on the full journal. The memory tree has the laws Coverage, Zoom, Prefix, Immutability, Order, Size and Roots
   ([CODE_HARNESS.md](CODE_HARNESS.md), 6.2).
@@ -1543,6 +1557,32 @@ gives these differences:
   a stand-in. Choice 9 makes fewer merges than before, but UniiChat makes a merge only when the view is too large. The
   open points give the other ideas of UniiChat as proposals.
 
+**The 50-turn comparison (2026-11-19).** 6 live sessions ran with DeepSeek-V4.1-Flash-1017 and with the fix of a long
+turn (7, "The messages of a long turn"): 3 with the summary calls and 3 with `--no-memory-calls`. Each session had 50
+turns and about 170 messages. The turns 2 to 34 gave 10 facts, with 14 points in all, and the last turn asked for all
+of them.
+
+| | Summary calls | No summary calls |
+|---|---|---|
+| Points | 38 of 42 (12, 12 and 14) | 37 of 42 (14, 13 and 10) |
+| Time in the turns | 383.5 s | 113.7 s |
+| Summary calls of a session | about 72 `compress`, 175 `merge` and 97 `shorten`, 235.7 s | none |
+| Mean time of a turn, turns 1 to 10 and turns 41 to 50 | 6.4 s and 11.2 s | 2.0 s and 3.5 s |
+| The last turn | 46.8 s, 10.0 steps, 12.7 `zoom` calls | 18.8 s, 9.7 steps, 8.3 `zoom` calls |
+
+- A pilot with no summary calls, with the same build and the same task, got 9 of 14 points.
+- At the start of the last turn, the memory field showed at most 1 of the 10 facts, with or without the summary calls.
+  The field had 4,000 to 8,000 characters. Its oldest line covered 128 messages in 512 bytes, so it could not hold the
+  facts. In each session, the model found the facts with `zoom`, and with the summary calls it made more `zoom` calls.
+- Each miss came with "I can't answer" or "you never told me", not with a false value. Two of these replies said that
+  the person never gave a fact, but the person did.
+- Nearly each last turn used all 10 of its steps.
+- About 97 summary replies of each session got a `shorten` call, but about 52 of the 175 stored lines above level 0
+  were still cut at 512 bytes. So with this model, the reply of `shorten` was too long about half of the time.
+- So at 50 turns too, the summary calls gave no better answers, and the turns took 3.4 times as long. The view is too
+  small for its summaries to hold the facts: about 13,000 characters for 24 parts. With the 64 to 128 KB of UniiChat,
+  the view would hold each of these 170 messages as its own line.
+
 **The words.** The user calls these folds projections, as the read models of event sourcing
 ([CODE_HARNESS.md](CODE_HARNESS.md), 8.2). In this code, `Projection` is the input of one step, and `project` makes it.
 So this section uses the word derivation, as [CODE_HARNESS.md](CODE_HARNESS.md), 7.2, does. Section 3 has the three
@@ -1667,8 +1707,8 @@ with no `shorten` call, a `shorten` call that spends no budget, and a close that
 - In the script mode of the CLI, the next message comes right after a turn, so the builder has little time between
   turns, and more lines are stand-ins. A person needs more time to write a message. So the script of step 5 must wait
   between the messages. Without the wait, it measures only the stand-ins.
-- The live comparison did not show that the summaries give better answers. Its sessions had at most 15 turns. A longer
-  comparison, with 50 turns or more, can show whether the summaries help when the view has many old lines.
+- The comparisons of 15 and 50 turns did not show that the summaries give better answers. A run of the 50-turn task
+  with a much larger view and no summary calls can show whether the size of the view is the change that helps.
 - These ideas come from UniiChat. They are proposals, not choices:
   - A view that counts bytes, with a much larger limit. With a limit near that of UniiChat, the sessions of the live
     comparison make no merge. The budget of the input, 40,000 characters now, must grow too. This change does not
