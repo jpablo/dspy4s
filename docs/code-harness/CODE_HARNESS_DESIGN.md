@@ -1222,7 +1222,10 @@ compiler came, and the restart can go.
 
 **The text of a cell.** `CellRun.text` is the text that an agent sees: the output; for a compile error, its lines and
 hints; for a failure, a timeout or a submit, the output and a note. The MCP server and the harness both show it, so the
-model of the harness sees the hints and learns that a cell stopped at its time limit.
+model of the harness sees the hints and learns that a cell stopped at its time limit. The REPL cuts the frames of a
+guest API call from a trace in the output (`ScalaRepl.shortTrace`), because the model cannot use them. These are the
+frames up to the last frame of the harness, with the frames of the JDK that the host called. The first frame of the
+harness stays for a developer, and one line `... N frames of the guest API call` replaces the others.
 
 **The conditions for a later `parallel`.** The first version has no `parallel` (choice 18). A later version needs five
 things:

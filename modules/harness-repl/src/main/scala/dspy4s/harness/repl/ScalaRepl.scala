@@ -16,7 +16,7 @@ import java.nio.file.Paths
 import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicReference
-import scala.annotation.nowarn
+import scala.annotation.{nowarn, tailrec}
 import scala.concurrent.duration.*
 
 /** The values behind the givens of a REPL (5.2): a handler for each capability, and the `Turn`. The mode says which of
@@ -276,24 +276,25 @@ final class ScalaRepl(
         result.get() match
           case Left(t) =>
             invalidate(before.objectIndex + 1)
-            CellRun(capture.text, CellOutcome.Failed(t.toString))
+            CellRun(shortTrace(capture.text), CellOutcome.Failed(t.toString))
           case Right(newState) =>
             state = newState
             HostBindings.submitted(key) match
               case Some(value) =>
                 // A cell that ended by `submit` defines no name, because the signal leaves the cell (5.1).
+                // `withoutSignal` removes each line `at ...`, so the output has no frame for `shortTrace`.
                 invalidate(newState.objectIndex)
                 CellRun(withoutSignal(capture.text), CellOutcome.Submitted(value))
               // The REPL hides the wrapper of a cell that does not compile (`afterFailedCompilation`).
               case None if parsed.reporter.hasErrors => compileError(capture.text.linesIterator.toVector)
               // The error is the text of the exception, not the first line of the output: the cell can print before
-              // it throws. The output keeps the printed lines and the trace.
+              // it throws. The output keeps the printed lines and the short trace.
               case None => driver.evaluationError match
                   case Some(error) =>
                     invalidate(newState.objectIndex)
-                    CellRun(capture.text, CellOutcome.Failed(error))
-                  case None => CellRun(capture.text, CellOutcome.Ok)
-          case null => CellRun(capture.text, CellOutcome.Failed("the cell gave no result"))
+                    CellRun(shortTrace(capture.text), CellOutcome.Failed(error))
+                  case None => CellRun(shortTrace(capture.text), CellOutcome.Ok)
+          case null => CellRun(shortTrace(capture.text), CellOutcome.Failed("the cell gave no result"))
     finally worker = null
 
   private def stop(thread: Thread, before: State): String =
@@ -302,7 +303,9 @@ final class ScalaRepl(
     thread.join(5000)
     if thread.isAlive then uncleanThread = true
     invalidate(state.objectIndex.max(before.objectIndex + 1))
-    withoutStopTrace(capture.text)
+    // The cut of the stop trace comes first, so it reads the trace as the REPL printed it. Then `shortTrace` cuts only
+    // the traces that stay.
+    shortTrace(withoutStopTrace(capture.text))
 
   private def timedOut(thread: Thread, before: State): CellRun =
     CellRun(stop(thread, before), CellOutcome.TimedOut(cellTimeout.toMillis))
@@ -437,10 +440,52 @@ object ScalaRepl:
     s"Hint: The cell used its wall time of ${timeWords(millis)}, with its guest API calls, so the host stopped it. " +
       "Long work needs a job: start it with spawn, and wait for it with waitJob in later cells."
 
-  /** True for a frame line of a trace that the REPL prints: `at ...`, `... 35 elided`, or `... 3 more`. */
+  /** True for a frame line of a trace that the REPL prints: `at ...`, `... 35 elided`, or `... 3 more`. The line of
+    * `shortTrace`, `... 9 frames of the guest API call`, is also a frame, so the walk of `withoutStopTrace` goes over
+    * it.
+    */
   private def isFrame(line: String): Boolean =
     val text = line.trim
-    text.startsWith("at ") || (text.startsWith("... ") && (text.endsWith(" elided") || text.endsWith(" more")))
+    text.startsWith("at ") || callFrames.matches(text) ||
+    (text.startsWith("... ") && (text.endsWith(" elided") || text.endsWith(" more")))
+
+  /** The line of `shortTrace` that counts the frames of a guest API call that it cut. */
+  private val callFrames = """\.\.\. \d+ frames? of the guest API call""".r
+
+  /** Cuts the frames of a guest API call from each trace in the output of a cell. The model reads the output in each
+    * later prompt, and the memory summaries read it too, but the model cannot use these frames. The first frame of the
+    * harness stays, because it shows a developer where the host threw or called the JDK.
+    *
+    * The rule applies to each run of frame lines (`isFrame`). A line that is not a frame ends a run, for example
+    * `Caused by: ...` or a printed line. A frame of the harness is a line whose trimmed text starts with `at dspy4s.`.
+    * The frames of a run up to its last frame of the harness are in a guest API call: no guest API call takes a
+    * function of the cell, so a frame of the cell is never above a frame of the harness. These frames become the first
+    * frame of the harness and one line `... N frames of the guest API call`, with the indent of the frames. The frames
+    * after the last frame of the harness stay, for example the frames of a lambda of the cell and the line
+    * `... 35 elided`. A run with no frame of the harness, or with one at its top, does not change. A line that is not a
+    * frame never changes.
+    */
+  private[repl] def shortTrace(output: String): String =
+    def isHarness(line: String) = line.trim.startsWith("at dspy4s.")
+
+    def cut(run: Vector[String]): Vector[String] =
+      val first = run.indexWhere(isHarness)
+      val last  = run.lastIndexWhere(isHarness)
+      // The lines 0 to `last` are the frames of the call. The first frame of the harness stays, so `last` frames go.
+      if first < 0 || last == 0 then run
+      else
+        val indent = run(first).takeWhile(_.isWhitespace)
+        val noun   = if last == 1 then "frame" else "frames"
+        run(first) +: s"$indent... $last $noun of the guest API call" +: run.drop(last + 1)
+    @tailrec def walk(rest: Vector[String], done: Vector[String]): Vector[String] =
+      if rest.isEmpty then done
+      else
+        val (text, tail)    = rest.splitAt(rest.segmentLength(l => !isFrame(l)))
+        val (frames, after) = tail.splitAt(tail.segmentLength(isFrame))
+        walk(after, done ++ text ++ cut(frames))
+    val lines = output.linesIterator.toVector
+    val short = walk(lines, Vector.empty)
+    if short == lines then output else short.mkString("\n")
 
   /** Removes the line of the signal of `submit`, and its trace (5.1). */
   private def withoutSignal(output: String): String =

@@ -94,8 +94,11 @@ def zoom(ref: String)(using t: Turn): String
   3.5.`
 - In a session with the window, `zoom` gives the error `this session has no memory tree, so zoom has nothing to read`.
 
-An error comes into the cell as an exception, so the cell fails with the text of the error. A typical cell reads the
-message under a short line:
+An error comes into the cell as an exception, so the cell fails with the text of the error. The output of the cell
+also has the trace of the exception. The trace keeps the first frame of the harness, which shows where the host threw.
+One line such as `... 9 frames of the guest API call` replaces the other frames of the call.
+
+A typical cell reads the message under a short line:
 
 ```scala
 --8<-- "modules/harness-repl/src/test/resources/doc-cells/memory.scala:zoom-a-message"

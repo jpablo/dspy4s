@@ -1660,6 +1660,15 @@ uses = ["scala-repl"]
 text = "The echo of a long val is cut to a few hundred characters, and println keeps its whole text."
 
 [[node]]
+id = "law-trace"
+group = "scala-repl-laws"
+kind = "law"
+name = "Trace:"
+ref = "6"
+uses = ["scala-repl"]
+text = "The trace of a guest API call in the output of a cell keeps the first frame of the harness, and one line counts the other frames of the call, with the frames of the JDK above it. The frames after the last frame of the harness stay, and a trace with no frame of the harness does not change."
+
+[[node]]
 id = "law-arrays"
 group = "scala-repl-laws"
 kind = "law"

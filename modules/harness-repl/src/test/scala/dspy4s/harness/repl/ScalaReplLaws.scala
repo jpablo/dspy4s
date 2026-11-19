@@ -359,6 +359,139 @@ class ScalaReplLaws extends munit.FunSuite:
     finally r.close()
   }
 
+  // In a live session of 2026-11-19, a zoom of the controller with the reference "top" threw in the host. The output of
+  // the cell gave the model 10 frames of the harness, which the model cannot use, in each later prompt and in the
+  // memory. The first frame of the harness shows where the host threw, so it stays for the developer.
+  test("Trace: the trace of a guest call keeps the first frame of the harness and counts the others in one line") {
+    val message = "java.lang.IllegalArgumentException: zoom: top is not a reference of the memory."
+    val live    = Vector(
+      message,
+      "  at dspy4s.harness.host.HostSessions.zoom$$anonfun$1(HostSessions.scala:77)",
+      "  at scala.util.Either.fold(Either.scala:232)",
+      "  at dspy4s.harness.host.HostSessions.zoom(HostSessions.scala:77)",
+      "  at dspy4s.harness.Handlers$package$$anon$7.zoom$$anonfun$4(Handlers.scala:361)",
+      "  at dspy4s.harness.Recorder.call(Handlers.scala:72)",
+      "  at dspy4s.harness.Handlers$package$$anon$7.zoom(Handlers.scala:361)",
+      "  at dspy4s.harness.repl.GatedSessions.zoom$$anonfun$2(Guards.scala:99)",
+      "  at dspy4s.harness.repl.CallGate.apply(Guards.scala:39)",
+      "  at dspy4s.harness.repl.GatedSessions.zoom(Guards.scala:99)",
+      "  at dspy4s.harness.guest.api$.zoom(Guest.scala:218)",
+      "  ... 35 elided"
+    ).mkString("\n")
+    assertEquals(
+      ScalaRepl.shortTrace(s"FAKE-LINE\n$live\nFAKE-AFTER"),
+      Vector(
+        "FAKE-LINE",
+        message,
+        "  at dspy4s.harness.host.HostSessions.zoom$$anonfun$1(HostSessions.scala:77)",
+        "  ... 9 frames of the guest API call",
+        "  ... 35 elided",
+        "FAKE-AFTER"
+      ).mkString("\n")
+    )
+  }
+
+  // In the live check of the cut, a read of a missing file gave 8 frames of the JDK above the first frame of the
+  // harness. The host called the JDK, so these frames are in the guest API call too.
+  test("Trace: the frames of the JDK above the first frame of the harness go into the count of the guest API call") {
+    val read = Vector(
+      "java.nio.file.NoSuchFileException: /ws/missing.txt",
+      "  at sun.nio.fs.UnixException.translateToIOException(UnixException.java:92)",
+      "  at sun.nio.fs.UnixException.rethrowAsIOException(UnixException.java:106)",
+      "  at java.nio.file.Files.newByteChannel(Files.java:379)",
+      "  at java.nio.file.Files.newInputStream(Files.java:159)",
+      "  at dspy4s.harness.LocalFiles.read(Handlers.scala:122)",
+      "  at dspy4s.harness.Recorder.call(Handlers.scala:72)",
+      "  at dspy4s.harness.guest.api$.read(Guest.scala:200)",
+      "  ... 35 elided"
+    ).mkString("\n")
+    assertEquals(
+      ScalaRepl.shortTrace(read),
+      Vector(
+        "java.nio.file.NoSuchFileException: /ws/missing.txt",
+        "  at dspy4s.harness.LocalFiles.read(Handlers.scala:122)",
+        "  ... 6 frames of the guest API call",
+        "  ... 35 elided"
+      ).mkString("\n")
+    )
+    // With one frame of the harness, the frames of the JDK above it go into the count too.
+    val one = Vector(
+      "java.lang.IllegalStateException: FAKE",
+      "  at java.util.Optional.orElseThrow(Optional.java:403)",
+      "  at dspy4s.harness.guest.api$.now(Guest.scala:1)",
+      "  ... 32 elided"
+    ).mkString("\n")
+    assertEquals(
+      ScalaRepl.shortTrace(one),
+      Vector(
+        "java.lang.IllegalStateException: FAKE",
+        "  at dspy4s.harness.guest.api$.now(Guest.scala:1)",
+        "  ... 1 frame of the guest API call",
+        "  ... 32 elided"
+      ).mkString("\n")
+    )
+  }
+
+  test("Trace: a trace with no frame of the harness stays, and the frames after the last frame of the harness stay") {
+    val own = Vector(
+      "java.lang.ArithmeticException: / by zero",
+      "  at scala.math.BigInt.$div(BigInt.scala:10)",
+      "  ... 32 elided"
+    ).mkString("\n")
+    assertEquals(ScalaRepl.shortTrace(own), own)
+    val one = Vector(
+      "java.lang.IllegalStateException: FAKE",
+      "  at dspy4s.harness.guest.api$.now(Guest.scala:1)",
+      "  ... 32 elided"
+    ).mkString("\n")
+    assertEquals(ScalaRepl.shortTrace(one), one)
+    // A lambda of the cell called the guest API in a map: its frame and the frame of the map stay.
+    val mapped = Vector(
+      "java.lang.IllegalArgumentException: no file a.txt",
+      "  at dspy4s.harness.repl.MemoryFiles.read$$anonfun$1(ScalaReplLaws.scala:58)",
+      "  at scala.collection.immutable.Map$EmptyMap$.getOrElse(Map.scala:262)",
+      "  at dspy4s.harness.repl.MemoryFiles.read(ScalaReplLaws.scala:58)",
+      "  at dspy4s.harness.guest.api$.read(Guest.scala:200)",
+      "  at rs$line$2$.$init$$$anonfun$1(rs$line$2:1)",
+      "  at scala.collection.immutable.List.map(List.scala:247)",
+      "  ... 30 elided",
+      "Caused by: java.lang.IllegalStateException: FAKE-CAUSE",
+      "  at dspy4s.harness.host.Jobs.run(Jobs.scala:5)",
+      "  at dspy4s.harness.host.Jobs.call(Jobs.scala:9)",
+      "  ... 8 more"
+    ).mkString("\n")
+    assertEquals(
+      ScalaRepl.shortTrace(mapped),
+      Vector(
+        "java.lang.IllegalArgumentException: no file a.txt",
+        "  at dspy4s.harness.repl.MemoryFiles.read$$anonfun$1(ScalaReplLaws.scala:58)",
+        "  ... 3 frames of the guest API call",
+        "  at rs$line$2$.$init$$$anonfun$1(rs$line$2:1)",
+        "  at scala.collection.immutable.List.map(List.scala:247)",
+        "  ... 30 elided",
+        "Caused by: java.lang.IllegalStateException: FAKE-CAUSE",
+        "  at dspy4s.harness.host.Jobs.run(Jobs.scala:5)",
+        "  ... 1 frame of the guest API call",
+        "  ... 8 more"
+      ).mkString("\n")
+    )
+  }
+
+  test("Trace: a cell that a guest call fails gives one frame of the harness in its output") {
+    val r = ScalaRepl(readFiles, Bindings(FakeTurn(), files = Some(MemoryFiles())), "", 10.seconds)
+    try
+      val run = r.run("""println(read("missing.txt"))""")
+      assertEquals(run.outcome, CellOutcome.Failed("java.lang.IllegalArgumentException: no file missing.txt"))
+      val frames = run.output.linesIterator.map(_.trim).filter(_.startsWith("at ")).toVector
+      assertEquals(frames.size, 1, run.output)
+      assert(frames.head.contains("MemoryFiles"), run.output)
+      assert(
+        run.output.linesIterator.exists(_.trim.matches("""\.\.\. \d+ frames? of the guest API call""")),
+        run.output
+      )
+    finally r.close()
+  }
+
   // In a live session of 2026-11-15, the controller grouped the cards of sessions() and matched each pair in a
   // foreach. The cell did not compile: "capability `any` cannot flow into capture set {} of value v".
   //
