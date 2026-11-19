@@ -22,9 +22,14 @@ def hint(error: String): Option[String] =
     val it    = if readOnly.size == 1 then "it" else "them"
     Some(s"The mode of this session gives $which only to read, so a call that changes $it does not compile. " +
       "Use a call that only reads, or ask for the change in another way.")
-  else if error.contains("Vector[String]{val prefix") then
-    Some("A Vector in a pair, for example in groupBy(f).map { case (k, v) => ... }. Use .view.mapValues, " +
-      "groupMapReduce or .toList.")
+  else if showsVectorPairDefect(error) then
+    // A .toList after groupBy does not help, because the values of the map stay Vectors. A .toList before groupBy
+    // makes them Lists.
+    Some(
+      "In safe mode, a lambda that splits a pair with a Vector into two names does not compile, for example " +
+        "{ case (k, v) => ... } after groupBy. This is a compiler defect. Use one name for the pair, for example " +
+        "foreach(p => println(s\"${p._1} ${p._2.size}\")). Or call .toList before groupBy: xs.toList.groupBy(f)."
+    )
   else if confusesCompiler(error) then
     // The error of a top-level val of a new Array also shows `Array[...]^{any.rd}`, so this check comes before the
     // check of an Array pattern.
@@ -68,6 +73,19 @@ def confusesCompiler(error: String): Boolean =
   */
 def showsArrayDefect(error: String): Boolean =
   arrayFound.findFirstIn(error).isDefined && arrayRequired.findFirstIn(error).isDefined
+
+/** True for a compile error of a defect of the compiler in safe mode (6). Safe mode treats an Array as a mutable
+  * capability, and a Vector keeps its elements in the Array field `prefix1`. So the checker gives the inferred type of
+  * a Vector a refinement of that field, with a root capability. When a lambda splits a pair with a Vector into two
+  * names, that root capability cannot flow into the empty capture set of a name. A lambda with one name for the pair
+  * compiles.
+  *
+  * A plain compile in safe mode, with no code of the harness, gives the same error: Scala 3.10.0, 3.10.1, and the
+  * nightlies of 2026-10-15 and 2026-11-08. The `Found:` type of a Vector of a guest type spans two lines of the error,
+  * so the check reads the two notes of the error.
+  */
+private def showsVectorPairDefect(error: String): Boolean =
+  error.contains("in the type of value prefix1") && error.contains("cannot flow into capture set {} of value")
 
 /** The `Found:` line of an Array type with a capture set, for example `Found: Array[Int]^{any.rd}`. */
 private val arrayFound = """Found:\s*Array\[.*\]\^\{[^}]*\}""".r

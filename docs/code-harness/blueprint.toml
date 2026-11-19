@@ -1684,7 +1684,7 @@ kind = "law"
 name = "Known compiler defect:"
 ref = "6"
 uses = ["scala-repl"]
-text = "An expected failure: after a failed val with no type, the compiler of the 3.10 nightly refuses a later Array chain. When this test passes, a fix of the compiler came, and the restart can go."
+text = "Expected failures. After a failed val with no type, the compiler of the 3.10 nightly refuses a later Array chain. When this test passes, a fix of the compiler came, and the restart can go. In safe mode, a lambda that splits a pair with a Vector into two names does not compile (2026-11-19): safe mode treats an Array as mutable, and a Vector keeps its elements in the Array field prefix1. When this test passes, the hint of that error can go."
 
 # ── Phase 2: the early MCP server (6) ───────────────────────────────────────────────────────────────────────────
 

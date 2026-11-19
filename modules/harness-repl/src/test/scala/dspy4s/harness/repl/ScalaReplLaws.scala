@@ -172,6 +172,26 @@ class ScalaReplLaws extends munit.FunSuite:
   ) =
     ScalaRepl(mode, Bindings(FakeTurn(inputs), files = Some(files)), preamble, cellTimeout, secondTry = secondTry)
 
+  /** A REPL in the mode of the controller, with no children, and the fake sessions. */
+  private def controllerRepl() =
+    val bindings = Bindings(
+      FakeTurn(),
+      files = Some(FakeFiles()),
+      llm = Some(FakeLlm()),
+      store = Some(FakeStore()),
+      sessions = Some(FakeSessions())
+    )
+    ScalaRepl(Mode.controller.copy(children = Access.None), bindings, "", 10.seconds)
+
+  /** The cell of the controller in the live session of 2026-11-15: it groups the cards of sessions() and matches each
+    * pair. The compiler defect of `showsVectorPairDefect` refuses it.
+    */
+  private val groupedCards = "sessions().groupBy(_.status).toVector.sortBy(_._1).foreach { case (status, cards) =>\n" +
+    "  println(s\"$status ${cards.size}\")\n}"
+
+  /** The form of the hint for a pair with a Vector: one name for the pair. */
+  private val onePair = "foreach(p => println(s\"${p._1} ${p._2.size}\"))"
+
   private def compileError(run: CellRun): Boolean =
     run.outcome match
       case CellOutcome.CompileError(_) => true
@@ -336,6 +356,54 @@ class ScalaReplLaws extends munit.FunSuite:
       assertEquals(run.outcome, CellOutcome.Failed("java.lang.IllegalStateException: FAKE-FAIL"))
       assert(run.output.contains("FAKE-LINE"), run.output)
       assert(run.text.contains("The cell failed: java.lang.IllegalStateException: FAKE-FAIL"), run.text)
+    finally r.close()
+  }
+
+  // In a live session of 2026-11-15, the controller grouped the cards of sessions() and matched each pair in a
+  // foreach. The cell did not compile: "capability `any` cannot flow into capture set {} of value v".
+  //
+  // This is a defect of the compiler in safe mode (`showsVectorPairDefect`). A plain compile with no code of the
+  // harness gives the same error in Scala 3.10.0, 3.10.1 and the nightlies of 2026-10-15 and 2026-11-08. Each lambda
+  // that splits a pair with a Vector into two names fails, with each type of element. The REPL gives a hint. This test
+  // is an expected failure: when it passes, a compiler fix came, and the hint can go.
+  test("Known compiler defect: a controller cell groups the cards of sessions() and matches each pair".fail) {
+    val r = controllerRepl()
+    try
+      val grouped = r.run(groupedCards)
+      assertEquals((grouped.outcome, grouped.output.trim), (CellOutcome.Ok, "idle 1"), grouped.toString)
+      val sorted = r.run("for card <- sessions().sortBy(_.lastSeq) do println(card.session.id)")
+      assertEquals((sorted.outcome, sorted.output.trim), (CellOutcome.Ok, "s-1"), sorted.toString)
+    finally r.close()
+  }
+
+  // The old check of the hint read only a Vector of String. The cell of the live session, a Vector of a plain pair and
+  // a lambda with two parameters and no case got no hint.
+  test("Hints: a lambda that splits a pair with a Vector into two names gets the hint of one name for the pair") {
+    val r = controllerRepl()
+    try
+      for cell <- Vector(
+                    groupedCards,
+                    "Vector((\"idle\", 1)).groupBy(_._1).foreach { case (k, v) => println(s\"$k ${v.size}\") }",
+                    "sessions().groupBy(_.status).foreach((status, cards) => println(s\"$status ${cards.size}\"))"
+                  )
+      do
+        r.run(cell).outcome match
+          case CellOutcome.CompileError(lines) =>
+            val hints = lines.filter(_.startsWith("Hint:"))
+            assert(hints.exists(h => h.contains(onePair) && h.contains(".toList.groupBy(")), lines.mkString("\n"))
+          case other => fail(s"$cell compiled, so the compiler defect is gone: $other")
+      assert(!r.needsRestart, "the defect does not confuse the compiler, so the REPL needs no restart")
+    finally r.close()
+  }
+
+  test("Hints: the two forms of the hint for a pair with a Vector compile, also after the error in the same REPL") {
+    val r = controllerRepl()
+    try
+      assert(compileError(r.run(groupedCards)), "the cell of the compiler defect")
+      val oneName = r.run(s"sessions().groupBy(_.status).toVector.sortBy(_._1).$onePair")
+      assertEquals((oneName.outcome, oneName.output.trim), (CellOutcome.Ok, "idle 1"), oneName.toString)
+      val listFirst = r.run(groupedCards.replace("sessions().groupBy(", "sessions().toList.groupBy("))
+      assertEquals((listFirst.outcome, listFirst.output.trim), (CellOutcome.Ok, "idle 1"), listFirst.toString)
     finally r.close()
   }
 

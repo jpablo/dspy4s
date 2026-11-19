@@ -121,9 +121,33 @@ class ReplLaws extends munit.FunSuite:
     assert(hint(error).exists(_.contains("locally")))
   }
 
-  test("Hints: a Vector in a pair") {
-    val error = "Found: (x$1: (String, Vector[String]{val prefix1: String}))"
-    assert(hint(error).exists(_.contains("groupMapReduce")))
+  // The texts come from the REPL, with no line of the root capability `=>`: the cell of the controller in the live
+  // session of 2026-11-15, where the `Found:` type spans two lines, and a Vector of String on one line.
+  test("Hints: a lambda that splits a pair with a Vector into two names") {
+    val cards = """-- [E007] Type Mismatch Error: -------------------------------------------------
+        |1 |sessions().groupBy(_.status).toVector.sortBy(_._1).foreach { case (status, cards) =>
+        |  |                                                           ^
+        |  |Found:    (x$1: (String,
+        |  |  Vector[dspy4s.harness.guest.SessionCard^'s1]{
+        |  |    val prefix1: Array[Object^'s2]^'s3}
+        |  |)) ->'s4 Unit
+        |  |Required: ((String, Vector[dspy4s.harness.guest.SessionCard @uncheckedVariance])) => Unit
+        |  |
+        |  |Note that capability `any` cannot flow into capture set {} of value cards.
+        |  |
+        |  |where:    any is a root capability classified as Unscoped in the type of value prefix1""".stripMargin
+    val strings = """|  |Found:    (x$1: (String, Vector[String]{val prefix1: Array[Object^'s1]^'s2})) ->'s3 Unit
+        |  |Required: ((String, Vector[String @uncheckedVariance])) => Unit
+        |  |
+        |  |Note that capability `any` cannot flow into capture set {} of value v.
+        |  |
+        |  |where:    any is a root capability classified as Unscoped in the type of value prefix1""".stripMargin
+    for error <- Vector(cards, strings) do
+      val text = hint(error)
+      assert(text.exists(h => h.contains("foreach(p => ") && h.contains(".toList.groupBy(")), text.toString)
+    // Each of the two notes alone is not the defect.
+    assertEquals(hint("Note that capability `any` cannot flow into capture set {} of value v."), None)
+    assertEquals(hint("any is a root capability classified as Unscoped in the type of value prefix1"), None)
   }
 
   test("Hints: an Array pattern inside collect") {
