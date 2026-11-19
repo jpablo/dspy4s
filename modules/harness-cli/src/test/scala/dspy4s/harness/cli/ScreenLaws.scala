@@ -127,6 +127,67 @@ class ScreenLaws extends munit.FunSuite:
     assertEquals(ended(CellOutcome.TimedOut(60_000)), "  ✗ The cell stopped at its time limit · 60 s  #3")
   }
 
+  // In a live run of 2026-11-19, one type error of 17 lines showed as "17 errors". The REPL keeps each line of the
+  // text of the compiler, and the last line of that text says "1 error found".
+  test("Screen: a compile error counts the errors of the compiler, and not the lines of its text or the hint") {
+    def ended(outcome: CellOutcome): String =
+      printed(Vector(
+        at(1, 0, Entry.TurnStarted),
+        at(2, 0, Entry.StepStarted(0)),
+        at(3, 0, Entry.Acted("", "", Some("x"))),
+        at(4, 1_000, Entry.Observed("", outcome, Map.empty))
+      )).last
+    val error = Vector(
+      "-- [E007] Type Mismatch Error: -------------------------------------------------",
+      "1 |sessions().groupBy(_.status).foreach { case (status, cards) => println(cards.size) }",
+      "  |Found:    (x$1: (String, Vector[SessionCard]))",
+      "  |Required: ((String, Vector[SessionCard])) => Unit"
+    )
+    val hint = "Hint: Use one name for the pair."
+    assertEquals(
+      ended(CellOutcome.CompileError(error ++ Vector("1 error found", hint))),
+      "  ✗ The cell did not compile · 1 error  #3"
+    )
+    assertEquals(
+      ended(CellOutcome.CompileError(error ++ error ++ Vector("2 errors found", hint))),
+      "  ✗ The cell did not compile · 2 errors  #3"
+    )
+    // The parser gives one element for each error, and no line with the count.
+    assertEquals(
+      ended(CellOutcome.CompileError(Vector("Line 1: e1", "Line 2: e2", hint))),
+      "  ✗ The cell did not compile · 2 errors  #3"
+    )
+  }
+
+  // In a live run of 2026-11-19, the call of sessions() showed as "sessions null", and the calls tell, start and
+  // observe showed their arguments as raw JSON.
+  test("Screen: the calls of Sessions have words, and a call with no arguments shows no null") {
+    val calls = Vector(
+      Entry.EffectStarted(EffectId(3, 0), "sessions", Json.Null),
+      call(3, 1, "tell", "session"    -> text("s-1"), "message"      -> text("go on")),
+      call(3, 2, "start", "goal"      -> text("Write a.txt"), "kind" -> text("Scratch"), "strategy" -> text("Window")),
+      call(3, 3, "observe", "session" -> text("s-1"), "question"     -> text("why?")),
+      Entry.EffectStarted(EffectId(3, 4), "now", Json.Null)
+    )
+    val log =
+      Vector(at(1, 0, Entry.TurnStarted), at(2, 0, Entry.StepStarted(0)), at(3, 0, Entry.Acted("", "", Some("x")))) ++
+        calls.zipWithIndex.flatMap((c, i) => Vector(at(4L + 2 * i, 0, c), at(5L + 2 * i, 0, done(3, i, "ok")))) :+
+        at(30, 1_000, Entry.Observed("", CellOutcome.Ok, Map.empty))
+    val rows = printed(log, look.copy(detail = Detail.Full))
+    Vector(
+      "    ✓ list the sessions ·",
+      "    ✓ tell s-1: go on ·",
+      "    ✓ start a session: Write a.txt ·",
+      "    ✓ observe s-1: why? ·",
+      "    ✓ now ·"
+    ).foreach(start => assert(rows.exists(_.startsWith(start)), s"no row [$start] in\n${rows.mkString("\n")}"))
+    assert(!rows.exists(_.contains("null")), rows.mkString("\n"))
+    assertEquals(
+      printed(log).last,
+      "  ▸ Listed the sessions, sent 1 message, started 1 session, ran 1 probe, called now · 1.0 s  #3"
+    )
+  }
+
   test("Screen: with the full detail, a finished cell prints its code, each call with its result, and its output") {
     val rows = printed(turn.take(6), look.copy(detail = Detail.Full)).drop(2)
     assertEquals(

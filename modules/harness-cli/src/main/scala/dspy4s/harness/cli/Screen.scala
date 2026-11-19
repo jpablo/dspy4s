@@ -134,6 +134,9 @@ object Screen:
   /** The note of `SandboxedShell` at the end of the output of a command whose exit code is not 0. */
   private val ExitCode = """\[exit code (-?\d+)\]""".r
 
+  /** The last line of the text of the compiler for a type error, for example `1 error found` or `2 errors found`. */
+  private val ErrorsFound = """(\d+) errors? found""".r
+
   /** The look of `of`: it prints no row, so only the model counts. */
   private val Quiet = Look(Detail.Compact, ReasoningView.Off, Glyphs.ascii)
 
@@ -427,7 +430,7 @@ object Screen:
       case CellOutcome.Ok                => line(true, s"The cell ended ${g.dot} ${count(lines.size, "line")} of output") +: output
       case CellOutcome.Submitted(_)      => line(true, "The cell submitted a value") +: output
       case CellOutcome.CompileError(all) =>
-        line(false, s"The cell did not compile ${g.dot} ${count(all.size, "error")}") +:
+        line(false, s"The cell did not compile ${g.dot} ${count(errorCount(all), "error")}") +:
           all.flatMap(d => cutRows(d, "      ", OutputLines, g))
       case CellOutcome.Failed(exception) =>
         line(false, s"The cell failed: ${cut(firstLine(exception), ArgChars, g)}") +: output
@@ -448,7 +451,7 @@ object Screen:
     val time   = cell.end.map(e => seconds(e.atMillis - cell.startMillis))
     val output = cell.end.map(e => printable(e.output).linesIterator.size).filter(_ > 0)
     cell.end.map(_.outcome) match
-      case Some(CellOutcome.CompileError(all)) => s"The cell did not compile${dot}${count(all.size, "error")}"
+      case Some(CellOutcome.CompileError(all)) => s"The cell did not compile${dot}${count(errorCount(all), "error")}"
       case Some(CellOutcome.Failed(exception)) =>
         val problem = cut(firstLine(exception), ArgChars, g)
         if verbs.isEmpty then s"The cell failed: $problem" else s"${capital(verbs)}, then the cell failed: $problem"
@@ -467,25 +470,44 @@ object Screen:
         val submit = outcome.collect { case CellOutcome.Submitted(_) => "submitted" }
         (base ++ exit.map(c => s"exit $c") ++ asked ++ submit ++ time).mkString(dot)
 
+  /** The number of the errors of a cell that did not compile. For a type error, the REPL gives one element for each
+    * line of the text of the compiler, and the last line gives the count, for example `2 errors found`. For an error of
+    * the parser, the REPL gives one element for each error, and no line with the count. In the two forms, the REPL can
+    * add one element `Hint: ...`, and this element is not an error. Old journals keep these forms, so the screen counts
+    * here, and the REPL keeps its form.
+    */
+  private def errorCount(diagnostics: Vector[String]): Int =
+    diagnostics.map(_.strip).collect { case ErrorsFound(n) => n.toIntOption }.flatten.lastOption.getOrElse(
+      diagnostics.count(!_.startsWith("Hint:"))
+    )
+
   /** What the calls of a cell did, in the order of the first call of each kind. */
   private def callVerbs(calls: Vector[CallView]): String =
     val kinds = calls.map(c => kindOf(c.op) -> c)
     kinds.map(_._1).distinct.map { kind =>
       val same = kinds.collect { case (k, c) if k == kind => c }
       kind match
-        case "exec"  => s"ran ${count(same.size, "command")}"
-        case "spawn" => if same.size == 1 then s"started job ${jobName(same.head.id)}" else s"started ${same.size} jobs"
-        case "read"  => s"read ${count(same.size, "file")}"
-        case "write" => s"wrote ${count(same.size, "file")}"
-        case "edit"  => s"edited ${count(same.size, "file")}"
-        case "ask"   => s"asked the model ${count(same.map(questions).sum, "question")}"
-        case "rlm"   => s"ran ${count(same.size, "sub-program")}"
-        case "load"  => "read the store"
-        case "store" => "wrote the store"
-        case "zoom"  => "read the memory"
-        case "jobs"  => s"looked at ${count(same.size, "job")}"
-        case other   => s"called $other"
+        case "exec"     => s"ran ${count(same.size, "command")}"
+        case "spawn"    => startedJobs(same)
+        case "read"     => s"read ${count(same.size, "file")}"
+        case "write"    => s"wrote ${count(same.size, "file")}"
+        case "edit"     => s"edited ${count(same.size, "file")}"
+        case "ask"      => s"asked the model ${count(same.map(questions).sum, "question")}"
+        case "rlm"      => s"ran ${count(same.size, "sub-program")}"
+        case "load"     => "read the store"
+        case "store"    => "wrote the store"
+        case "zoom"     => "read the memory"
+        case "jobs"     => s"looked at ${count(same.size, "job")}"
+        case "sessions" => "listed the sessions"
+        case "tell"     => s"sent ${count(same.size, "message")}"
+        case "start"    => s"started ${count(same.size, "session")}"
+        case "observe"  => s"ran ${count(same.size, "probe")}"
+        case other      => s"called $other"
     }.mkString(", ")
+
+  /** The verb of the calls of `spawn`: the name of the job for one call, else the number of the jobs. */
+  private def startedJobs(spawns: Vector[CallView]): String =
+    if spawns.size == 1 then s"started job ${jobName(spawns.head.id)}" else s"started ${spawns.size} jobs"
 
   private def kindOf(op: String): String =
     op match
@@ -501,7 +523,9 @@ object Screen:
       case Json.Object(fields) => fields.collectFirst { case ("prompts", Json.Array(items)) => items.size }.getOrElse(1)
       case _                   => 1
 
-  /** What a call does, on one line. */
+  /** What a call does, on one line. A call with no label of its own shows its name, and its arguments as JSON when it
+    * has arguments. So a call with no arguments, for example `now()`, shows no `null`.
+    */
   private def callLine(call: CallView, g: Glyphs): String =
     def field(name: String): String =
       call.args match
@@ -524,7 +548,14 @@ object Screen:
       case "zoom"            => s"zoom ${arg("ref")}"
       case "stopJob"         => "stop a job"
       case "jobOutput"       => "read the output of a job"
-      case other             => s"${visible(other)} ${cut(visible(call.args.print), ArgChars, g)}"
+      case "sessions"        => "list the sessions"
+      case "tell"            => s"tell ${arg("session")}: ${arg("message")}"
+      case "start"           => s"start a session: ${arg("goal")}"
+      case "observe"         => s"observe ${arg("session")}: ${arg("question")}"
+      case other             => call.args match
+          case Json.Null                             => visible(other)
+          case Json.Object(fields) if fields.isEmpty => visible(other)
+          case args                                  => s"${visible(other)} ${cut(visible(args.print), ArgChars, g)}"
 
   /** The first line of `text` with each hidden character as an escape, cut, and a note of the other lines. */
   private def oneLine(text: String, g: Glyphs): String =

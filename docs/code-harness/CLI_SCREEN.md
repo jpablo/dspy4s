@@ -150,13 +150,18 @@ its time.
 |---|---|---|
 | `exec` | `$ sbt cart/test · exit 1 · 4.2 s` | ran N commands |
 | `spawn` | `$ sbt ~compile · job 12.0` | started job 12.0 |
-| `stopJob` | `stop job 12.0` | stopped job 12.0 |
+| `stopJob`, `jobOutput` | `stop a job`, `read the output of a job` | looked at N jobs |
 | `read` | `read src/cart/Total.scala` | read N files |
 | `write`, `edit` | `write notes.md`, `edit src/cart/Total.scala` | wrote N files, edited N files |
 | `llmQuery`, `llmQueryBatched` | `ask the model · 3 questions` | asked the model N questions |
 | `rlm`, `rlmBatched` | `run a sub-program: <first line of the task>` | ran N sub-programs |
 | `load`, `store`, `keys` | `load plan`, `store plan`, `keys of the store` | read or wrote the store |
 | `zoom` | `zoom 3.5` | read the memory |
+| `sessions` | `list the sessions` | listed the sessions |
+| `tell` | `tell <session>: <first line of the message>` | sent N messages |
+| `start` | `start a session: <first line of the goal>` | started N sessions |
+| `observe` | `observe <session>: <first line of the question>` | ran N probes |
+| another op | its name, and its arguments as JSON when it has arguments, for example `now` | called <op> |
 
 - A command shows as `$ <command>` on one line. Each hidden character shows as an escape, with the rule of
   `visible` of PR #10. Section 11 asks if the quotes of PR #10 must stay outside the approval card.

@@ -73,8 +73,9 @@ and the time. The id at the end (`#3`) is the cell id for `/show`.
 
 A summary line uses these words: `ran 2 commands`, `read 1 file`, `edited 1 file`, `wrote 1 file`, `started job 3.5`,
 `asked the model 2 questions`, `ran 1 sub-program`, `read the store`, `wrote the store` and `read the memory`. A cell
+of the controller also uses `listed the sessions`, `sent 1 message`, `started 1 session` and `ran 1 probe`. A cell
 with no call says `Ran a cell · 3 lines of output`. A cell that failed starts with `✗`, for example
-`✗ The cell did not compile · 2 errors  #3`. A call that waits for an approval adds a card under the summary line
+`✗ The cell did not compile · 2 errors  #3`. The count is the count of the compiler, not the lines of its text. A call that waits for an approval adds a card under the summary line
 ([The sandbox and approvals](sandbox.md)).
 
 Ctrl-O switches between the summary line and the full form. The full form shows the code and each call with the
