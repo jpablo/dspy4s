@@ -185,7 +185,7 @@ class ViewLaws extends munit.FunSuite:
       val ended  = Logged(2L, log.head.meta, Entry.TurnEnded(outcome))
       val report = reports(SessionId("s1"), Source.Controller, owned :+ ended).lastOption.map(_.text)
       assert(report.nonEmpty, outcome.toString)
-      // The next line of the report is for the owner: it says that the session stays open.
+      // The next lines of the report are for the owner: they say that the session stays open, and they give its folder.
       assertEquals(entryText(ended), report.map(_.linesIterator.next()), outcome.toString)
     }
     assertEquals(entryText(Support.logOf(1000L, Entry.TurnEnded(TurnOutcome.Replied("done"))).head), None)

@@ -1,5 +1,6 @@
 package dspy4s.harness.kernel
 
+import dspy4s.harness.guest.Scope
 import munit.ScalaCheckSuite
 import org.scalacheck.Gen
 import org.scalacheck.Prop.forAll
@@ -162,9 +163,50 @@ class ReportLaws extends ScalaCheckSuite:
   // In the live session of 2026-11-15, the controller read "The turn ended with submit: ..." as the end of the session.
   // So it did not use tell for more work, and it started a new session for the same work.
   test("Report: the report of a turn says that the session stays open and that tell gives it more work") {
-    val open = s"The session ${session.value} stays open. To give it more work, send it a message with tell."
-    outcomes.foreach(outcome => assertEquals(textOf(Entry.TurnEnded(outcome)), s"${outcome.report}\n$open"))
+    val open   = s"The session ${session.value} stays open. To give it more work, send it a message with tell."
+    val folder = "The folder of the session is /tmp/session. A relative path in this report is a path in that folder."
+    outcomes.foreach(outcome => assertEquals(textOf(Entry.TurnEnded(outcome)), s"${outcome.report}\n$open\n$folder"))
     // The end of the session closes it, so its report has no such line.
     val end = SessionOutcome.Abandoned("not needed")
     assertEquals(textOf(Entry.Ended(end, "not needed")), end.report("not needed"))
+  }
+
+  // In the live session of 2026-11-15, a work session submitted `hello.txt`, a path in its folder. The report gave only
+  // that path, so the controller ran an observe probe after each report to learn the folder of the session.
+  test("Report: a report of a turn names the folder of the last activation, so the owner can find a relative path") {
+    def folderLine(path: String): String =
+      s"The folder of the session is $path. A relative path in this report is a path in that folder."
+    def withScope(scope: Scope): SessionConfig                = config().copy(scope = scope)
+    def textAfter(activations: Vector[SessionConfig]): String =
+      val log = journalFrom(
+        (activations.map(c => Source.Harness -> activated(c)) ++
+          turn(TurnOutcome.Submitted(Json.String("hello.txt")), owner))*
+      )
+      reports(session, owner, log).lastOption.fold(fail("no report"))(_.text)
+    val scopes = Vector(
+      Scope.Scratch("/tmp/a")                           -> "/tmp/a",
+      Scope.Directory("/tmp/b")                         -> "/tmp/b",
+      Scope.Worktree("/tmp/c", "jp/c", "/repo", "main") -> "/tmp/c",
+      Scope.Fork("/tmp/d", "/tmp/a")                    -> "/tmp/d",
+      Scope.Home("/home/e")                             -> "/home/e"
+    )
+    scopes.foreach { (scope, path) =>
+      val text = textAfter(Vector(withScope(scope)))
+      assertEquals(text.linesIterator.toVector.last, folderLine(path), text)
+    }
+    // A later activation can have another scope, and its folder counts.
+    val moved = textAfter(Vector(withScope(Scope.Scratch("/tmp/old")), withScope(Scope.Directory("/tmp/new"))))
+    assertEquals(moved.linesIterator.toVector.last, folderLine("/tmp/new"), moved)
+    // A scope with no path names no folder.
+    val empty = textAfter(Vector(withScope(Scope.Scratch(""))))
+    assert(!empty.contains("The folder of the session"), empty)
+    // The report of the end of a goal loop names the folder too.
+    val loop = journalFrom(
+      (Vector(Source.Harness -> activated(withScope(Scope.Directory("/tmp/loop")).copy(goal = Some("tests pass")))) ++
+        Vector(input("m1", owner), Source.Harness -> Entry.GoalLoopStarted(3)) ++
+        turn(TurnOutcome.Submitted(Json.String("done")), Source.Harness).drop(1) ++
+        Vector(Source.Harness -> Entry.GoalLoopEnded(LoopEnd.Limit)))*
+    )
+    val loopText = reports(session, owner, loop).lastOption.fold(fail("no report"))(_.text)
+    assertEquals(loopText.linesIterator.toVector.last, folderLine("/tmp/loop"), loopText)
   }

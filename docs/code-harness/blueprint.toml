@@ -799,7 +799,7 @@ name = "reports"
 ref = "8.6"
 uses = ["session-id", "source", "logged", "command"]
 proof_uses = ["session-outcome", "turn-outcome"]
-text = "A report is a pure function of the journal of the session. Its text gives the outcome in words: the end of a turn (TurnOutcome.report) and a line that says that the session stays open and that tell gives it more work, or the end of the session (SessionOutcome.words) and its reason one time."
+text = "A report is a pure function of the journal of the session. Its text gives the outcome in words: the end of a turn (TurnOutcome.report), a line that says that the session stays open and that tell gives it more work, and a line with the folder of the scope of the last activation, so that the owner can find a relative path, or the end of the session (SessionOutcome.words) and its reason one time."
 
 [[node]]
 id = "owes"

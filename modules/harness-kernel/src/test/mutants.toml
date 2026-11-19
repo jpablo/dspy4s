@@ -182,6 +182,20 @@ old = "case TurnOutcome.Submitted(_) | TurnOutcome.Exhausted | TurnOutcome.Abort
 new = "case TurnOutcome.Submitted(_) | TurnOutcome.Exhausted | TurnOutcome.Aborted | TurnOutcome.Replied(_) => true"
 
 [[mutant]]
+name = "Mutant: a report of a turn names no folder"
+[[mutant.edit]]
+file = "Reports.scala"
+old = "if folder.isEmpty then Vector(open) else Vector(open, where)"
+new = "if folder.isEmpty || where.nonEmpty then Vector(open) else Vector(open, where)"
+
+[[mutant]]
+name = "Mutant: a report of a turn names the folder of the first activation"
+[[mutant.edit]]
+file = "Reports.scala"
+old = "case Entry.Activated(_, config) => debt.copy(looping = false, folder = folderOf(config.scope))"
+new = "case Entry.Activated(_, config) => debt.copy(looping = false, folder = if debt.folder.isEmpty then folderOf(config.scope) else debt.folder)"
+
+[[mutant]]
 name = "Mutant: a pending call in a session with no person"
 [[mutant.edit]]
 file = "Approvals.scala"
@@ -440,8 +454,8 @@ new = "case Entry.TurnEnded(outcome) if debt.looping && !debt.open =>"
 name = "Mutant: the end of a goal loop with no debt gives no report"
 [[mutant.edit]]
 file = "Reports.scala"
-old = "case Entry.GoalLoopEnded(_)   => debt.copy(looping = false, due = debt.due :+ (logged -> debt.last))"
-new = "case Entry.GoalLoopEnded(_)   => debt.copy(looping = false, due = if debt.open then debt.due :+ (logged -> debt.last) else debt.due)"
+old = "case Entry.GoalLoopEnded(_)     => debt.copy(looping = false, due = debt.due :+ (logged, debt.last, debt.folder))"
+new = "case Entry.GoalLoopEnded(_)     => debt.copy(looping = false, due = if debt.open then debt.due :+ (logged, debt.last, debt.folder) else debt.due)"
 
 [[mutant]]
 name = "Mutant: the end of a goal loop starts the turn of a message that waits"

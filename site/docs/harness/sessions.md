@@ -122,6 +122,11 @@ A report of a turn has a second line: `The session <id> stays open. To give it m
 tell.` A session stays open after each turn. So, for a change to the work of a session, ask the controller to `tell`
 that session. A new session starts again from an empty folder.
 
+A report of a turn has a third line with the folder of the session: `The folder of the session is <path>. A relative
+path in this report is a path in that folder.` The path is the folder of the last activation of the session. So the
+controller can find a file that the report names with a relative path, for example `hello.txt`. The report of the end
+of a goal loop has the same two lines at its end.
+
 - The goal of `start` is a message from the controller. After a message from the controller, each end of a turn
   gives one report, until the work ends. This rule also applies to a turn that your message starts.
 - The work ends at a turn that ends with `submit`, or at a turn that used all its steps. It also ends at a stop, and at
