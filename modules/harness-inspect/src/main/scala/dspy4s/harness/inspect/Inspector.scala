@@ -1,11 +1,12 @@
 package dspy4s.harness.inspect
 
-import dspy4s.harness.host.ExchangeFile
+import dspy4s.harness.host.{ExchangeFile, SessionFile}
 import dspy4s.harness.kernel.SessionId
 import zio.blocks.schema.json.Json
 
 import com.sun.net.httpserver.{HttpExchange, HttpServer}
 
+import java.io.{IOException, OutputStream}
 import java.net.{InetAddress, InetSocketAddress, URI}
 import java.nio.charset.StandardCharsets.UTF_8
 import java.nio.file.{Files, Path}
@@ -51,10 +52,22 @@ object Inspector:
 private[inspect] final case class Reply(
     status     : Int,
     contentType: String,
-    body       : String,
+    body       : Body,
     page       : Boolean        = false,
     download   : Option[String] = None
 )
+
+/** The body of a reply. */
+private[inspect] enum Body:
+
+  /** A text. The reply has its exact length. */
+  case Text(text: String)
+
+  /** The bytes that `write` sends to the stream of the reply when it reads them. The reply is chunked and has no
+    * length, so the server does not hold a whole file (5.5). `close` frees what `write` reads, for example an open
+    * journal. It runs after `write`, also when `write` fails or does not run.
+    */
+  case Stream(write: OutputStream => Unit, close: () => Unit)
 
 /** The routes of the inspector (5.1, 5.2 and 5.5).
   *
@@ -81,7 +94,7 @@ private[inspect] final class Routes(store: Store, port: Int):
             exchange.getRequestURI,
             nonce
           )
-        catch case NonFatal(e) => Reply(500, "text/plain", s"The inspector failed: $e")
+        catch case NonFatal(e) => Reply(500, "text/plain", Body.Text(s"The inspector failed: $e"))
       val headers = exchange.getResponseHeaders
       headers.set("Content-Type", s"${reply.contentType}; charset=utf-8")
       headers.set("Cache-Control", "no-store")
@@ -96,15 +109,28 @@ private[inspect] final class Routes(store: Store, port: Int):
           s"default-src 'none'; script-src 'nonce-$nonce'; style-src 'unsafe-inline'; connect-src 'self'; " +
             "img-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'"
         )
-      val bytes = reply.body.getBytes(UTF_8)
-      exchange.sendResponseHeaders(reply.status, if bytes.isEmpty then -1 else bytes.length.toLong)
-      if bytes.nonEmpty then exchange.getResponseBody.write(bytes)
-    finally exchange.close()
+      reply.body match
+        case Body.Text(text) =>
+          val bytes = text.getBytes(UTF_8)
+          exchange.sendResponseHeaders(reply.status, if bytes.isEmpty then -1 else bytes.length.toLong)
+          if bytes.nonEmpty then exchange.getResponseBody.write(bytes)
+        case Body.Stream(write, close) =>
+          // The length 0 makes a chunked reply.
+          try
+            exchange.sendResponseHeaders(reply.status, 0)
+            write(exchange.getResponseBody)
+          finally close()
+      exchange.close()
+    // A failure after the headers must not look like a complete reply. `exchange.close()` sends the last chunk, so after
+    // a failure only an exchange with no headers closes here. A later failure goes on to the server, and the server
+    // closes the connection with no last chunk (JDK 21, `ServerImpl.Exchange.run`).
+    finally if exchange.getResponseCode == -1 then exchange.close()
 
   /** The reply to a request with `method`, the `Host` header `host`, and `uri`. */
   def answer(method: String, host: Option[String], uri: URI, nonce: String): Reply =
-    if !host.exists(h => h == s"127.0.0.1:$port" || h == s"localhost:$port") then Reply(403, "text/plain", "")
-    else if method != "GET" then Reply(405, "text/plain", "Only GET.")
+    if !host.exists(h => h == s"127.0.0.1:$port" || h == s"localhost:$port") then
+      Reply(403, "text/plain", Body.Text(""))
+    else if method != "GET" then Reply(405, "text/plain", Body.Text("Only GET."))
     else
       val parts = uri.getRawPath.split('/').toList.filter(_.nonEmpty)
       parts match
@@ -118,7 +144,7 @@ private[inspect] final class Routes(store: Store, port: Int):
         case "s" :: id :: "after" :: seq :: Nil => withSession(id) { s =>
             seq.toLongOption.fold(missing) { from =>
               val size = query(uri).get("size").flatMap(_.toLongOption).getOrElse(-1L)
-              Pages.after(store, s, from, size).fold(failed, Reply(200, "text/html", _))
+              Pages.after(store, s, from, size).fold(failed, html => Reply(200, "text/html", Body.Text(html)))
             }
           }
         case "p" :: name :: Nil                    => if store.hasProbe(name) then page(Pages.probe(store, name, nonce)) else missing
@@ -128,21 +154,22 @@ private[inspect] final class Routes(store: Store, port: Int):
           withSession(id)(s => saved(uri, s"${s.value}.http.jsonl", exchangeFile(s)))
         case "raw" :: id :: "x" :: xid :: "request" :: Nil => withSession(id) { s =>
             exchange(s, xid).fold(missing)(x =>
-              saved(uri, s"${x.id}.request.json", Reply(200, "application/json", x.body))
+              saved(uri, s"${x.id}.request.json", Reply(200, "application/json", Body.Text(x.body)))
             )
           }
         case "raw" :: id :: "x" :: xid :: "reply" :: Nil => withSession(id) { s =>
             exchange(s, xid).fold(missing) { x =>
-              saved(uri, s"${x.id}.reply.txt", Reply(200, "text/plain", x.replied.mkString("\n")))
+              saved(uri, s"${x.id}.reply.txt", Reply(200, "text/plain", Body.Text(x.replied.mkString("\n"))))
             }
           }
         case _ => missing
 
-  private val missing: Reply = Reply(404, "text/plain", "Not found.")
+  private val missing: Reply = Reply(404, "text/plain", Body.Text("Not found."))
 
-  private def failed(error: String): Reply = Reply(500, "text/plain", error)
+  private def failed(error: String): Reply = Reply(500, "text/plain", Body.Text(error))
 
-  private def page(html: Either[String, String]): Reply = html.fold(failed, Reply(200, "text/html", _, page = true))
+  private def page(html: Either[String, String]): Reply =
+    html.fold(failed, h => Reply(200, "text/html", Body.Text(h), page = true))
 
   private def withSession(id: String)(run: SessionId => Reply): Reply =
     if SessionId.valid(id) && store.has(SessionId(id)) then run(SessionId(id)) else missing
@@ -159,22 +186,34 @@ private[inspect] final class Routes(store: Store, port: Int):
   private def exchange(session: SessionId, id: String): Option[Exchange] =
     store.exchanges(session)._1.find(_.id == id)
 
-  /** Each row of the journal as one JSON line: its `seq`, its `required` flag, and its entry as it is in the file. */
+  /** Each row of the journal as one JSON line: its `seq`, its `required` flag, and its entry as it is in the file. The
+    * journal opens before the headers go, so an error of its open gets the reply 500. Each line goes when the read gets
+    * its row, so the server does not hold the whole journal. A read that fails later throws, so the reply has no last
+    * chunk (`handle`).
+    */
   private def journal(session: SessionId): Reply =
-    store.rows(session, 0L).fold(
+    store.journal(session).fold(
       failed,
-      rows =>
-        val lines = rows.map { row =>
-          val entry = Json.parse(row.text).getOrElse(Json.String(row.text))
-          Json.Object("seq" -> Json.Number(row.seq), "required" -> Json.Boolean(row.required), "entry" -> entry).print
-        }
-        Reply(200, "text/plain", lines.map(_ + "\n").mkString)
+      file =>
+        def write(out: OutputStream): Unit =
+          file.eachRow(0L)(row => out.write(s"${line(row)}\n".getBytes(UTF_8))).left.foreach(e => throw IOException(e))
+        Reply(200, "text/plain", Body.Stream(write, () => file.close()))
     )
 
+  /** The JSON line of `row` in the raw journal, with no end of line. */
+  private def line(row: SessionFile.Row): String =
+    val entry = Json.parse(row.text).getOrElse(Json.String(row.text))
+    Json.Object("seq" -> Json.Number(row.seq), "required" -> Json.Boolean(row.required), "entry" -> entry).print
+
+  /** The exchange file with its bytes as they are on the disk, or an empty text when the session has no file. The file
+    * opens before the headers go, and its bytes go when the server reads them.
+    */
   private def exchangeFile(session: SessionId): Reply =
     val path = ExchangeFile.pathOf(store.root, session)
-    if !Files.isRegularFile(path) then Reply(200, "text/plain", "")
-    else Reply(200, "text/plain", Files.readString(path, UTF_8))
+    if !Files.isRegularFile(path) then Reply(200, "text/plain", Body.Text(""))
+    else
+      val in = Files.newInputStream(path)
+      Reply(200, "text/plain", Body.Stream(out => in.transferTo(out): Unit, () => in.close()))
 
   private def query(uri: URI): Map[String, String] =
     Option(uri.getRawQuery).toVector.flatMap(_.split('&')).flatMap { pair =>

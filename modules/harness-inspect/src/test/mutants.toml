@@ -180,15 +180,29 @@ new = '<pre id="request-exact" hidden>${escape(pretty(x.body))}</pre>'
 name = "Mutant: the exchange file goes as NDJSON, so a browser saves it and does not show it"
 [[mutant.edit]]
 file = "Inspector.scala"
-old = 'else Reply(200, "text/plain", Files.readString(path, UTF_8))'
-new = 'else Reply(200, "application/x-ndjson", Files.readString(path, UTF_8))'
+old = 'Reply(200, "text/plain", Body.Stream(out => in.transferTo(out): Unit, () => in.close()))'
+new = 'Reply(200, "application/x-ndjson", Body.Stream(out => in.transferTo(out): Unit, () => in.close()))'
 
 [[mutant]]
 name = "Mutant: the rows of the journal go as NDJSON"
 [[mutant.edit]]
 file = "Inspector.scala"
-old = 'Reply(200, "text/plain", lines.map(_ + "\n").mkString)'
-new = 'Reply(200, "application/x-ndjson", lines.map(_ + "\n").mkString)'
+old = 'Reply(200, "text/plain", Body.Stream(write, () => file.close()))'
+new = 'Reply(200, "application/x-ndjson", Body.Stream(write, () => file.close()))'
+
+[[mutant]]
+name = "Mutant: the raw journal goes as one text, so the server holds the whole file"
+[[mutant.edit]]
+file = "Inspector.scala"
+old = 'Reply(200, "text/plain", Body.Stream(write, () => file.close()))'
+new = 'Reply(200, "text/plain", Body.Text { val all = java.io.ByteArrayOutputStream(); try write(all) finally file.close(); all.toString(UTF_8) })'
+
+[[mutant]]
+name = "Mutant: a read that fails after the headers closes the exchange, so a part of the journal looks complete"
+[[mutant.edit]]
+file = "Inspector.scala"
+old = 'finally if exchange.getResponseCode == -1 then exchange.close()'
+new = 'finally exchange.close()'
 
 [[mutant]]
 name = "Mutant: download=1 gives no name to save"

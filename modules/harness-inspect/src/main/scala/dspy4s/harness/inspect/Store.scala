@@ -9,7 +9,8 @@ import scala.util.{Try, Using}
 
 /** The files of the root `root` of a host, for the inspector (docs/code-harness/OBSERVABILITY.md, 5.1). It only reads:
   * a journal and the catalog open with `mode=ro`, and an exchange file is a plain read. Each call opens its file and
-  * closes it again, so the inspector holds no connection while it waits.
+  * closes it again, so the inspector holds no connection while it waits. Only `journal` gives an open file to its
+  * caller, and the caller closes it.
   */
 final class Store(val root: Path):
 
@@ -46,6 +47,13 @@ final class Store(val root: Path):
   /** The rows of the journal of `session` from `from` on. */
   def rows(session: SessionId, from: Long): Either[String, Vector[SessionFile.Row]] =
     read(SessionFile.pathOf(root, session), session, from)
+
+  /** The journal of `session`, open to read with `mode=ro`, or the error of its open. The caller gives its rows to a
+    * function with `SessionFile.eachRow`, and then it closes the file. So a reply finds an error of the open before it
+    * sends its headers, and it does not hold all the rows (5.5).
+    */
+  def journal(session: SessionId): Either[String, SessionFile] =
+    SessionFile.readOnly(SessionFile.pathOf(root, session), session)
 
   /** The last `count` rows of the journal of `session` at most, with the `seq` where the read starts: `count` before
     * the end, or 0. The writer gives the entries the `seq` 0, 1, 2 and on, so the journal has that many rows before the

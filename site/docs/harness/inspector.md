@@ -125,6 +125,8 @@ exchange, the `seq` of its entry (`after #41`), the links `earlier` and `later`,
 **The raw paths.** `/raw/<id>/journal.jsonl` gives each row of the journal as one JSON line. `/raw/<id>/http.jsonl`
 gives the exchange file. `/raw/<id>/x/<xid>/request` gives the exact request body of one exchange, and
 `/raw/<id>/x/<xid>/reply` gives its reply: the body, or the lines of a stream. Add `?download=1` to save the file.
+The server sends the journal and the exchange file while it reads them, so a long session needs little memory. When a
+read fails in the middle, the reply ends with no last chunk, and `curl` gives the exit code 18.
 
 ```bash
 curl -s http://127.0.0.1:7411/raw/<id>/http.jsonl | jq -c '{kind, predictor, after}'

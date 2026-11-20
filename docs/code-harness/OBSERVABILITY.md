@@ -349,6 +349,13 @@ Four buttons select its view. A row of the tree links to the page.
 
 So `curl` and `jq` can read each item, and so can an agent.
 
+The server sends `journal.jsonl` and `http.jsonl` as a chunked reply: it writes each row or each part of the file as
+it reads it, so it never holds a whole file. The first version put all the rows in one text before the first byte,
+and the raw journal of a session with 502,180 entries (158 MB) took an RSS of 2.5 GB (found on 2026-11-19). A journal
+that does not open gets 500 with the error, before any byte of the rows. A read that fails after the headers ends the
+connection with no last chunk, so a client does not take a part of the file for the whole file: `curl` gives the exit
+code 18, and the `HttpClient` of Java gives an `IOException`.
+
 A browser shows each raw path, because the server sends it as text: `text/plain`, or `application/json` for the body
 of a request, each with `charset=utf-8`. The first version sent the two files as `application/x-ndjson`. A browser does
 not show that type, so it saved the file in Downloads with the name `http.jsonl.ndjson` (found on 2026-11-12).
@@ -408,7 +415,9 @@ The inspector:
   the session. A reader that follows a journal while a writer appends gets each row once, in order.
 - **The pages.** Each exchange shows after its entry, and an exchange with no reply shows as open. The list of the
   sessions comes from the catalog, and from the journals with no catalog. The raw paths give the rows, the exchange
-  file and the bodies of an exchange, and a path that leaves the root gets 404.
+  file and the bodies of an exchange, and a path that leaves the root gets 404. The rows and the exchange file go as
+  a chunked reply with no `Content-Length`, with the same bytes. A read of the rows that fails after the headers
+  gives a reply with no last chunk.
 - **L16. The diff.** The diff of `a` and `b`, applied to `a`, gives `b`. The diff of `a` with `a` has no change. The
   kept lines occur in `a` and in `b` in the same order, and they are as many as the longest common subsequence. Each
   change is in one part, with at most three kept lines around it, and the line numbers of a part point at its lines.

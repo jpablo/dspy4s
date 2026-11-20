@@ -85,24 +85,30 @@ final class SessionFile private (private val connection: Connection, val path: P
 
   /** The rows with a `seq` from `from` on, in the order of `seq`, as they are in the file: each with the text of its
     * `entry` column and its decoded value, or the error of its decode (docs/code-harness/OBSERVABILITY.md, 5.3). A row
-    * that does not decode is a row too, so a reader can show it.
+    * that does not decode is a row too, so a reader can show it. The rows come from `eachRow`.
     */
   def rows(from: Long): Either[String, Vector[SessionFile.Row]] =
+    val out = Vector.newBuilder[SessionFile.Row]
+    eachRow(from)(row => out += row: Unit).map(_ => out.result())
+
+  /** Gives each row of `rows(from)` to `use`, in the same order, when the read gets it from the file. So a reader that
+    * sends each row on does not hold all the rows (5.5). An exception of the read or of `use` stops the read, and its
+    * message comes in the error.
+    */
+  def eachRow(from: Long)(use: SessionFile.Row => Unit): Either[String, Unit] =
     Try {
       Using.resource(connection.prepareStatement(SessionFile.Select)) { select =>
         select.setString(1, session.value)
         select.setLong(2, from)
         Using.resource(select.executeQuery()) { rows =>
-          val out = Vector.newBuilder[SessionFile.Row]
           while rows.next() do
             val text = rows.getString(3)
-            out += SessionFile.Row(
+            use(SessionFile.Row(
               rows.getLong(1),
               rows.getBoolean(2),
               text,
               SessionFile.codec.decode(text).left.map(_.toString)
-            )
-          out.result()
+            ))
         }
       }
     }.toEither.left.map(e => s"the read of the journal $path failed: ${e.getMessage}")
@@ -203,7 +209,7 @@ object SessionFile:
   def pathOf(root: Path, session: SessionId): Path = folderOf(root).resolve(s"${session.value}.db")
 
   /** One row of a journal as it is in the file: its `seq`, its `required` flag, the text of its `entry` column, and its
-    * decoded value or the error of its decode (`SessionFile.rows`).
+    * decoded value or the error of its decode (`SessionFile.rows` and `SessionFile.eachRow`).
     */
   final case class Row(seq: Long, required: Boolean, text: String, logged: Either[String, Logged]) derives CanEqual
 

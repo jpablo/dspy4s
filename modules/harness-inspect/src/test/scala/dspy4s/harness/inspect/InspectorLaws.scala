@@ -13,10 +13,12 @@ import org.scalacheck.Prop.forAllNoShrink
 import zio.blocks.schema.Schema
 import zio.blocks.schema.json.Json
 
-import java.io.{BufferedReader, InputStreamReader, PrintStream}
+import java.io.{BufferedReader, IOException, InputStreamReader, PrintStream}
 import java.net.http.HttpResponse.BodyHandlers
 import java.net.http.{HttpClient, HttpRequest}
 import java.net.{Socket, URI}
+import java.nio.ByteBuffer
+import java.nio.channels.FileChannel
 import java.nio.charset.StandardCharsets.UTF_8
 import java.nio.file.attribute.PosixFilePermissions
 import java.nio.file.{Files, Path, StandardOpenOption}
@@ -396,6 +398,54 @@ class InspectorLaws extends ScalaCheckSuite:
         assertEquals(get(inspector, s"/raw/${session.value}/x/$xid/reply")._2, "data: {\"a\":1}\n\ndata: [DONE]")
         assertEquals(get(inspector, s"/raw/${session.value}/x/fake-none/request")._1, 404)
         assertEquals(get(inspector, "/raw/..%2F..%2Fetc/journal.jsonl")._1, 404)
+      }
+    }
+  }
+
+  // On 2026-11-19 the raw journal of a session with 502,180 entries (158 MB) took an RSS of 2.5 GB, because the route
+  // put all its rows in one text before it sent the first byte.
+  test("Inspect: the raw journal and the exchange file go as a chunked reply, with each byte as before") {
+    withRoot { root =>
+      val (session, _) = fixture(root)
+      serving(root) { inspector =>
+        Vector(s"/raw/${session.value}/journal.jsonl", s"/raw/${session.value}/http.jsonl").foreach { path =>
+          val head = rawRequest(inspector.port, "GET", s"127.0.0.1:${inspector.port}", path)
+            .linesIterator.takeWhile(_.nonEmpty).toVector
+          assert(head.headOption.exists(_.startsWith("HTTP/1.1 200")), head.mkString("\n"))
+          val names = head.drop(1).map(_.toLowerCase)
+          assert(names.contains("transfer-encoding: chunked"), head.mkString("\n"))
+          assert(!names.exists(_.startsWith("content-length:")), head.mkString("\n"))
+        }
+        val (_, file) = get(inspector, s"/raw/${session.value}/http.jsonl")
+        assertEquals(file, Files.readString(ExchangeFile.pathOf(root, session), UTF_8))
+        val (_, journalText) = get(inspector, s"/raw/${session.value}/journal.jsonl")
+        assert(journalText.endsWith("\n"), journalText.takeRight(80))
+        assert(journalText.linesIterator.forall(l => Json.parse(l).toOption.isDefined), journalText.take(400))
+        assertEquals(journalText.linesIterator.size, rowsOf(root, session).size)
+      }
+    }
+  }
+
+  // A client must not take a part of the journal for the whole journal.
+  test("Inspect: a read of the raw journal that fails after the headers gives a reply with no last chunk") {
+    withRoot { root =>
+      val session = SessionId("fake-session-2")
+      val path    = SessionFile.pathOf(root, session)
+      val file    = SessionFile.open(path, session).fold(e => fail(e), identity)
+      val log     = Support.logOf(1000L, (0 until 3000).map(i => Entry.Input(RequestId(s"r$i"), s"FAKE $i", Map.empty))*)
+      try assertEquals(file.append(log, flush = true), Right(()))
+      finally file.close()
+      // A page in the middle of the file with no valid header. The open does not read it, and the read fails at it.
+      val pages   = Files.size(path) / 4096
+      val channel = FileChannel.open(path, StandardOpenOption.WRITE)
+      try channel.write(ByteBuffer.wrap(Array.fill[Byte](4096)(-1)), pages / 2 * 4096): Unit
+      finally channel.close()
+      serving(root) { inspector =>
+        val raw  = s"/raw/${session.value}/journal.jsonl"
+        val head = rawRequest(inspector.port, "GET", s"127.0.0.1:${inspector.port}", raw).linesIterator.toVector
+        assert(head.headOption.exists(_.startsWith("HTTP/1.1 200")), head.take(12).mkString("\n"))
+        assert(head.map(_.toLowerCase).contains("transfer-encoding: chunked"), head.take(12).mkString("\n"))
+        intercept[IOException](send(inspector, raw)): Unit
       }
     }
   }
