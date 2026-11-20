@@ -1586,6 +1586,38 @@ of them.
   small for its summaries to hold the facts: about 13,000 characters for 24 parts. With the 64 to 128 KB of UniiChat,
   the view would hold each of these 170 messages as its own line.
 
+**The large-view test (2026-11-20).** 3 more live sessions ran the same 50-turn task with the same model and
+`--no-memory-calls`, but with a view of 200 parts in place of 24. The budget of the input was 135,744 characters in
+place of 40,000: 40,000 + `room(200)` - `room(24)`. So the open turn got the same characters as before, and only the
+view changed. Two switches of a test build set these two values, and the code of `main` does not have them.
+
+| | Summary calls, 24 parts | No summary calls, 24 parts | No summary calls, 200 parts |
+|---|---|---|---|
+| Points | 38 of 42 | 37 of 42 | 42 of 42 (14, 14 and 14) |
+| Time in the turns | 383.5 s | 113.7 s | 97.6 s |
+| Mean time of a turn, turns 1 to 10 and turns 41 to 50 | 6.4 s and 11.2 s | 2.0 s and 3.5 s | 2.1 s and 2.1 s |
+| The last turn | 46.8 s, 10.0 steps, 12.7 `zoom` calls | 18.8 s, 9.7 steps, 8.3 `zoom` calls | 3.5 s, 2.0 steps, 1.3 `zoom` calls |
+| Prompt tokens of the policy calls of a session | 724,339, 82% from the cache | 696,372, 80% from the cache | 1,174,755, 91% from the cache |
+
+- A pilot with the same build got 14 of 14 points too.
+- At the start of the last turn, the view had 148 to 156 parts in 46,000 to 52,000 characters. Each part was a message
+  of level 0, and the view held each of the 10 facts. No message of a fact had more than 512 bytes, so
+  `MemoryLine.of` cut none of them.
+- In two of the three last turns, the model made no `zoom` call. It answered from the view.
+- The view only gets new lines at its end, so the prompt cache held 91% of the prompt tokens. A session sent about
+  105,000 tokens that were not in the cache. With the view of 24 parts, a session sent about 127,000 with the summary
+  calls and about 141,000 without them.
+- So at 50 turns, the size of the view decides the answers, not the summaries. A view that holds each message as its
+  own line gives each fact to the model, and with no summary calls it is also the fastest of the three.
+- The test has limits:
+  - It used one task, with short messages, and about 150 messages. With no summary calls, a message of more than 512
+    bytes keeps only its first 512 bytes in its line.
+  - At more than 200 parts, `fit` joins old parts until the view has 100 parts. With no summary calls, a joined part
+    keeps only the first 512 bytes of the lines of its two halves. So a longer session still needs the summaries, or
+    a larger view.
+  - The view of 200 parts takes about 109,000 characters of each prompt.
+  - The test did not run the summary calls with the large view.
+
 **The words.** The user calls these folds projections, as the read models of event sourcing
 ([CODE_HARNESS.md](CODE_HARNESS.md), 8.2). In this code, `Projection` is the input of one step, and `project` makes it.
 So this section uses the word derivation, as [CODE_HARNESS.md](CODE_HARNESS.md), 7.2, does. Section 3 has the three
@@ -1710,12 +1742,15 @@ with no `shorten` call, a `shorten` call that spends no budget, and a close that
 - In the script mode of the CLI, the next message comes right after a turn, so the builder has little time between
   turns, and more lines are stand-ins. A person needs more time to write a message. So the script of step 5 must wait
   between the messages. Without the wait, it measures only the stand-ins.
-- The comparisons of 15 and 50 turns did not show that the summaries give better answers. A run of the 50-turn task
-  with a much larger view and no summary calls can show whether the size of the view is the change that helps.
+- The comparisons of 15 and 50 turns did not show that the summaries give better answers. The large-view test of
+  2026-11-20 showed that the size of the view is the change that helps.
+- The large-view test supports a new order of the work. First, a view that counts bytes, with a large limit, and a
+  merge only when the view passes its limit. Then the builder, because a session needs summaries only when it is longer
+  than its view. The order of the work above stays until the user chooses.
 - These ideas come from UniiChat. They are proposals, not choices:
   - A view that counts bytes, with a much larger limit. With a limit near that of UniiChat, the sessions of the live
     comparison make no merge. The budget of the input, 40,000 characters now, must grow too. This change does not
-    need the builder.
+    need the builder. The large-view test supports this proposal.
   - A cheaper model for the summaries. Section 7.1 says that it comes later.
   - A merge only when the view passes its limit. This rule makes fewer merges than choice 9.
   - New calls with the cut point in place of `shorten`, and a ruler in the task.
