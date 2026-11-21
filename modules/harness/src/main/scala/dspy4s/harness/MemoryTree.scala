@@ -105,15 +105,16 @@ object MemoryProgress:
 /** The memory tree (CODE_HARNESS.md, 6; CODE_HARNESS_DESIGN.md, 7.1): the strategy of a long work session.
   *
   *   - `update` takes the stand-ins out of the memory (`Memory.withoutStandIns`) when the budget of the summaries has a
-  *     call, appends the new messages of the journal (`MemoryLog`), builds each ready node, and advances `View.empty`
-  *     to `MemoryLog.beforeOpenTurn` with `View.advance` and at most `viewChars` characters (7.2, choice 10). The size
-  *     of a part is the length of its line, and the view of the last update can have its sizes from stand-ins. So each
-  *     update makes the view again, and two updates give the same state as one update on the full journal. The rounds
-  *     build each stand-in again, so each part of the last view is built again. A node gets the line of the store for
-  *     its key, or a new line: a message of 512 bytes or less is its own line, `compress` makes the line of a longer
-  *     message, and `merge` makes the line of a node from the lines of its halves. The nodes of one round do not need
-  *     each other, so their leaf calls run at the same time, at most `width` at a time. The new lines of each round go
-  *     to the store with one `putAll`, so a long update keeps the rounds that it ended.
+  *     call, appends the new messages of the journal (`MemoryLog`), and advances the view to `MemoryLog.beforeOpenTurn`
+  *     with `View.advance` and at most `viewChars` characters (7.2, choice 10). The size of a part reads only the
+  *     messages (`ViewLimit.lineChars`), and the view joins on `Memory.planned`, so a summary never changes the view.
+  *     Then `update` builds only the nodes that the newest view of all the messages needs (`View.needed`, 7.2, choice
+  *     9). These include each part of the view of the last reply, so each part has a line. Two updates give the same
+  *     state as one update on the full journal. The rounds build each needed stand-in again. A node gets the line of
+  *     the store for its key, or a new line: a message of 512 bytes or less is its own line, `compress` makes the line
+  *     of a longer message, and `merge` makes the line of a node from the lines of its halves. The nodes of one round
+  *     do not need each other, so their leaf calls run at the same time, at most `width` at a time. The new lines of
+  *     each round go to the store with one `putAll`, so a long update keeps the rounds that it ended.
   *   - A leaf runs through `leafRunner`, so a hard stop cuts it, and each call spends one call of `summaries`, the
   *     budget of the summaries of the turn, apart from the model calls of the policy. A reply of `compress` or `merge`
   *     with more than `MemoryLine.MaxBytes` bytes gets exactly one call of the third leaf, `shorten`, with the reply as
@@ -159,8 +160,11 @@ final class MemoryTree(
     val kept   = if budget.check().isRight then Memory.withoutStandIns(d.memory) else d.memory
     val added  = MemoryLog.messages(journal).drop(d.memory.log.size)
     val start  = added.foldLeft(kept)(Memory.append)
-    val memory = counted(start)(count => settle(start, budget, count))
-    val view   = View.advance(View.empty, memory, ViewLimit.chars(viewChars), MemoryLog.beforeOpenTurn(journal))
+    val shape  = Memory.planned(start)
+    val limit  = ViewLimit.chars(viewChars)
+    val view   = View.advance(d.view, shape, limit, MemoryLog.beforeOpenTurn(journal))
+    val needed = View.needed(View.advance(view, shape, limit, start.log.size.toLong))
+    val memory = counted(start, needed)(count => settle(start, needed, budget, count))
     Right(MemoryState(memory, view))
 
   def project(journal: Vector[Logged], d: MemoryState, budget: Int): Projection =
@@ -175,24 +179,28 @@ final class MemoryTree(
 
   /** The text of the part `ref` of the memory: the message of a part of level 0, or the lines of its two halves with
     * their references. A part that the memory does not have, or a text that is not a reference, gives an error with the
-    * top parts (`Memory.roots`), so the model can zoom one of them and go down, and does not guess a reference.
+    * parts that zoom (the parts of the view and of level 0), so the model can zoom one of them and go down, and does
+    * not guess a reference.
     */
   override def zoom(d: MemoryState, ref: String): Either[String, String] =
     NodeId.parse(ref) match
-      case None     => Left(MemoryTree.notReference(d.memory, ref))
+      case None     => Left(MemoryTree.notReference(d.memory, d.view, ref))
       case Some(id) => (Memory.zoom(d.memory, id), id.halves) match
           case (Some(Left(message)), _)                    => Right(message.text)
           case (Some(Right((older, newer))), Some((a, b))) =>
             Right(s"[${a.ref}] ${older.text}\n[${b.ref}] ${newer.text}")
-          case _ => Left(MemoryTree.noPart(d.memory, ref))
+          case _ => Left(MemoryTree.noPart(d.memory, d.view, ref))
 
-  /** Builds the ready nodes in rounds until no node is ready. The nodes of one round need only the nodes of the rounds
-    * before, so their lines come at the same time, at most `width` at a time, and they build in the order of `ready`.
-    * The new lines of each round go to the store with one `putAll`. A stand-in builds as a stand-in.
+  /** Builds the ready nodes of `needed` in rounds until no node of `needed` is ready. The nodes of one round need only
+    * the nodes of the rounds before, so their lines come at the same time, at most `width` at a time, and they build in
+    * the order of `ready`. The new lines of each round go to the store with one `putAll`. A stand-in builds as a
+    * stand-in.
     */
   @tailrec
-  private def settle(m: Memory, budget: Budget, count: SummaryCount)(using RuntimeContext): Memory =
-    val ready = Memory.ready(m)
+  private def settle(m: Memory, needed: Set[NodeId], budget: Budget, count: SummaryCount)(using
+      RuntimeContext
+  ): Memory =
+    val ready = Memory.ready(m).filter(needed)
     if ready.isEmpty then m
     else
       val made = inBatch(ready, width)(id => lineOf(m, id, budget, count)).fold((_, error) => throw error, identity)
@@ -201,25 +209,26 @@ final class MemoryTree(
       val grown = ready.zip(made).foldLeft(m) { case (acc, (id, MemoryTree.Made(line, _, standIn))) =>
         Memory.buildNode(acc, id, line, standIn)
       }
-      settle(grown, budget, count)
+      settle(grown, needed, budget, count)
 
-  /** Runs `build` with the count of the leaf calls that `settle` makes from `m` (`pending`), for `progress`. The count
-    * closes after `build`, also after a throw, so a failed or a stopped call also ends the summaries.
+  /** Runs `build` with the count of the leaf calls that `settle` makes from `m` for `needed` (`pending`), for
+    * `progress`. The count closes after `build`, also after a throw, so a failed or a stopped call also ends the
+    * summaries.
     */
-  private def counted(m: Memory)(build: SummaryCount => Memory): Memory =
-    val count = SummaryCount(pending(m), progress)
+  private def counted(m: Memory, needed: Set[NodeId])(build: SummaryCount => Memory): Memory =
+    val count = SummaryCount(pending(m, needed), progress)
     try build(count)
     finally count.close()
 
-  /** The number of leaf calls that `settle` makes from `m`: each node of its rounds with no line of the store and no
-    * short message. Each round builds each ready node, so these rounds build the same nodes as `settle`. They give each
-    * node a line of no text, so the count makes no leaf call. A node of a spent budget counts, and it ends at once. A
-    * node with a half that is a stand-in also counts, and it ends at once.
+  /** The number of leaf calls that `settle` makes from `m` for `needed`: each node of its rounds with no line of the
+    * store and no short message. Each round builds each ready node of `needed`, so these rounds build the same nodes as
+    * `settle`. They give each node a line of no text, so the count makes no leaf call. A node of a spent budget counts,
+    * and it ends at once. A node with a half that is a stand-in also counts, and it ends at once.
     */
-  private def pending(m: Memory): Int =
+  private def pending(m: Memory, needed: Set[NodeId]): Int =
     @tailrec
     def rounds(at: Memory, total: Int): Int =
-      val ready = Memory.ready(at)
+      val ready = Memory.ready(at).filter(needed)
       if ready.isEmpty then total
       else
         val leaves = ready.count(id => known(at, id, Memory.key(at, id)).isEmpty)
@@ -398,32 +407,43 @@ object MemoryTree:
     */
   private final case class Made(line: MemoryLine, stored: Option[(LineKey, MemoryLine)], standIn: Boolean)
 
-  /** The error of a zoom into the part `ref`, which the memory `m` does not have. It names the top parts of the memory,
-    * so the model can zoom one of them and go down. A memory with no message gives an error that says so.
+  /** The error of a zoom into the part `ref`, which the memory `m` does not have. It names the parts that zoom
+    * (`parts`), so the model can zoom one of them and go down. A memory with no message gives an error that says so.
     */
-  private[harness] def noPart(m: Memory, ref: String): String =
-    topParts(m).fold(s"the memory has no part $ref, because the memory is empty")(tops =>
-      s"the memory has no part $ref yet. $tops"
+  private[harness] def noPart(m: Memory, v: View, ref: String): String =
+    parts(m, v).fold(s"the memory has no part $ref, because the memory is empty")(named =>
+      s"the memory has no part $ref yet. $named"
     )
 
   /** The error of a zoom with `ref`, a text that is not a reference, for example a seq of the journal. It gives the
-    * form of a reference and the top parts of the memory `m`, so the model can zoom a part that exists.
+    * form of a reference and the parts that zoom (`parts`), so the model can zoom a part that exists.
     */
-  private[harness] def notReference(m: Memory, ref: String): String =
+  private[harness] def notReference(m: Memory, v: View, ref: String): String =
     val form = s"$ref is not a reference of the memory. A reference is level.index, for example 3.5."
-    topParts(m).fold(s"$form The memory is empty.")(tops => s"$form $tops")
+    parts(m, v).fold(s"$form The memory is empty.")(named => s"$form $named")
 
-  /** The text that names the top parts of the memory `m` (`Memory.roots`) and tells how to go down from them, or none
-    * for a memory with no message.
+  /** The most parts of the view that an error names one by one. */
+  private val NamedParts = 12
+
+  /** The text that names the parts of `m` that zoom, and tells how to go down from them, or none for a memory with no
+    * message. Each part of the view `v` has a line, and so do the nodes under it (`View.needed`), but a node above them
+    * can have none (7.2, choice 9). So the text names the parts of the view, and the parts of level 0, which give the
+    * messages.
     */
-  private def topParts(m: Memory): Option[String] =
-    val tops = Memory.roots(m.log.size.toLong).map(_.ref)
-    Option.when(tops.nonEmpty) {
+  private def parts(m: Memory, v: View): Option[String] =
+    Option.when(m.log.nonEmpty) {
+      val shown = v.parts.map(_.ref)
       val named =
-        if tops.size == 1 then s"The top part of the memory is ${tops.head}"
-        else s"The top parts of the memory are ${tops.mkString(", ")}"
-      s"$named. A zoom of a part shows its two halves with their references, or the message of a part of level 0. So " +
-        "zoom a top part, and then zoom a half of it."
+        if shown.isEmpty then ""
+        else if shown.size == 1 then s"The part of the view is ${shown.head}. "
+        else if shown.size <= NamedParts then s"The parts of the view are ${shown.mkString(", ")}. "
+        else
+          s"The view has ${shown.size} parts, from ${shown.head} to ${shown.last}, and each line of the field memory " +
+            "starts with its part. "
+      val messages =
+        if m.log.size == 1 then "0.0 gives the message" else s"0.0 to 0.${m.log.size - 1} give the messages"
+      s"${named}A zoom of a part of level 1 or more shows its two halves with their references, and $messages. So " +
+        "zoom a part of the view, and then zoom a half of it."
     }
 
   /** The characters of the field memory with a view of at most `viewChars` characters: the header, its newline and the

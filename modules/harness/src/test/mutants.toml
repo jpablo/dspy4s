@@ -662,15 +662,70 @@ new = "View(go(Nil, v.parts.toList, total))"
 name = "Mutant: lineChars counts the line with no reference"
 [[mutant.edit]]
 file = "Memory.scala"
-old = "digits(id.level.toLong) + 1 + digits(id.index) + 4 + l.text.length"
-new = "digits(id.level.toLong) * 0 + 1 + l.text.length"
+old = "digits(id.level.toLong) + 1 + digits(id.index) + 4 + line"
+new = "digits(id.level.toLong) * 0 + 1 + line"
+
+# ── The merges that a view needs (7.2, choice 9) ──
 
 [[mutant]]
-name = "Mutant: update advances the view of the last update"
+name = "Mutant: update makes each ready merge"
 [[mutant.edit]]
 file = "MemoryTree.scala"
-old = "View.advance(View.empty, memory, ViewLimit.chars(viewChars), MemoryLog.beforeOpenTurn(journal))"
-new = "View.advance(d.view, memory, ViewLimit.chars(viewChars), MemoryLog.beforeOpenTurn(journal))"
+old = "val ready = Memory.ready(m).filter(needed)"
+new = "val ready = Memory.ready(m).filter(needed ++ Memory.ready(m))"
+[[mutant.edit]]
+file = "MemoryTree.scala"
+old = "val ready = Memory.ready(at).filter(needed)"
+new = "val ready = Memory.ready(at).filter(needed ++ Memory.ready(at))"
+
+[[mutant]]
+name = "Mutant: the count of the leaf calls counts each ready merge"
+[[mutant.edit]]
+file = "MemoryTree.scala"
+old = "val ready = Memory.ready(at).filter(needed)"
+new = "val ready = Memory.ready(at).filter(needed ++ Memory.ready(at))"
+
+[[mutant]]
+name = "Mutant: needed has the parts of the view, but not the nodes under them"
+[[mutant.edit]]
+file = "Memory.scala"
+old = "case id :: more => under(id.halves.fold(more)((a, b) => a :: b :: more), found + id)"
+new = "case id :: more => under(id.halves.fold(more)((_, _) => more), found + id)"
+
+[[mutant]]
+name = "Mutant: lineChars reads the built line"
+[[mutant.edit]]
+file = "Memory.scala"
+old = "val line    = message.filter(MemoryLine.fits).fold(MemoryLine.MaxBytes)(_.length)"
+new = "val line    = m.built.get(id).fold(message.filter(MemoryLine.fits).fold(MemoryLine.MaxBytes)(_.length))(_.text.length)"
+
+[[mutant]]
+name = "Mutant: the view joins only the nodes that have a line"
+[[mutant.edit]]
+file = "MemoryTree.scala"
+old = "val view   = View.advance(d.view, shape, limit, MemoryLog.beforeOpenTurn(journal))"
+new = "val view   = View.advance(d.view, start, limit, MemoryLog.beforeOpenTurn(journal))"
+
+[[mutant]]
+name = "Mutant: needed comes from the view of the last reply, not from the newest view"
+[[mutant.edit]]
+file = "MemoryTree.scala"
+old = "val needed = View.needed(View.advance(view, shape, limit, start.log.size.toLong))"
+new = "val needed = View.needed(View.advance(view, shape, limit, view.upTo))"
+
+[[mutant]]
+name = "Mutant: planned gives no line to a node above level 0"
+[[mutant.edit]]
+file = "Memory.scala"
+old = "if acc.contains(id) then acc else acc.updated(id, Planned)"
+new = "if acc.contains(id) || id.level > 0 then acc else acc.updated(id, Planned)"
+
+[[mutant]]
+name = "Mutant: the error of a zoom names the roots, not the parts of the view"
+[[mutant.edit]]
+file = "MemoryTree.scala"
+old = "val shown = v.parts.map(_.ref)"
+new = "val shown = (Memory.roots(m.log.size.toLong) ++ v.parts.take(0)).map(_.ref)"
 
 [[mutant]]
 name = "Mutant: the room of the view has no limit"

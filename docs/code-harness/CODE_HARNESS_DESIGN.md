@@ -1620,7 +1620,30 @@ view changed. Two switches of a test build set these two values, and the code of
     keeps only the first 512 bytes of the lines of its two halves. So a longer session still needs the summaries, or
     a larger view.
   - The view of 200 parts takes about 109,000 characters of each prompt.
-  - The test did not run the summary calls with the large view.
+  - The test did not run the summary calls with the large view. Step 3 did (the next paragraph).
+
+**The 50-turn task after step 3 (2026-11-21).** 3 more live sessions ran the same task with the same model and the code
+of steps 2 and 3, with the summary calls: a view of 100,000 characters on top of the budget of 40,000, and only the
+merges that the view needs. The other columns come from the two paragraphs above.
+
+| | Summary calls, 24 parts | No summary calls, 200 parts | Summary calls, after step 3 |
+|---|---|---|---|
+| Points | 38 of 42 | 42 of 42 | 42 of 42 (14, 14 and 14) |
+| Time in the turns | 383.5 s | 97.6 s | 145.4 s |
+| Mean time of a turn, turns 1 to 10 and turns 41 to 50 | 6.4 s and 11.2 s | 2.1 s and 2.1 s | 3.0 s and 3.1 s |
+| Summary calls of a session | about 72 `compress`, 175 `merge` and 97 `shorten`, 235.7 s | none | about 56 `compress`, no `merge` and 0.7 `shorten`, 28.3 s |
+| The last turn | 46.8 s, 10.0 steps, 12.7 `zoom` calls | 3.5 s, 2.0 steps, 1.3 `zoom` calls | 5.2 s, 1.7 steps, 0.7 `zoom` calls |
+| Prompt tokens of the policy calls of a session | 724,339, 82% from the cache | 1,174,755, 91% from the cache | 948,855, 92% from the cache |
+
+- At the start of the last turn, the view had 152 to 163 parts of level 0, in 31,700 to 34,500 characters, and it
+  held each of the 10 facts. The `compress` lines of the long cells make the view smaller than the view of the test,
+  which had 46,000 to 52,000 characters.
+- A session sent about 71,000 prompt tokens that were not in the cache, the fewest of the four kinds of run.
+- The turns took 2.6 times less time than with the summary calls and 24 parts, but 1.5 times as long as with no
+  summary calls. The `compress` calls of each step cause the difference: the step waits for them until the builder
+  of step 5 comes.
+- So with the large view, the summary calls give the same answers as no summary calls in these 50 turns. They make
+  the view smaller, so a longer session can keep each message as a part for longer.
 
 **The words.** The user calls these folds projections, as the read models of event sourcing
 ([CODE_HARNESS.md](CODE_HARNESS.md), 8.2). In this code, `Projection` is the input of one step, and `project` makes it.
@@ -1678,6 +1701,11 @@ new words:
    halves, and these are under the part, so they have lines too. In the 15-turn sessions, this rule makes about 26
    merges in place of 46 to 49. With the large view of choice 10, these sessions make no merge. Until the builder
    comes, `update` keeps the same rule.
+   - Step 3 built this rule in `update` on 2026-11-21. The newest view is the view of `Memory.planned`: the memory
+     with a line of no text for each node that has no line. The size of a part (`ViewLimit.lineChars`) reads only the
+     messages, so the newest view, and the nodes that it needs (`View.needed`), are known before the summary calls.
+   - A root of the tree can now have no line. So the error of a `zoom` names the parts of the view and the range
+     `0.0` to `0.n` of the messages, which always zoom, in place of the roots.
 10. **The view has a large limit in characters.** The view gets a limit in characters, `HarnessLimits.viewChars`, in
     place of its number of parts, `high`. The default is 100,000 characters. When the lines of the view take more than
     the limit, `View.fit` joins the oldest pairs, until the lines take at most half of the limit or no pair can join.
@@ -1688,9 +1716,10 @@ new words:
     - The user chose this on 2026-11-20. With one budget of 127,000 for the view and the open turn, the window
       strategy of the programs got 127,000 too, and the memory benchmark of phase 8 (`MemoryTaskLaws`) kept its far
       facts in the window. Now the window strategy does not change.
-    - The size of a part is the length of its line, so the view depends on the lines too. The line of a stand-in is
-      longer than its later summary. So each update makes the view again from `View.empty`, and two updates still give
-      the state of one update.
+    - The size of a part is an upper bound of its line, with its reference and its newline. A message of 512 bytes
+      or less is its own line, so it counts its characters, and each other part counts 512. In step 2 the size was the
+      length of the line, so the view depended on the summaries, and each update made the view again. Step 3 needs a
+      view that does not depend on them (choice 9). The bound also keeps the text of the view in its limit.
     - The limit counts characters, as the budget of the input does. UniiChat counts bytes. For text in English, the
       two counts are nearly the same.
     - The view of 200 parts of the large-view test reserved about 109,000 characters, and its lines took 46,000 to
@@ -1715,8 +1744,8 @@ new words:
 | Part | Types and functions | Laws |
 |---|---|---|
 | The limit of a line | the leaf `shorten`, `ShortenInput`, `MemoryTree.shortenInstructions` | `Memory tree:` |
-| The large view | `HarnessLimits.viewChars`, `ViewLimit`, `View.fit` and `View.advance` with a limit in characters, `View.line` and `View.chars`, `MemoryTree.room`, and `ContextStrategy.maxSize` | `Memory:`, `Memory tree:`, `Work:` |
-| The merges that a view needs | `Memory.needed`: the parts of the newest view and the nodes under them. `update` uses it first, and `MemoryBuilder` later. | `Memory tree:` |
+| The large view | `HarnessLimits.viewChars`, `ViewLimit`, `View.fit` and `View.advance` with a limit in characters, `View.line` and `ViewLimit.lineChars`, `MemoryTree.room`, and `ContextStrategy.maxSize` | `Memory:`, `Memory tree:`, `Work:` |
+| The merges that a view needs | `View.needed`: the parts of the newest view and the nodes under them. `Memory.planned` gives the newest view, `MemoryLine.fits` the short messages, and the errors of `zoom` name the parts of the view. `update` uses them first, and `MemoryBuilder` later. | `Memory:`, `Memory tree:` |
 | The store | `LineStore.get(key, upTo)`, `LineStore.newest`, `putAll` that gives the build number of the write, the column `build` of the table `memory`, with 0 for a line of an older file | `Memory tree:`, `File:` |
 | The read of a turn | `Entry.DerivedRead`, the last case of `Entry`, and one `update` for each turn in `HarnessEffects` | `Decide:`, `Memory tree:`, `Work:` |
 | The builder | `DerivationName`, `BuiltDerivation` with `build` and `newest`, `MemoryBuilder`, `Builder`, the gate of the policy calls, and the wake in `onCommit` | `Builder:`, `Work:` |
@@ -1743,8 +1772,12 @@ also between turns.
 - `Memory tree:` after an update with stand-ins, the next update with a budget gives the view of an update with no
   stand-in.
 - `Memory tree:` `update`, and later the builder, makes a merge only for a part of the newest view or a node under one.
-  A journal of the shape of the 15-turn sessions gives the expected number of merges with a limit of 13,000
-  characters, and no merge with the default limit.
+  A journal of the shape of the 15-turn sessions with a small view makes fewer merges than the whole tree, and the
+  count of the leaf calls has only them. With the default limit, the journal of the 50-turn shape makes no merge.
+- `Memory:` `ViewLimit.lineChars` is at least the characters of a line and its newline, exact for a message of 512
+  bytes or less, and it reads only the messages. `View.needed` gives each part of a view and each node under it.
+- `Memory tree:` a summary does not change the view, and each message of the open turn gets its line.
+- `Memory tree:` the error of a `zoom` names the parts of the view and the messages, and each of them zooms.
 - `Decide:` `DerivedRead` changes no part of the state.
 - `Work:` a policy call does not wait for a leaf call. A fake model holds each summary reply until the law frees it, and
   the turn ends first.
@@ -1759,11 +1792,12 @@ also between turns.
 - `File:` a session file from before the column `build` opens, and its lines have the build number 0.
 
 **The mutants.** Each one must die: a `fit` that joins a view under its limit, a `fit` that counts parts in place of
-characters, a `project` that takes the room of the view from the budget of the open turn, an `update` that advances
-the view of the last update, an `update` that makes each ready merge, an
-`update` at each step, a turn that waits for the builder, a read with no limit of build number, a builder that does not
-wait for the policy call, a builder that makes each ready merge, a long reply with no `shorten` call, a `shorten` call
-that spends no budget, and a close that does not stop the builder.
+characters, a `project` that takes the room of the view from the budget of the open turn, an `update` that makes each
+ready merge, a count of the leaf calls with each ready merge, a size that reads the built line, a `needed` with no
+nodes under its parts, a view that joins only the nodes that have a line, a `needed` from the view of the last reply,
+an error of `zoom` that names the roots, an `update` at each step, a turn that waits for the builder, a read with no
+limit of build number, a builder that does not wait for the policy call, a builder that makes each ready merge, a long
+reply with no `shorten` call, a `shorten` call that spends no budget, and a close that does not stop the builder.
 
 **The order of the work.** Each step ends with all laws green. The user chose this order on 2026-11-20, after the
 large-view test. Before, the builder came first, and the merges that a view needs came last.
@@ -1773,7 +1807,8 @@ large-view test. Before, the builder came first, and the merges that a view need
 2. The large view (choice 10): `viewChars`, the limit in characters of `View.fit`, and the room of the view on top of
    the budget of the input. The leaf calls do not change. Done on 2026-11-20, with 11 new or changed mutants killed.
 3. The merges that a view needs (choice 9), first in `update`. Then the 50-turn task runs again live, with the summary
-   calls and the large view, because the large-view test ran with no summary calls.
+   calls and the large view, because the large-view test ran with no summary calls. Done on 2026-11-21, with 8 new
+   mutants killed: the 3 live sessions got 42 of 42 points with no merge ("The 50-turn task after step 3").
 4. The build numbers of the store, `DerivedRead`, and one `update` for each turn. In this step, `update` still makes
    the leaf calls, at the first step of the turn only.
 5. The builder. The leaf calls move to `MemoryBuilder` on the thread of the builder, with the gate and the budget, and

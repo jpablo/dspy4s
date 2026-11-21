@@ -248,15 +248,41 @@ class MemoryLaws extends ScalaCheckSuite:
 
   // ── A limit in characters (7.2, choice 10) ──
 
-  property("Memory: lineChars is the length of the line of a part and its newline, and 0 for a part with no line") {
-    forAll(withStandIns, nodes) { (m, id) =>
-      val withNewline =
-        Memory.ready(m).foldLeft(m)((acc, r) => Memory.buildNode(acc, r, MemoryLine.of(s"a\nb ${r.ref}")))
-      Vector(m, withNewline).forall { at =>
-        val shown = at.built.keys.toVector :+ id
-        shown.forall(p => ViewLimit.lineChars(at, p) == View.line(at, p).fold(0)(_.length + 1)) &&
-        shown.forall(p => View.line(at, p).forall(!_.exists(c => c == '\n' || c == '\r')))
+  /** A memory as the memory tree makes it: up to 40 messages of 0 to 700 units of `m`, `é` or `𝄞`, a short message as
+    * its own line, and for each other node a line of up to 900 characters with newlines, which `MemoryLine.of` cuts.
+    */
+  private val asTree: Gen[Memory] =
+    for
+      texts <- Gen.listOf(Gen.zip(Gen.choose(0, 700), Gen.oneOf("m", "é", "𝄞")).map((k, unit) => unit * k))
+      lines <- Gen.listOfN(64, Gen.choose(0, 900).map(k => ("ab\n" * k).take(k)))
+    yield
+      val logged = texts.take(40).zipWithIndex.foldLeft(Memory.empty) { case (m, (text, i)) =>
+        Memory.append(m, MemoryMessage(MessageKind.Heard(Source.User), text, i.toLong))
       }
+      def line(m: Memory, id: NodeId): MemoryLine =
+        val text = Option.when(id.level == 0)(m.log(id.index.toInt).text).filter(MemoryLine.fits)
+        MemoryLine.of(text.getOrElse(lines((id.level * 31 + id.index.toInt) % lines.size)))
+      Iterator.iterate(logged)(m => Memory.ready(m).foldLeft(m)((acc, id) => Memory.buildNode(acc, id, line(acc, id))))
+        .dropWhile(m => Memory.ready(m).nonEmpty).next()
+
+  property("Memory: MemoryLine.fits is true for a text of 512 bytes or less") {
+    forAll(Gen.choose(0, 900), Gen.oneOf("a", "é", "€", "𝄞")) { (n, unit) =>
+      val text = unit * n
+      MemoryLine.fits(text) == (text.getBytes(UTF_8).length <= MemoryLine.MaxBytes)
+    }
+  }
+
+  // The view of choice 9 must not depend on the summaries, so the size of a part reads only the messages. The size is
+  // an upper bound of the line, so the text of a view never takes more than its limit (7.2, step 3).
+  property("Memory: lineChars is at least the characters of a line and its newline, exact for a short message") {
+    forAll(asTree, nodes) { (m, id) =>
+      val shown = m.built.keys.toVector
+      val short = shown.filter(p => p.level == 0 && MemoryLine.fits(m.log(p.index.toInt).text))
+      val bare  = Memory(m.log, Map.empty, Set.empty)
+      Prop(shown.forall(p => View.line(m, p).forall(l => ViewLimit.lineChars(m, p) >= l.length + 1))) &&
+      Prop(short.forall(p => View.line(m, p).forall(l => ViewLimit.lineChars(m, p) == l.length + 1))) &&
+      Prop((shown :+ id).forall(p => ViewLimit.lineChars(m, p) == ViewLimit.lineChars(bare, p))) &&
+      Prop(shown.forall(p => View.line(m, p).forall(!_.exists(c => c == '\n' || c == '\r'))))
     }
   }
 
@@ -286,10 +312,32 @@ class MemoryLaws extends ScalaCheckSuite:
     }
   }
 
-  property("Memory: the text of a view has the characters of its parts, less one newline") {
-    forAll(Gen.choose(1, 200), Gen.choose(0, 3_000)) { (n, units) =>
-      val m = fullOf(n)
-      val v = View.advance(View.empty, m, ViewLimit.chars(units), n.toLong)
-      MemoryTree.render(m, v).length == charsOf(m, v) - 1
+  property("Memory: the text of a view has at most the characters of its parts, less one newline") {
+    forAll(asTree, Gen.choose(0, 3_000)) { (m, units) =>
+      val v = View.advance(View.empty, m, ViewLimit.chars(units), m.log.size.toLong)
+      v.parts.isEmpty || MemoryTree.render(m, v).length <= charsOf(m, v) - 1
+    }
+  }
+
+  property("Memory: needed gives each part of a view and each node under it, and no other node") {
+    forAll(Gen.choose(0, 200), Gen.choose(0, 3_000)) { (n, units) =>
+      val v                               = View.advance(View.empty, fullOf(n), ViewLimit.chars(units), n.toLong)
+      val needed                          = View.needed(v)
+      def under(id: NodeId, part: NodeId) = part.span._1 <= id.span._1 && id.span._2 <= part.span._2
+      Prop(v.parts.forall(needed)) &&
+      Prop(needed.forall(id => v.parts.exists(under(id, _)))) &&
+      Prop(needed.forall(_.halves.forall((a, b) => needed(a) && needed(b))))
+    }
+  }
+
+  property(
+    "Memory: planned keeps the messages and the lines of a memory, and gives a line to each node of its messages"
+  ) {
+    forAll(withStandIns) { m =>
+      val p     = Memory.planned(m)
+      val n     = m.log.size.toLong
+      val nodes = (0 to 7).flatMap(level => (0L until (n >> level)).map(NodeId(level, _)))
+      Prop(p.log == m.log) && Prop(m.built.forall((id, line) => p.built.get(id).contains(line))) &&
+      Prop(nodes.forall(p.built.contains)) && Prop(p.built.keys.forall(_.span._2 <= n))
     }
   }

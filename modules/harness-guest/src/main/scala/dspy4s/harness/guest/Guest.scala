@@ -213,7 +213,7 @@ final case class NeedsApproval(op: String, argument: String)
 
   /** A part of the memory of `session`. `ref` is a reference of that memory, level.index, as for `zoom(ref)` of this
     * session: for example `0.0` for its first message. A part of level 0 gives its message, and a summary part gives
-    * its two halves with their references. An error names the top parts of the memory, so zoom one of them.
+    * its two halves with their references. An error names the parts that zoom, so zoom one of them.
     */
   def zoom(session: SessionRef, ref: String)(using s: Sessions): String            = s.zoom(session, ref)
 

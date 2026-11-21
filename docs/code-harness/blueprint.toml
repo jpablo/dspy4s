@@ -4077,22 +4077,22 @@ id = "memory-line"
 group = "memory"
 kind = "data"
 name = "MemoryLine"
-ops = ["of"]
+ops = ["of", "fits"]
 ref = "7.1"
 uses = []
-text = "A summary line of at most 512 bytes of UTF-8. MemoryLine.of keeps a short text and cuts a longer one at the end of a character, so a leaf never gives a longer line."
+text = "A summary line of at most 512 bytes of UTF-8. MemoryLine.of keeps a short text and cuts a longer one at the end of a character, so a leaf never gives a longer line. fits tells, with no new string, whether a text is short."
 
 [[node]]
 id = "memory"
 group = "memory"
 kind = "data"
 name = "Memory"
-ops = ["append", "ready", "buildNode", "onStandIn", "withoutStandIns", "roots", "zoom", "fork", "key"]
+ops = ["append", "ready", "buildNode", "onStandIn", "withoutStandIns", "roots", "planned", "zoom", "fork", "key"]
 ref = "7.1"
 spec = true
 uses = ["message", "node-id", "memory-line", "line-key"]
 proof_uses = ["node-id"]
-text = "The log, the built lines and the stand-ins, as a pure value. ready gives the nodes whose halves are built, buildNode of another node gives the same memory, roots gives one node for each set bit, zoom gives a message or the lines of two halves, and key gives the node with a SHA-256 of its texts. A stand-in is a built node with the line of its source after a stop or a spent budget. Each built node above a stand-in is a stand-in, and withoutStandIns takes them out so they can build again."
+text = "The log, the built lines and the stand-ins, as a pure value. ready gives the nodes whose halves are built, buildNode of another node gives the same memory, roots gives one node for each set bit, planned gives a line of no text to each node with no line, so its view is the newest view of 7.2, choice 9, zoom gives a message or the lines of two halves, and key gives the node with a SHA-256 of its texts. A stand-in is a built node with the line of its source after a stop or a spent budget. Each built node above a stand-in is a stand-in, and withoutStandIns takes them out so they can build again."
 
 [[node]]
 id = "line-key"
@@ -4108,12 +4108,12 @@ id = "view"
 group = "memory"
 kind = "data"
 name = "View"
-ops = ["upTo", "extend", "split", "join", "line", "fit", "advance"]
+ops = ["upTo", "needed", "extend", "split", "join", "line", "fit", "advance"]
 ref = "7.1"
 spec = true
 uses = ["node-id", "memory", "view-limit"]
 proof_uses = ["node-id"]
-text = "A cut through the tree that covers [0, upTo). extend adds messages at the end, split shows the two halves of a node, join is its inverse, and line gives the text [ref] line of a part. fit joins the oldest pairs, when the parts take more than the units of a ViewLimit, until they take at most half of them, and advance gives one extend and one fit for each message."
+text = "A cut through the tree that covers [0, upTo). needed gives its parts and each node under them (7.2, choice 9), extend adds messages at the end, split shows the two halves of a node, join is its inverse, and line gives the text [ref] line of a part. fit joins the oldest pairs, when the parts take more than the units of a ViewLimit, until they take at most half of them, and advance gives one extend and one fit for each message."
 
 [[node]]
 id = "view-limit"
@@ -4123,8 +4123,9 @@ name = "ViewLimit"
 ops = ["chars", "lineChars"]
 ref = "7.2"
 spec = true
-uses = ["memory", "node-id"]
-text = "The limit of a view (7.2, choice 10): at most units, where size gives the units of one part. chars counts the characters of the lines of the parts with lineChars: the reference, the line and the newline. The laws of the algebra count parts with a size of 1."
+uses = ["memory", "node-id", "memory-line"]
+proof_uses = ["memory-line"]
+text = "The limit of a view (7.2, choice 10): at most units, where size gives the units of one part. chars counts the characters of the parts with lineChars: an upper bound of the reference, the line and the newline, exact for a short message, and 512 for each other line. lineChars reads only the messages, so a summary never changes a view (7.2, choice 9). The laws of the algebra count parts with a size of 1."
 
 [[node]]
 id = "memory-log"
@@ -4231,7 +4232,7 @@ uses = ["context-strategy", "predict", "compress-input", "merge-input", "shorten
         "runtime-context", "dspy-error", "logged", "projection", "strategy-name", "signature", "policy-runner", "budget", "memory-log", "window",
         "memory-progress"]
 proof_uses = ["budget", "memory", "memory-log", "node-id", "view", "view-limit", "in-batch", "text-prefix"]
-text = "update takes the stand-ins out when the summary budget has a call, appends the new messages, builds each ready node with the store or a leaf through the runner and the summary budget, and advances an empty view to the last reply, with at most viewChars characters (100,000 by default). Each update makes the view again, because the size of a part is the length of its line. A failed leaf gives the line of the source, for the store. A stop or a spent budget gives a stand-in, and a node above a stand-in is a stand-in with no leaf call. A stand-in never goes to the store. A reply of compress or merge of more than 512 bytes gets one shorten call through the runner and the budget. A spent budget or a stop of that call gives a stand-in, and a failed call gives the cut of the first reply, for the store. project gives the view its own room on top of the budget, and the whole budget to the open turn as the window gives it, and maxSize is the budget and the room. zoom gives a message or the lines of two halves. project gives the view as the field memory, and the history holds only the steps of the open turn. compress, merge and shorten keep who wrote each part."
+text = "update takes the stand-ins out when the summary budget has a call, appends the new messages, advances the view to the last reply, with at most viewChars characters (100,000 by default) on Memory.planned, and builds with the store or a leaf, through the runner and the summary budget, only the nodes that the newest view of all the messages needs (7.2, choice 9). A failed leaf gives the line of the source, for the store. A stop or a spent budget gives a stand-in, and a node above a stand-in is a stand-in with no leaf call. A stand-in never goes to the store. A reply of compress or merge of more than 512 bytes gets one shorten call through the runner and the budget. A spent budget or a stop of that call gives a stand-in, and a failed call gives the cut of the first reply, for the store. project gives the view its own room on top of the budget, and the whole budget to the open turn as the window gives it, and maxSize is the budget and the room. zoom gives a message or the lines of two halves, and its error names the parts of the view and the messages. project gives the view as the field memory, and the history holds only the steps of the open turn. compress, merge and shorten keep who wrote each part."
 
 [[group]]
 id = "file-lines"
@@ -4265,7 +4266,7 @@ kind = "law"
 name = "Memory:"
 ref = "7.1"
 uses = ["memory", "view", "node-id", "memory-line", "message"]
-text = "The laws of CODE_HARNESS.md 6.2 as properties: Coverage, Zoom, Prefix, Immutability, Order, Size, Roots and Stand-ins, and the laws of a node, a reference and a line. These laws count parts. With a limit in characters, lineChars is the length of a line and its newline, a view of the limit or less stays the same, a fit that changes a view drops it to half of the limit or the roots, advance gives at most the limit or the roots, and the text of a view has the characters of its parts less one newline."
+text = "The laws of CODE_HARNESS.md 6.2 as properties: Coverage, Zoom, Prefix, Immutability, Order, Size, Roots and Stand-ins, and the laws of a node, a reference and a line. These laws count parts. With a limit in characters, lineChars is the length of a line and its newline, a view of the limit or less stays the same, a fit that changes a view drops it to half of the limit or the roots, advance gives at most the limit or the roots, and the text of a view has at most the characters of its parts less one newline. MemoryLine.fits is true for a short text, lineChars is an upper bound that reads only the messages, needed gives each part of a view and each node under it, and planned keeps the messages and the lines."
 
 [[group]]
 id = "memory-log-laws"
@@ -4299,7 +4300,7 @@ kind = "law"
 name = "Memory tree:"
 ref = "7.1"
 uses = ["memory-tree", "line-store", "memory-log", "window"]
-text = "A short message is its own line with no LM call. Two updates give the same state as one. A second tree with the same store makes no LM call, and a line of other messages is not used. A failed leaf gives the line of the source. After a stop or a spent budget, the next update with a budget gives the lines of an update with no stop, and a node above a stand-in makes no leaf call. While the budget is spent, the stand-ins stay with no report. The view takes at most viewChars characters, takes its own room on top of the budget in full, and stays the same during a turn, and the open turn gets the whole budget. With the default limit, a session of the shape of the 50-turn task keeps each message as a part. render gives one line for each part. zoom gives a message or two lines. An update with leaf calls reports 0 of their number, each end in order, and the end, also after a failed, a stopped or a broken call. An update with no leaf call reports nothing. A reply of compress or merge of more than 512 bytes gets one shorten call with the option bag, and the store keeps its line. A long shorten reply is cut, with no second call. The shorten call spends one call of the budget. A failed shorten call gives the cut of the first reply, and a stop or a spent budget gives a stand-in."
+text = "A short message is its own line with no LM call. Two updates give the same state as one. A second tree with the same store makes no LM call, and a line of other messages is not used. A failed leaf gives the line of the source. After a stop or a spent budget, the next update with a budget gives the lines of an update with no stop, and a node above a stand-in makes no leaf call. While the budget is spent, the stand-ins stay with no report. The view takes at most viewChars characters, takes its own room on top of the budget in full, and stays the same during a turn, and the open turn gets the whole budget. With the default limit, a session of the shape of the 50-turn task keeps each message as a part. render gives one line for each part. zoom gives a message or two lines, and its error names the parts of the view and the messages, which zoom. update makes a merge only for the newest view, a summary does not change the view, each message of the open turn gets its line, and the count of the leaf calls has only the needed merges. An update with leaf calls reports 0 of their number, each end in order, and the end, also after a failed, a stopped or a broken call. An update with no leaf call reports nothing. A reply of compress or merge of more than 512 bytes gets one shorten call with the option bag, and the store keeps its line. A long shorten reply is cut, with no second call. The shorten call spends one call of the budget. A failed shorten call gives the cut of the first reply, and a stop or a spent budget gives a stand-in."
 
 [[group]]
 id = "memory-tasks"

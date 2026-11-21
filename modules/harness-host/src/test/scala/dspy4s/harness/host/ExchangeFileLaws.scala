@@ -163,7 +163,9 @@ class ExchangeFileLaws extends ScalaCheckSuite:
     work(endpoint) { (root, handle) =>
       assertEquals(handle.send(message("m1")), Right(()))
       ended(handle, 1)
-      assertEquals(handle.send(message("m2", "a second fake message")), Right(()))
+      // A message of more than 512 bytes gets a compress call. A short message needs no summary, and the large view
+      // needs no merge (7.2, choices 9 and 10).
+      assertEquals(handle.send(message("m2", "a second fake message " + "y" * 700)), Right(()))
       ended(handle, 2)
       val lines    = linesOf(ExchangeFile.pathOf(root, id(1)))
       val requests = lines.filter(text(_, "kind").contains("request"))

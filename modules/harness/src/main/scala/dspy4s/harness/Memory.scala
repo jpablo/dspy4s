@@ -76,6 +76,9 @@ object MemoryLine:
     if text.getBytes(UTF_8).length <= MaxBytes then MemoryLine(text)
     else MemoryLine(text.substring(0, cut(text, 0, 0)))
 
+  /** True when `text` has at most `MaxBytes` bytes of UTF-8, so it is its own line. The test makes no new string. */
+  def fits(text: String): Boolean = text.length <= MaxBytes && cut(text, 0, 0) == text.length
+
   /** The end of the longest start of `text` from `at` with at most `MaxBytes` bytes, after `bytes` bytes. */
   @tailrec
   private def cut(text: String, at: Int, bytes: Int): Int =
@@ -144,6 +147,20 @@ object Memory:
     }
     ._1
 
+  /** `m` with a line of no text for each node of its messages that has no line. Its view joins each pair that the size
+    * of the limit asks for, and the size reads only the messages (`ViewLimit.lineChars`). So the view of `planned` does
+    * not depend on the lines that `m` has (7.2, choice 9): it is the newest view, with a stand-in for each node that
+    * has no line. Only the shape of a view comes from it, never a line.
+    */
+  def planned(m: Memory): Memory =
+    val n     = m.log.size.toLong
+    val nodes = (0 to NodeId.MaxLevel).iterator.takeWhile(level => (1L << level) <= n)
+      .flatMap(level => (0L until (n >> level)).iterator.map(NodeId(level, _)))
+    m.copy(built = nodes.foldLeft(m.built)((acc, id) => if acc.contains(id) then acc else acc.updated(id, Planned)))
+
+  /** The line of a node of `planned` that has no line. */
+  private val Planned: MemoryLine = MemoryLine.of("")
+
   /** What the node `id` holds: its message at level 0, or the lines of its two halves. None for a node outside the log
     * or a node whose halves are not built.
     */
@@ -194,6 +211,17 @@ final case class View(parts: Vector[NodeId]) derives CanEqual:
 
 object View:
   val empty: View = View(Vector.empty)
+
+  /** The nodes that the view `v` needs (7.2, choice 9): its parts and each node under them. A part of level 1 or more
+    * shows the line of its node, and a zoom into it reads the lines of its halves, so they need lines too.
+    */
+  def needed(v: View): Set[NodeId] =
+    @tailrec
+    def under(open: List[NodeId], found: Set[NodeId]): Set[NodeId] =
+      open match
+        case Nil        => found
+        case id :: more => under(id.halves.fold(more)((a, b) => a :: b :: more), found + id)
+    under(v.parts.toList, Set.empty)
 
   /** The view with one node of level 0 for each message from `v.upTo` to `until`, at its end. A view that already
     * covers `until` stays the same.
@@ -270,12 +298,16 @@ object ViewLimit:
   /** At most `n` characters of the lines of the parts and their newlines (`lineChars`). */
   def chars(n: Int): ViewLimit = ViewLimit(n, lineChars)
 
-  /** The characters of the part `id` in the text of a view: its line `[ref] line` and one newline, or 0 for a part with
-    * no built line. A newline of a line becomes a space, so the count is the same. The count makes no new string,
-    * because `fit` counts each part of each view of `advance`.
+  /** The most characters of the part `id` in the text of a view: its line `[ref] line` and one newline. A message of
+    * `MemoryLine.MaxBytes` bytes or less is its own line, so its count is exact. Each other line has at most
+    * `MemoryLine.MaxBytes` bytes, so it has at most as many characters. A newline of a line becomes a space, so the
+    * count is the same. The count reads only the messages, never a line, so a summary never changes the shape of a view
+    * (7.2, choice 9), and the text of a view never takes more than its limit.
     */
   def lineChars(m: Memory, id: NodeId): Int =
-    m.built.get(id).fold(0)(l => digits(id.level.toLong) + 1 + digits(id.index) + 4 + l.text.length)
+    val message = Option.when(id.level == 0)(m.log.lift(id.index.toInt)).flatten.map(_.text)
+    val line    = message.filter(MemoryLine.fits).fold(MemoryLine.MaxBytes)(_.length)
+    digits(id.level.toLong) + 1 + digits(id.index) + 4 + line
 
   /** The number of decimal digits of `n`, which is 0 or more. */
   private def digits(n: Long): Int = if n < 10 then 1 else 1 + digits(n / 10)

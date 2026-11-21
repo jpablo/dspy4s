@@ -49,8 +49,10 @@ The memory tree builds a binary tree of lines over the log:
   or `merge` is longer, the leaf `shorten` gets that reply and writes a shorter line. When the reply of `shorten` is
   also too long, the harness cuts it at the end of a character.
 
-On this page, a call of `compress`, `merge` or `shorten` is a summary call. The memory tree builds each part whose messages exist,
-also a part that the view does not show yet.
+On this page, a call of `compress`, `merge` or `shorten` is a summary call. The memory tree builds only the parts that
+the view needs: each part of the view of all the messages, and each part under it. Each message is under a part, so a
+message of more than 512 bytes always gets its `compress` line. A view that holds each message as a part of level 0
+needs no `merge` call.
 
 The lines go to the table `memory` of the session file `<root>/sessions/<id>.db`. The key of a line holds a SHA-256 of
 the texts under the part, so a line never goes to other messages. When a session opens again, the memory tree reads
@@ -68,8 +70,10 @@ The memory of this session before this turn, oldest first. Each line is [ref] su
 [0.2] The model replied: README.md has 42 lines.
 ````
 
-- The lines of the view take at most 100,000 characters (`HarnessLimits.viewChars`), each with its reference and its
-  newline. A session of about 150 short messages keeps each message as its own part of level 0.
+- The view counts at most 100,000 characters (`HarnessLimits.viewChars`). A message of 512 bytes or less counts its
+  characters, and each other part counts 512, each with its reference and its newline. The count reads only the
+  messages, so a summary never changes the view. A session of about 150 short messages keeps each message as its own
+  part of level 0.
 - A new message can give the view more than 100,000 characters. Then the view puts the part of the next level in place
   of its two halves, the oldest pair first. It continues until its lines take 50,000 characters or fewer.
 - The view gets its own room on top of the budget: the header, its newline and the 100,000 characters, which is
@@ -90,8 +94,8 @@ def zoom(ref: String)(using t: Turn): String
 - A reference of level 0, for example `0.3`, gives the whole text of that message, with its speaker.
 - A reference of a higher level, for example `2.1`, gives the lines of its two halves. Each line has its reference:
   `[1.2] ...` and `[1.3] ...` on two lines.
-- A part that the memory does not have gives an error that names the top parts. The model can zoom a top part and then
-  zoom a half of it.
+- A part that the memory does not have gives an error that names the parts of the view and the range `0.0` to `0.n`
+  of the messages. Each of them zooms, so the model can zoom a part of the view and then zoom a half of it.
 - A text of another form gives the error `x is not a reference of the memory. A reference is level.index, for example
   3.5.`
 - In a session with the window, `zoom` gives the error `this session has no memory tree, so zoom has nothing to read`.
@@ -117,8 +121,8 @@ In the terminal client, each `zoom` call of a cell has a line such as `zoom 0.0`
 
 ## When the summary calls run
 
-- Before each step, the memory tree adds the new messages of the journal to its log, and it builds each part that it
-  can. Then the policy call of the step starts.
+- Before each step, the memory tree adds the new messages of the journal to its log, and it builds each part that the
+  view needs. Then the policy call of the step starts.
 - The summary calls of one round do not need each other, so they run at the same time, at most 4
   (`HarnessLimits.batch`). The rounds run one after the other.
 - While the summary calls run, the status line of the turn shows a label, for example
@@ -203,7 +207,7 @@ export DSPY_SUMMARY_OPTIONS='{"chat_template_kwargs": {"enable_thinking": false}
 3. Compare the two sessions. Look at the time on the end line of each turn, and at the `memory` part of the footer.
 
 4. Run `dspy4s-harness --inspect`, and open the two sessions (see [The inspector](inspector.md)). The first session
-   has exchange rows of `compress` and `merge`, and of `shorten` for a reply that was too long. The second session
-   has only exchange rows of `policy`.
+   has an exchange row of `compress`, and of `shorten` for a reply that was too long. It has no row of `merge`,
+   because its view needs no merge. The second session has only exchange rows of `policy`.
 
 Next: [The inspector](inspector.md).
