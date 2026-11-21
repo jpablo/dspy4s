@@ -4027,7 +4027,7 @@ kind = "law"
 name = "Shell stop:"
 ref = "10.3"
 uses = ["sandboxed-shell"]
-text = "stopAll ends an exec that runs, its process tree stops, and the exec gives a note of the stop. An interrupt of the thread of an exec stops its process tree, and the exec gives the interrupt back to its thread."
+text = "stopAll ends an exec that runs, its process tree stops, and the exec gives a note of the stop. An interrupt of the thread of an exec stops its process tree, and the exec gives the interrupt back to its thread. A second interrupt during the stop does not cut the stop of the wrapper, so a process that left the tree of the command also stops. An interrupt during the grace period of the handler does not skip its KILL."
 
 [[group]]
 id = "stop-cell-laws"

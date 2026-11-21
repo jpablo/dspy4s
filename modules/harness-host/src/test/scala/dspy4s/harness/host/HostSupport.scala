@@ -12,9 +12,10 @@ import scala.jdk.OptionConverters.*
 /** The helpers of the tests of the host (CODE_HARNESS_DESIGN.md, 10). */
 object HostSupport:
 
-  /** True for a request of the leaf `compress` or `merge` of the memory tree (7.1). */
+  /** True for a request of the leaf `compress`, `merge` or `shorten` of the memory tree (7.1, 7.2). */
   def isSummary(text: String): Boolean =
-    text.contains(MemoryTree.compressInstructions) || text.contains(MemoryTree.mergeInstructions)
+    Vector(MemoryTree.compressInstructions, MemoryTree.mergeInstructions, MemoryTree.shortenInstructions)
+      .exists(text.contains)
 
   /** The reply of a summary leaf: a line that is a fixed function of the request. */
   def summaryReply(text: String): String =

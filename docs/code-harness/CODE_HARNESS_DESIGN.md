@@ -1882,10 +1882,10 @@ large-view test. Before, the builder came first, and the merges that a view need
   - New calls with the cut point in place of `shorten`, and a ruler in the task.
   - A summary input with the system prompt and a view, so the prompt cache holds most of it, and a merge reads more
     detail.
-- A stop that comes after the `EffectStarted` of an `exec` and before the start of its process leaves the process.
-  The law "Work: a stop during a long exec ends the command and its process" fails then. It failed under load before
-  the builder, and the builds after each commit add load, so it fails more often. It is a defect of the stop path
-  (10.3), apart from choice 20.
+- Fixed on 2026-11-21: the law "Work: a stop during a long exec ends the command and its process" failed under load,
+  also before the builder. The cause was in the stop path, apart from choice 20: a second interrupt of the cell thread
+  cut the stop of the wrapper of the `exec` (10.3). The builds after each commit add load, so the failure came more
+  often after step 5.
 - The gate can hold the builder for a long time in a turn with many short steps. The live comparison of step 6 checks
   it.
 - The controller has the memory tree too, so it gets the builder too.
@@ -2602,6 +2602,16 @@ necessary.
    writer then commits the closing entries. A later commit from that worker gets a rejection.
 
 A stop never cuts a commit, because the commit runs in the writer.
+
+A stop also never cuts the stop of an `exec`. Each `exec` runs under `ProcessWrapper`, and the watcher of the wrapper
+stops the group and the tree of the command. A signal of the handler to a wrapper that runs ends its watcher. The cell
+thread gets two interrupts in a stop: step 2, and the wait of the REPL for the cell. So the handler waits for the end of
+the wrapper, also after a second interrupt. Then it stops only the processes that are left: TERM, a grace period, then
+KILL. An interrupt does not end the grace period either. The handler keeps a record of each interrupt, and it sets the
+interrupt again at its end.
+
+This rule came on 2026-11-21. Before it, the second interrupt ended the wait for the wrapper, and the handler sent TERM
+to the wrapper during its stop. A host law then left a `sleep` with no parent, under load.
 
 **The stop of a job.** An `Abort` stops no job, because a job must be able to outlive a turn, for example `sbt ~test`.
 `StopJobs` stops jobs, and it also works with no open turn:
