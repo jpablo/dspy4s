@@ -2,7 +2,7 @@ package dspy4s.harness.host
 
 import dspy4s.core.contracts.{DynamicValues, RuntimeContext}
 import dspy4s.core.runtime.RuntimeEnvironment
-import dspy4s.harness.{HarnessLimits, Models, Place, PolicyRunner, RequestLm, Secrets, StreamLm}
+import dspy4s.harness.{HarnessLimits, MemoryTree, Models, Place, PolicyRunner, RequestLm, Secrets, StreamLm}
 import dspy4s.harness.Models.policy
 import dspy4s.harness.guest.{Access, JobStatus, Mode, Scope, StrategyName}
 import dspy4s.harness.kernel.*
@@ -861,10 +861,12 @@ class WorkLaws extends munit.FunSuite:
       assert(eventually(30)(handle.activity == Some(Activity.MemorySummaries(0, 1))), handle.activity.toString)
       assert(eventually(60)(outcomes(handle) == Vector(TurnOutcome.Replied("FAKE-DONE"))), entries(handle).toString)
       assert(eventually()(handle.activity.isEmpty), handle.activity.toString)
+      // The budget of a memory session is the budget of the open turn and the room of the view (7.2, choice 10).
+      val most = limits.budget + MemoryTree.room(limits.viewChars)
       handle.memoryUse match
         case Some(MemoryUse(chars, budget)) =>
-          assert(chars > long.length && chars <= limits.budget, s"$chars")
-          assertEquals(budget, limits.budget)
+          assert(chars > long.length && chars <= most, s"$chars")
+          assertEquals(budget, most)
         case None => fail("no memory use after the policy call")
     }
   }

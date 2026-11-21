@@ -26,7 +26,7 @@ A turn while its first cell runs:
 ⠹ 4 s · step 1 of 10 · ctrl-c stops · ctrl-o details
 ────────────────────────────────────────────────────────────────────────
 ›
-  ~/code/shop · work mode · my-model · effort low · context 18k of 1M (2%) · memory 12k of 40k chars
+  ~/code/shop · work mode · my-model · effort low · context 18k of 1M (2%) · memory 12k of 140k chars
 ```
 
 The same turn after its end:
@@ -90,7 +90,7 @@ prints `↳ The next step reads your message.`
 ### The footer
 
 ```text
-  ~/code/shop · work mode · my-model · effort low · context 18k of 1M (2%) · memory 12k of 40k chars · 1 job · 1 call waits
+  ~/code/shop · work mode · my-model · effort low · context 18k of 1M (2%) · memory 12k of 140k chars · 1 job · 1 call waits
 ```
 
 The parts, in this order:

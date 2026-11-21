@@ -2,7 +2,8 @@
 
 At each step, the policy call gets a projection of the journal. The projection holds the status, the output of the
 last cell, the earlier steps of the turn, and the earlier turns. The context strategy of the session makes it. The budget of a
-projection is 40,000 characters (`HarnessLimits.budget`). The budget counts characters, because the harness has no
+projection is 40,000 characters (`HarnessLimits.budget`). The memory tree puts its view on top of the budget, in at
+most 100,000 more characters (`HarnessLimits.viewChars`). The budget counts characters, because the harness has no
 tokenizer.
 
 This page tells how the memory tree keeps the earlier turns of a long session. It also tells how a cell reads a full
@@ -67,11 +68,12 @@ The memory of this session before this turn, oldest first. Each line is [ref] su
 [0.2] The model replied: README.md has 42 lines.
 ````
 
-- The view has at most 24 parts (`MemoryTree.DefaultHigh`). A new message can give the view more than 24 parts. Then
-  the view puts the part of the next level in place of its two halves, the oldest pair first. It continues until it
-  has 12 parts or fewer.
-- The view gets its room of the budget first: `24 * (512 + 32) + 114`, which is 13,170 characters. The harness never
-  cuts the view. The open turn gets the rest of the budget.
+- The lines of the view take at most 100,000 characters (`HarnessLimits.viewChars`), each with its reference and its
+  newline. A session of about 150 short messages keeps each message as its own part of level 0.
+- A new message can give the view more than 100,000 characters. Then the view puts the part of the next level in place
+  of its two halves, the oldest pair first. It continues until its lines take 50,000 characters or fewer.
+- The view gets its own room on top of the budget: the header, its newline and the 100,000 characters, which is
+  100,115 characters in all. The harness never cuts the view. The open turn gets the whole budget of 40,000.
 - The view stays the same during a turn. The first turn of a session has no view.
 - Each line break in a summary line becomes a space, so each part is one line of the text.
 
@@ -170,11 +172,12 @@ export DSPY_SUMMARY_OPTIONS='{"chat_template_kwargs": {"enable_thinking": false}
 ## The memory part of the footer
 
 ```text
-  ~/code/shop · work mode · my-model · effort low · context 18k of 1M (2%) · memory 13k of 40k chars
+  ~/code/shop · work mode · my-model · effort low · context 18k of 1M (2%) · memory 13k of 140k chars
 ```
 
-- `memory 13k of 40k chars` gives the size of the last projection that a policy call got, and the budget, in
-  characters. The projection holds the status, the last output, the steps of the open turn, and the view.
+- `memory 13k of 140k chars` gives the size of the last projection that a policy call got, and its largest size, in
+  characters: the budget of 40,000 and the room of the view. The projection holds the status, the last output, the
+  steps of the open turn, and the view.
 - The instructions, the task and the API reference are not in the count. So this part does not tell how full the
   context of the model is. The `context` part tells that.
 - The client shows whole thousands, for example `13k`.

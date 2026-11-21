@@ -79,7 +79,7 @@ final class HarnessEffects(
       derived = data
       zooms.setReader(ref => strategy.zoom(data, ref))
       val view = strategy.project(log, data, limits.budget)
-      progress.projected(view.size, limits.budget)
+      progress.projected(view.size, strategy.maxSize(limits.budget))
       val input   = PolicyInput(task(log), reference, view.memory, view.status, view.observation, view.history)
       val number  = drafts.map(d => d -> d.begin())
       val context = number.fold(policyContext)((d, n) => PolicyStream.around(policyContext, d, n))

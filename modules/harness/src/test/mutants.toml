@@ -636,18 +636,69 @@ new = ""
 # ── The memory tree (7.1) ──
 
 [[mutant]]
-name = "Mutant: fit stops at high parts, not at high / 2"
+name = "Mutant: fit stops at the limit, not at half of it"
 [[mutant.edit]]
 file = "Memory.scala"
-old = "if size <= high / 2 then (stack.reverse ++ rest).toVector"
-new = "if size <= high then (stack.reverse ++ rest).toVector"
+old = "if total <= limit.units / 2 then (stack.reverse ++ rest).toVector"
+new = "if total <= limit.units then (stack.reverse ++ rest).toVector"
+
+# ── The large view (7.2, choice 10) ──
+
+[[mutant]]
+name = "Mutant: a limit in characters counts parts"
+[[mutant.edit]]
+file = "Memory.scala"
+old = "def chars(n: Int): ViewLimit = ViewLimit(n, lineChars)"
+new = "def chars(n: Int): ViewLimit = ViewLimit(n, (_, _) => 1)"
+
+[[mutant]]
+name = "Mutant: fit joins a view under its limit"
+[[mutant.edit]]
+file = "Memory.scala"
+old = "if total <= limit.units then v else View(go(Nil, v.parts.toList, total))"
+new = "View(go(Nil, v.parts.toList, total))"
+
+[[mutant]]
+name = "Mutant: lineChars counts the line with no reference"
+[[mutant.edit]]
+file = "Memory.scala"
+old = "digits(id.level.toLong) + 1 + digits(id.index) + 4 + l.text.length"
+new = "digits(id.level.toLong) * 0 + 1 + l.text.length"
+
+[[mutant]]
+name = "Mutant: update advances the view of the last update"
+[[mutant.edit]]
+file = "MemoryTree.scala"
+old = "View.advance(View.empty, memory, ViewLimit.chars(viewChars), MemoryLog.beforeOpenTurn(journal))"
+new = "View.advance(d.view, memory, ViewLimit.chars(viewChars), MemoryLog.beforeOpenTurn(journal))"
+
+[[mutant]]
+name = "Mutant: the room of the view has no limit"
+[[mutant.edit]]
+file = "MemoryTree.scala"
+old = "def room(viewChars: Int): Int = Header.length + 1 + viewChars"
+new = "def room(viewChars: Int): Int = Header.length + 1 + viewChars * 0"
+
+[[mutant]]
+name = "Mutant: the default view is the view of 24 parts"
+[[mutant.edit]]
+file = "MemoryTree.scala"
+old = "val DefaultViewChars = 100_000"
+new = "val DefaultViewChars = 13_056"
+
+[[mutant]]
+name = "Mutant: the largest projection of the memory tree has no room for the view"
+[[mutant.edit]]
+file = "MemoryTree.scala"
+old = "override def maxSize(budget: Int): Int = budget + MemoryTree.room(viewChars)"
+new = "override def maxSize(budget: Int): Int = budget"
 
 [[mutant]]
 name = "Mutant: advance extends the view to the end in one step"
 [[mutant.edit]]
 file = "Memory.scala"
-old = "(v.upTo + 1 to until).foldLeft(v)((view, count) =>"
-new = "(until to until).foldLeft(v)((view, count) =>"
+old = "(v.upTo + 1 to until).foldLeft(v)("
+new = "(until to until).foldLeft(v)("
 
 [[mutant]]
 name = "Mutant: the key of a line does not read the texts"
@@ -673,9 +724,9 @@ new = "def beforeOpenTurn(journal: Vector[Logged]): Long = walk(journal).message
 [[mutant]]
 name = "Mutant: render keeps the newlines of a line"
 [[mutant.edit]]
-file = "MemoryTree.scala"
-old = "line.text.replace('\\n', ' ').replace('\\r', ' ')"
-new = "line.text"
+file = "Memory.scala"
+old = "l.text.replace('\\n', ' ').replace('\\r', ' ')"
+new = "l.text"
 
 [[mutant]]
 name = "Mutant: a spent summary budget does not stop the leaf calls"
@@ -720,11 +771,11 @@ old = "if standIn || onStandIn(m, id) then m.standIns + id else m.standIns"
 new = "if standIn then m.standIns + id else m.standIns"
 
 [[mutant]]
-name = "Mutant: project gives the open turn the whole budget"
+name = "Mutant: project takes the room of the view from the budget of the open turn"
 [[mutant.edit]]
 file = "MemoryTree.scala"
-old = "Window.openTurn(journal, (budget - MemoryTree.room(high)).max(0))"
-new = "Window.openTurn(journal, budget)"
+old = "Window.openTurn(journal, budget)"
+new = "Window.openTurn(journal, (budget - MemoryTree.room(viewChars)).max(0))"
 
 [[mutant]]
 name = "Mutant: project leaves out the view"

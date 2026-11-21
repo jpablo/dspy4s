@@ -166,9 +166,16 @@ final class WorkRuntime(
             lines = Some(opened)
             opened
           }
-        val strategy =
-          WorkRuntime.strategyOf(config, file, calls, () => summary.current, limits.batch, env.summaryOptions, meter)
-            .fold(error => throw IllegalStateException(error), identity)
+        val strategy = WorkRuntime.strategyOf(
+          config,
+          file,
+          calls,
+          () => summary.current,
+          limits.batch,
+          env.summaryOptions,
+          meter,
+          limits.viewChars
+        ).fold(error => throw IllegalStateException(error), identity)
         val probe = HarnessProbe(env.journals, env.home, env.secrets, limits, policy, subQuery)
         // The files of the cells. The task gets AGENTS.md and the README of the folder through them, once for this
         // activation (`ProjectFiles`). The controller works in the home folder, so its task gets no files.
@@ -558,11 +565,11 @@ object WorkRuntime:
       env = Set.empty
     )
 
-  /** The strategy of an activation from `config.strategy` (7.1): the window, or the memory tree with `lines`, at most
-    * `width` summaries at a time with the option bag `options`, the runner of the activation, the budget of the
-    * summaries of the turn, and the progress of the activation for a client. `lines` is the table `memory` of the
-    * session file, and the activation opens it only for the memory tree, and closes it in its `close`. `PrefixSummary`
-    * has no code, so it gives an error, and the activation fails with it.
+  /** The strategy of an activation from `config.strategy` (7.1): the window, or the memory tree with `lines`, a view of
+    * at most `viewChars` characters, at most `width` summaries at a time with the option bag `options`, the runner of
+    * the activation, the budget of the summaries of the turn, and the progress of the activation for a client. `lines`
+    * is the table `memory` of the session file, and the activation opens it only for the memory tree, and closes it in
+    * its `close`. `PrefixSummary` has no code, so it gives an error, and the activation fails with it.
     */
   def strategyOf(
       config    : SessionConfig,
@@ -571,12 +578,13 @@ object WorkRuntime:
       summaries : () => Budget,
       width     : Int,
       options   : DynamicValue.Record,
-      progress  : MemoryProgress = MemoryProgress.none
+      progress  : MemoryProgress = MemoryProgress.none,
+      viewChars : Int            = MemoryTree.DefaultViewChars
   ): Either[String, ContextStrategy] =
     config.strategy match
       case StrategyName.Window     => Right(Window)
       case StrategyName.MemoryTree => lines().map(store =>
-          MemoryTree.withLeaves(store, MemoryTree.DefaultHigh, leafRunner, summaries, width, options, progress)
+          MemoryTree.withLeaves(store, viewChars, leafRunner, summaries, width, options, progress)
         )
       case StrategyName.PrefixSummary =>
         Left("the strategy PrefixSummary has no code yet, so a session with it cannot start")

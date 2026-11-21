@@ -17,6 +17,11 @@ class MemoryTreeLaws extends munit.FunSuite:
 
   private val request = RequestId("FAKE-REQUEST")
 
+  /** The limit of a small view, in characters: about 6 parts of these laws. A short message or a summary of the fake
+    * model takes about 15 to 35 characters with its reference, so a view of a few turns joins its oldest parts.
+    */
+  private val SmallView = 150
+
   /** A summary model: the line is a fixed function of the request, after `before` and with `after` around it. */
   private def summaries(before: String = "S", after: String = ""): RequestLm =
     RequestLm(text =>
@@ -73,7 +78,7 @@ class MemoryTreeLaws extends munit.FunSuite:
   test("Memory tree: a message of 512 bytes or less is its own line, with no compress call") {
     val lm = summaries()
     Models.withModel(lm) {
-      val tree = MemoryTree.withLeaves(LineStore.inMemory(), high = 40)
+      val tree = MemoryTree.withLeaves(LineStore.inMemory())
       val d    = updated(tree, chat(3, output = 10), tree.empty)
       assertEquals(calls(lm, MemoryTree.compressInstructions), 0)
       d.memory.log.zipWithIndex.foreach { (message, i) =>
@@ -85,7 +90,7 @@ class MemoryTreeLaws extends munit.FunSuite:
   test("Memory tree: compress makes the line of each longer message, and merge makes the line of each parent") {
     val lm = summaries()
     Models.withModel(lm) {
-      val tree = MemoryTree.withLeaves(LineStore.inMemory(), high = 40)
+      val tree = MemoryTree.withLeaves(LineStore.inMemory())
       val d    = updated(tree, chat(4, output = 900), tree.empty)
       assertEquals(calls(lm, MemoryTree.compressInstructions), d.memory.log.count(_.text.getBytes(UTF_8).length > 512))
       assertEquals(calls(lm, MemoryTree.mergeInstructions), d.memory.built.keys.count(_.level > 0))
@@ -95,7 +100,7 @@ class MemoryTreeLaws extends munit.FunSuite:
 
   test("Memory tree: two updates give the same memory and view as one update on the full journal") {
     Models.withModel(summaries()) {
-      val tree    = MemoryTree.withLeaves(LineStore.inMemory(), high = 3)
+      val tree    = MemoryTree.withLeaves(LineStore.inMemory(), viewChars = SmallView / 2)
       val journal = withOpen(chat(6, output = 700), turn(6, 700), 5)
       val once    = updated(tree, journal, tree.empty)
       (0 to journal.size).foreach { k =>
@@ -108,12 +113,12 @@ class MemoryTreeLaws extends munit.FunSuite:
   test("Memory tree: a second tree with the same store makes no LM call for the lines that the store has") {
     val store = LineStore.inMemory()
     Models.withModel(summaries()) {
-      val first = MemoryTree.withLeaves(store, high = 6)
+      val first = MemoryTree.withLeaves(store, viewChars = SmallView)
       updated(first, chat(5, output = 700), first.empty): Unit
     }
     val again = summaries()
     Models.withModel(again) {
-      val tree = MemoryTree.withLeaves(store, high = 6)
+      val tree = MemoryTree.withLeaves(store, viewChars = SmallView)
       updated(tree, chat(5, output = 700), tree.empty): Unit
     }
     assertEquals(again.requests.size, 0)
@@ -123,7 +128,7 @@ class MemoryTreeLaws extends munit.FunSuite:
     val store = LineStore.inMemory()
     store.putAll(Vector(LineKey(NodeId(0, 1), "FAKE-OTHER-DIGEST") -> MemoryLine.of("FAKE-WRONG-LINE")))
     Models.withModel(summaries()) {
-      val tree = MemoryTree.withLeaves(store, high = 6)
+      val tree = MemoryTree.withLeaves(store, viewChars = SmallView)
       val d    = updated(tree, chat(2, output = 700), tree.empty)
       assert(!d.memory.built.values.exists(_.text == "FAKE-WRONG-LINE"), d.memory.built.toString)
     }
@@ -133,7 +138,7 @@ class MemoryTreeLaws extends munit.FunSuite:
     val store = LineStore.inMemory()
     val lm    = RequestLm(_ => Left("FAKE-FAILURE"))
     Models.withModel(lm) {
-      val tree = MemoryTree.withLeaves(store, high = 6)
+      val tree = MemoryTree.withLeaves(store, viewChars = SmallView)
       val d    = updated(tree, chat(2, output = 700), tree.empty)
       assert(calls(lm, MemoryTree.compressInstructions) > 0, "no compress call failed")
       d.memory.log.zipWithIndex.foreach { (message, i) =>
@@ -149,7 +154,7 @@ class MemoryTreeLaws extends munit.FunSuite:
     val store = LineStore.inMemory()
     val lm    = summaries()
     Models.withModel(lm) {
-      val tree = MemoryTree.withLeaves(store, high = 6, summaries = () => Budget(1))
+      val tree = MemoryTree.withLeaves(store, viewChars = SmallView, summaries = () => Budget(1))
       val d    = updated(tree, chat(3, output = 700), tree.empty)
       assertEquals(lm.requests.size, 1)
       val sourced = d.memory.log.zipWithIndex.filter((message, i) =>
@@ -165,7 +170,7 @@ class MemoryTreeLaws extends munit.FunSuite:
     val stopped = new PolicyRunner:
       def run[A](call: () => Either[String, A]): Either[String, A] = Left(PolicyRunner.Stopped)
     Models.withModel(summaries()) {
-      val tree = MemoryTree.withLeaves(store, high = 6, leafRunner = stopped)
+      val tree = MemoryTree.withLeaves(store, viewChars = SmallView, leafRunner = stopped)
       val d    = updated(tree, chat(2, output = 700), tree.empty)
       d.memory.log.zipWithIndex.foreach { (message, i) =>
         val id = NodeId(0, i.toLong)
@@ -182,13 +187,13 @@ class MemoryTreeLaws extends munit.FunSuite:
   test("Memory tree: after an update that a stop cut, the next update gives the lines of an update with no stop") {
     Models.withModel(summaries()) {
       val journal  = chat(4, output = 700)
-      val fresh    = MemoryTree.withLeaves(LineStore.inMemory(), high = 6)
+      val fresh    = MemoryTree.withLeaves(LineStore.inMemory(), viewChars = SmallView)
       val expected = updated(fresh, journal, fresh.empty)
       // The 9 messages of 3 turns need 3 compress calls and 7 merge calls: a stop at the start, after the compress
       // calls, and among the merge calls.
       Vector(0, 3, 6).foreach { allowed =>
         val runner = StopAfter(allowed)
-        val tree   = MemoryTree.withLeaves(LineStore.inMemory(), high = 6, leafRunner = runner)
+        val tree   = MemoryTree.withLeaves(LineStore.inMemory(), viewChars = SmallView, leafRunner = runner)
         val cut    = updated(tree, chat(3, output = 700), tree.empty)
         // The stop ends the turn. The steps of the next turn have no stop.
         runner.stopping = false
@@ -202,10 +207,10 @@ class MemoryTreeLaws extends munit.FunSuite:
   test("Memory tree: after an update with a spent summary budget, an update with a new budget makes the lines") {
     Models.withModel(summaries()) {
       val journal  = chat(4, output = 700)
-      val fresh    = MemoryTree.withLeaves(LineStore.inMemory(), high = 6)
+      val fresh    = MemoryTree.withLeaves(LineStore.inMemory(), viewChars = SmallView)
       val expected = updated(fresh, journal, fresh.empty)
       val budget   = AtomicReference(Budget(1))
-      val tree     = MemoryTree.withLeaves(LineStore.inMemory(), high = 6, summaries = () => budget.get)
+      val tree     = MemoryTree.withLeaves(LineStore.inMemory(), viewChars = SmallView, summaries = () => budget.get)
       val spent    = updated(tree, chat(3, output = 700), tree.empty)
       // Each turn gets a new budget (`TurnBudget` of the host).
       budget.set(Budget(Int.MaxValue))
@@ -220,7 +225,12 @@ class MemoryTreeLaws extends munit.FunSuite:
   ) {
     val reports = Reports()
     Models.withModel(summaries()) {
-      val tree  = MemoryTree.withLeaves(LineStore.inMemory(), high = 6, summaries = () => Budget(0), progress = reports)
+      val tree = MemoryTree.withLeaves(
+        LineStore.inMemory(),
+        viewChars = SmallView,
+        summaries = () => Budget(0),
+        progress = reports
+      )
       val spent = updated(tree, chat(3, output = 700), tree.empty)
       assert(spent.memory.standIns.nonEmpty, "the spent budget gave no stand-in")
       val first = reports.all
@@ -239,7 +249,7 @@ class MemoryTreeLaws extends munit.FunSuite:
       def run[A](call: () => Either[String, A]): Either[String, A] =
         if made.getAndIncrement() == 0 then Left(PolicyRunner.Stopped) else call()
     Models.withModel(lm) {
-      val tree = MemoryTree.withLeaves(store, high = 6, leafRunner = cutFirst, width = 1)
+      val tree = MemoryTree.withLeaves(store, viewChars = SmallView, leafRunner = cutFirst, width = 1)
       val d    = updated(tree, chat(2, output = 700), tree.empty)
       // The cut call is the compress of 0.1. The nodes 1.0 and 2.0 are above it, and only 1.1 and 1.2 merge.
       assertEquals(d.memory.standIns, Set(NodeId(0, 1), NodeId(1, 0), NodeId(2, 0)))
@@ -248,19 +258,64 @@ class MemoryTreeLaws extends munit.FunSuite:
     }
   }
 
-  test("Memory tree: the view has at most high parts, and it covers the messages up to the last reply") {
+  test("Memory tree: the view takes at most viewChars characters, and it covers the messages up to the last reply") {
     Models.withModel(summaries()) {
-      val tree    = MemoryTree.withLeaves(LineStore.inMemory(), high = 6)
+      val tree    = MemoryTree.withLeaves(LineStore.inMemory(), viewChars = SmallView)
       val journal = withOpen(chat(12, output = 700), turn(12, 700), 5)
       val d       = updated(tree, journal, tree.empty)
-      assert(d.view.parts.size <= 6, d.view.toString)
+      val view    = MemoryTree.render(d.memory, d.view)
+      assert(view.length <= SmallView, view)
+      assert(d.view.parts.exists(_.level > 0), s"the law has no join: $view")
       assertEquals(d.view.upTo, MemoryLog.beforeOpenTurn(journal))
+      val memory = tree.project(journal, d, budget = 20_000).memory
+      assert(memory.length <= MemoryTree.room(SmallView), memory)
     }
+  }
+
+  // ── The large view (7.2, choice 10) ──
+
+  // In the 50-turn live comparison of 2026-11-19, a view of 24 parts showed at most 1 of 10 facts. In the large-view
+  // test of 2026-11-20, a view of 200 parts held each message as its own line, and the model answered each question.
+
+  test("Memory tree: with the default limit, a session of the shape of the 50-turn task keeps each message as a part") {
+    Models.withModel(summaries()) {
+      val tree = MemoryTree.withLeaves(LineStore.inMemory())
+      // A cell output of 300 characters gives a line of about 370 characters, so the view has more than 20,000.
+      val d = updated(tree, chat(50, output = 300), tree.empty)
+      assert(d.memory.log.size >= 100, s"the law has ${d.memory.log.size} messages")
+      assert(MemoryTree.render(d.memory, d.view).length > 20_000, "the view of the law is too small")
+      assertEquals(d.view.parts, (0 until d.memory.log.size).map(i => NodeId(0, i.toLong)).toVector)
+    }
+  }
+
+  test("Memory tree: the open turn gets the whole budget, and the view gets its own room on top of the budget") {
+    // With one budget for both parts, a large view would take the budget of the window strategy too (2026-11-20).
+    // The open turn has more than the budget, so a smaller budget gives it fewer steps.
+    val steps = (0 until 12).toVector.flatMap(k =>
+      Vector(
+        Entry.StepStarted(k),
+        Entry.Acted("", s"look $k", Some(s"println($k)")),
+        Entry.Observed("z" * 3000, CellOutcome.Ok, Map.empty)
+      )
+    )
+    Models.withModel(summaries()) {
+      val tree    = MemoryTree.withLeaves(LineStore.inMemory(), viewChars = SmallView)
+      val journal =
+        withOpen(chat(12, output = 700), Entry.Input(request, "long", Map.empty) +: Entry.TurnStarted +: steps, 38)
+      val d = updated(tree, journal, tree.empty)
+      val p = tree.project(journal, d, budget = 20_000)
+      assert(Window.openTurn(journal, 40_000).size > 20_000, "the open turn of the law fits the budget")
+      assertEquals(p.history, Window.openTurn(journal, 20_000).history, "the open turn has a smaller budget")
+      assertEquals(tree.maxSize(20_000), 20_000 + MemoryTree.room(SmallView))
+      assert(p.size <= tree.maxSize(20_000), s"${p.size}")
+    }
+    assertEquals(Window.maxSize(20_000), 20_000)
+    assertEquals(HarnessLimits().viewChars, MemoryTree.DefaultViewChars)
   }
 
   test("Memory tree: the view is in the field memory, and it stays the same during a turn") {
     Models.withModel(summaries()) {
-      val tree  = MemoryTree.withLeaves(LineStore.inMemory(), high = 6)
+      val tree  = MemoryTree.withLeaves(LineStore.inMemory(), viewChars = SmallView)
       val base  = chat(8, output = 700)
       val views = (1 to 5).map { k =>
         val journal = withOpen(base, turn(8, 700), k)
@@ -277,12 +332,12 @@ class MemoryTreeLaws extends munit.FunSuite:
     // The view came as a first step of the history with an empty reply and the code None, which can teach the model an
     // empty reply (2026-11-12).
     Models.withModel(summaries()) {
-      val tree    = MemoryTree.withLeaves(LineStore.inMemory(), high = 6)
+      val tree    = MemoryTree.withLeaves(LineStore.inMemory(), viewChars = SmallView)
       val journal = withOpen(chat(8, output = 700), turn(8, 700), 4)
       val d       = updated(tree, journal, tree.empty)
       val p       = tree.project(journal, d, budget = 20_000)
       assertEquals(p.memory, s"${MemoryTree.Header}\n${MemoryTree.render(d.memory, d.view)}")
-      val open = Window.openTurn(journal, (20_000 - MemoryTree.room(6)).max(0))
+      val open = Window.openTurn(journal, 20_000)
       assertEquals(p.history, open.history, "the history is the open turn")
       assert(!p.history.messages.flatMap(strings).exists(_.contains(MemoryTree.Header)), p.history.toString)
     }
@@ -294,7 +349,7 @@ class MemoryTreeLaws extends munit.FunSuite:
     assert(MemoryTree.shortenInstructions.contains("who wrote"), MemoryTree.shortenInstructions)
   }
 
-  test("Memory tree: the view takes its room of the budget first, in full, also in a long turn") {
+  test("Memory tree: the view takes its own room in full, also in a long turn") {
     Models.withModel(summaries(before = "y" * 600)) {
       val tree  = MemoryTree.withLeaves(LineStore.inMemory())
       val steps = (0 until 30).toVector.flatMap(k =>
@@ -306,18 +361,20 @@ class MemoryTreeLaws extends munit.FunSuite:
       )
       val journal =
         withOpen(chat(60, output = 700), Entry.Input(request, "long", Map.empty) +: Entry.TurnStarted +: steps, 92)
-      val d    = updated(tree, journal, tree.empty)
-      val p    = tree.project(journal, d, budget = 40_000)
-      val view = MemoryTree.render(d.memory, d.view)
-      assert(view.length <= MemoryTree.room(MemoryTree.DefaultHigh), s"${view.length}")
+      val d      = updated(tree, journal, tree.empty)
+      val budget = HarnessLimits().budget
+      val p      = tree.project(journal, d, budget)
+      val view   = MemoryTree.render(d.memory, d.view)
+      assert(p.memory.length <= MemoryTree.room(MemoryTree.DefaultViewChars), s"${p.memory.length}")
       assert(p.memory.contains(view), p.memory)
-      assert(p.size <= 40_000, s"${p.size}")
+      assert(p.size <= tree.maxSize(budget), s"${p.size}")
+      assert(p.size - p.memory.length <= budget, s"${p.size - p.memory.length}")
     }
   }
 
   test("Memory tree: render gives one line for each part, also for a line with a newline") {
     Models.withModel(summaries(after = "\nwith a second line")) {
-      val tree = MemoryTree.withLeaves(LineStore.inMemory(), high = 6)
+      val tree = MemoryTree.withLeaves(LineStore.inMemory(), viewChars = SmallView)
       val d    = updated(tree, chat(8, output = 700), tree.empty)
       val text = MemoryTree.render(d.memory, d.view)
       assertEquals(text.linesIterator.size, d.view.parts.size)
@@ -327,7 +384,7 @@ class MemoryTreeLaws extends munit.FunSuite:
 
   test("Memory tree: zoom gives the message of 0.i and the two lines under a summary line, else an error") {
     Models.withModel(summaries()) {
-      val tree  = MemoryTree.withLeaves(LineStore.inMemory(), high = 6)
+      val tree  = MemoryTree.withLeaves(LineStore.inMemory(), viewChars = SmallView)
       val d     = updated(tree, chat(8, output = 700), tree.empty)
       val first = tree.zoom(d, "0.0")
       assert(first.exists(_.contains("message 0")), first.toString)
@@ -344,7 +401,7 @@ class MemoryTreeLaws extends munit.FunSuite:
 
   test("Memory tree: the zoom of a part that does not exist names the top parts, and each of them zooms") {
     Models.withModel(summaries()) {
-      val tree  = MemoryTree.withLeaves(LineStore.inMemory(), high = 6)
+      val tree  = MemoryTree.withLeaves(LineStore.inMemory(), viewChars = SmallView)
       val d     = updated(tree, chat(8, output = 700), tree.empty)
       val roots = Memory.roots(d.memory.log.size.toLong).map(_.ref)
       assert(roots.nonEmpty)
@@ -361,7 +418,7 @@ class MemoryTreeLaws extends munit.FunSuite:
   // reference looks like, so the model could not find a part that exists.
   test("Memory tree: the zoom of a text that is not a reference names the form and the top parts") {
     Models.withModel(summaries()) {
-      val tree  = MemoryTree.withLeaves(LineStore.inMemory(), high = 6)
+      val tree  = MemoryTree.withLeaves(LineStore.inMemory(), viewChars = SmallView)
       val d     = updated(tree, chat(8, output = 700), tree.empty)
       val roots = Memory.roots(d.memory.log.size.toLong).map(_.ref)
       tree.zoom(d, "40") match
@@ -385,7 +442,7 @@ class MemoryTreeLaws extends munit.FunSuite:
     )
     val lm = summaries()
     Models.withModel(lm) {
-      val tree = MemoryTree.withLeaves(LineStore.inMemory(), high = 6, options = options)
+      val tree = MemoryTree.withLeaves(LineStore.inMemory(), viewChars = SmallView, options = options)
       updated(tree, chat(2, output = 700), tree.empty): Unit
     }
     assert(!lm.requests.isEmpty, "the update made no leaf call")
@@ -403,7 +460,7 @@ class MemoryTreeLaws extends munit.FunSuite:
         if made.incrementAndGet() > 3 then throw IllegalStateException("FAKE-BREAK") else call()
     val journal = chat(3, output = 700)
     Models.withModel(summaries()) {
-      val tree = MemoryTree.withLeaves(store, high = 6, leafRunner = breaking, width = 1)
+      val tree = MemoryTree.withLeaves(store, viewChars = SmallView, leafRunner = breaking, width = 1)
       intercept[IllegalStateException](tree.update(journal, tree.empty)): Unit
     }
     val memory = MemoryLog.messages(journal).foldLeft(Memory.empty)(Memory.append)
@@ -418,7 +475,7 @@ class MemoryTreeLaws extends munit.FunSuite:
       _ => 200L
     )
     Models.withModel(lm) {
-      val tree = MemoryTree.withLeaves(LineStore.inMemory(), high = 6, width = 3)
+      val tree = MemoryTree.withLeaves(LineStore.inMemory(), viewChars = SmallView, width = 3)
       updated(tree, chat(4, output = 700), tree.empty): Unit
     }
     assertEquals(lm.most.get, 3)
@@ -462,7 +519,7 @@ class MemoryTreeLaws extends munit.FunSuite:
     val reports = Reports()
     val lm      = tooLong(text => Right(s"short-${(text.hashCode & 0x7fffffff) % 100000}"))
     Models.withModel(lm) {
-      val tree = MemoryTree.withLeaves(store, high = 40, progress = reports)
+      val tree = MemoryTree.withLeaves(store, progress = reports)
       val d    = updated(tree, chat(3, output = 900), tree.empty)
       // The 3 long cells give 3 compress calls, and the 9 messages give 7 merge calls.
       val leaves = calls(lm, MemoryTree.compressInstructions) + calls(lm, MemoryTree.mergeInstructions)
@@ -484,7 +541,7 @@ class MemoryTreeLaws extends munit.FunSuite:
     val long  = "t" * 700
     val lm    = tooLong(_ => Right(long))
     Models.withModel(lm) {
-      val tree = MemoryTree.withLeaves(store, high = 40)
+      val tree = MemoryTree.withLeaves(store)
       val d    = updated(tree, chat(3, output = 900), tree.empty)
       assertEquals(shortenCalls(lm), 10)
       assertEquals(summarized(d).size, 10)
@@ -502,7 +559,7 @@ class MemoryTreeLaws extends munit.FunSuite:
     val journal = chat(1, output = 900)
     val cell    = NodeId(0, 1)
     Models.withModel(lm) {
-      val tree  = MemoryTree.withLeaves(store, high = 40, summaries = () => budget.get, width = 1)
+      val tree  = MemoryTree.withLeaves(store, summaries = () => budget.get, width = 1)
       val spent = updated(tree, journal, tree.empty)
       // The compress call of the long cell 0.1 spends the only call of the budget, so no shorten call comes.
       assertEquals(lm.requests.size, 1)
@@ -518,7 +575,7 @@ class MemoryTreeLaws extends munit.FunSuite:
     // With 2 calls, the compress call and its shorten call spend the budget, so the merge of 1.0 makes no call.
     val two = tooLong(_ => Right("short"))
     Models.withModel(two) {
-      val tree = MemoryTree.withLeaves(LineStore.inMemory(), high = 40, summaries = () => Budget(2), width = 1)
+      val tree = MemoryTree.withLeaves(LineStore.inMemory(), summaries = () => Budget(2), width = 1)
       val d    = updated(tree, journal, tree.empty)
       assertEquals(two.requests.size, 2)
       assertEquals(d.memory.built.get(cell), Some(MemoryLine.of("short")))
@@ -531,7 +588,7 @@ class MemoryTreeLaws extends munit.FunSuite:
     val store = LineStore.inMemory()
     val lm    = tooLong(_ => Left("FAKE-FAILURE"))
     Models.withModel(lm) {
-      val tree     = MemoryTree.withLeaves(store, high = 40, width = 1)
+      val tree     = MemoryTree.withLeaves(store, width = 1)
       val d        = updated(tree, chat(1, output = 900), tree.empty)
       val expected = lm.requests.asScala.map(textOf).find(_.contains(MemoryTree.compressInstructions))
         .map(text => MemoryLine.of(longLine(text)))
@@ -548,7 +605,7 @@ class MemoryTreeLaws extends munit.FunSuite:
         if made.incrementAndGet() == 2 then Left(PolicyRunner.Stopped) else call()
     val other = LineStore.inMemory()
     Models.withModel(tooLong(_ => Right("short"))) {
-      val tree = MemoryTree.withLeaves(other, high = 40, leafRunner = cutSecond, width = 1)
+      val tree = MemoryTree.withLeaves(other, leafRunner = cutSecond, width = 1)
       val d    = updated(tree, chat(1, output = 900), tree.empty)
       assertEquals(made.get, 2)
       assert(d.memory.standIns.contains(cell), d.memory.standIns.toString)
@@ -564,7 +621,7 @@ class MemoryTreeLaws extends munit.FunSuite:
     )
     val lm = tooLong(_ => Right("short"))
     Models.withModel(lm) {
-      val tree = MemoryTree.withLeaves(LineStore.inMemory(), high = 40, options = options)
+      val tree = MemoryTree.withLeaves(LineStore.inMemory(), options = options)
       updated(tree, chat(1, output = 900), tree.empty): Unit
     }
     assert(shortenCalls(lm) > 0, "the update made no shorten call")
@@ -592,7 +649,7 @@ class MemoryTreeLaws extends munit.FunSuite:
     val lm      = summaries()
     val reports = Reports()
     Models.withModel(lm) {
-      val tree = MemoryTree.withLeaves(LineStore.inMemory(), high = 6, width = 3, progress = reports)
+      val tree = MemoryTree.withLeaves(LineStore.inMemory(), viewChars = SmallView, width = 3, progress = reports)
       updated(tree, chat(4, output = 700), tree.empty): Unit
     }
     // The 4 long cells give 4 compress calls, and the 12 messages give 10 merge calls.
@@ -605,12 +662,12 @@ class MemoryTreeLaws extends munit.FunSuite:
     val reports = Reports()
     Models.withModel(summaries()) {
       // One short message is its own line, and it has no parent.
-      val short = MemoryTree.withLeaves(LineStore.inMemory(), high = 6, progress = reports)
+      val short = MemoryTree.withLeaves(LineStore.inMemory(), viewChars = SmallView, progress = reports)
       updated(short, withOpen(chat(0, output = 10), turn(0, 10), 1), short.empty): Unit
-      val first = MemoryTree.withLeaves(store, high = 6)
+      val first = MemoryTree.withLeaves(store, viewChars = SmallView)
       updated(first, chat(3, output = 700), first.empty): Unit
       // The store has each line, so this update makes no leaf call.
-      val again = MemoryTree.withLeaves(store, high = 6, progress = reports)
+      val again = MemoryTree.withLeaves(store, viewChars = SmallView, progress = reports)
       val d     = updated(again, chat(3, output = 700), again.empty)
       updated(again, chat(3, output = 700), d): Unit
     }
@@ -627,21 +684,27 @@ class MemoryTreeLaws extends munit.FunSuite:
     val failed = RequestLm(_ => Left("FAKE-FAILURE"))
     val first  = Reports()
     Models.withModel(failed) {
-      val tree = MemoryTree.withLeaves(LineStore.inMemory(), high = 6, width = 3, progress = first)
+      val tree = MemoryTree.withLeaves(LineStore.inMemory(), viewChars = SmallView, width = 3, progress = first)
       updated(tree, chat(2, output = 700), tree.empty): Unit
     }
     // The 2 long cells give 2 compress calls, and the 6 messages give 4 merge calls.
     assertEquals(first.all, counted(6))
     val second = Reports()
     Models.withModel(summaries()) {
-      val tree = MemoryTree.withLeaves(LineStore.inMemory(), high = 6, leafRunner = stopped, progress = second)
+      val tree =
+        MemoryTree.withLeaves(LineStore.inMemory(), viewChars = SmallView, leafRunner = stopped, progress = second)
       updated(tree, chat(2, output = 700), tree.empty): Unit
     }
     assertEquals(second.all, counted(6))
     val third = Reports()
     Models.withModel(summaries()) {
-      val tree =
-        MemoryTree.withLeaves(LineStore.inMemory(), high = 6, leafRunner = breaking, width = 1, progress = third)
+      val tree = MemoryTree.withLeaves(
+        LineStore.inMemory(),
+        viewChars = SmallView,
+        leafRunner = breaking,
+        width = 1,
+        progress = third
+      )
       intercept[IllegalStateException](tree.update(chat(3, output = 700), tree.empty)): Unit
     }
     // The 9 messages need 3 compress calls and 7 merge calls. The 3 compress calls end, and the first merge breaks. It

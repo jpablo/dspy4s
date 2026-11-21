@@ -55,6 +55,14 @@ class MemoryLaws extends ScalaCheckSuite:
       index <- Gen.choose(0L, 1000L)
     yield NodeId(level, index)
 
+  /** A limit of `high` parts: each part has the size 1. The laws of the algebra count parts, and the memory tree counts
+    * characters (`ViewLimit.chars`).
+    */
+  private def parts(high: Int): ViewLimit = ViewLimit(high, (_, _) => 1)
+
+  /** The characters of the parts of `v` in `m`, each with its newline. */
+  private def charsOf(m: Memory, v: View): Long = v.parts.foldLeft(0L)(_ + ViewLimit.lineChars(m, _))
+
   /** The spans of `v` follow each other from 0. */
   private def covers(v: View): Boolean =
     v.parts.foldLeft(Option(0L))((at, id) => at.filter(_ == id.span._1).map(_ => id.span._2)).contains(v.upTo)
@@ -98,7 +106,7 @@ class MemoryLaws extends ScalaCheckSuite:
   property("Memory: Coverage: a view from extend, fit and split has spans that follow each other and cover [0, end)") {
     forAll(memories, Gen.choose(1, 40), Gen.listOfN(5, Gen.choose(0, 70))) { (m, high, stops) =>
       val ends  = stops.map(_.toLong.min(m.log.size.toLong)).sorted.toVector
-      val views = ends.scanLeft(View.empty)((v, upTo) => View.fit(View.extend(v, upTo), m, high))
+      val views = ends.scanLeft(View.empty)((v, upTo) => View.fit(View.extend(v, upTo), m, parts(high)))
       Prop(views.forall(covers)) && Prop(views.tail.map(_.upTo) == ends) &&
       Prop(views.forall(v => v.parts.forall(p => covers(View.split(v, p)))))
     }
@@ -107,7 +115,7 @@ class MemoryLaws extends ScalaCheckSuite:
   property("Memory: Zoom: a view that shows the two halves of a built node joins back to the view that shows it") {
     forAll(Gen.choose(1, 70), Gen.choose(1, 40)) { (n, high) =>
       val m = fullOf(n)
-      val v = View.fit(View.extend(View.empty, n.toLong), m, high)
+      val v = View.fit(View.extend(View.empty, n.toLong), m, parts(high))
       v.parts.forall(p => View.join(View.split(v, p), m, p) == v) &&
       v.parts.filter(_.level == 0).forall(p => View.split(v, p) == v)
     }
@@ -122,10 +130,10 @@ class MemoryLaws extends ScalaCheckSuite:
 
   property("Memory: Prefix: extend keeps the view at its start, and fit keeps a view of high parts or fewer") {
     forAll(memories, Gen.choose(1, 40), Gen.choose(0, 70)) { (m, high, upTo) =>
-      val start    = View.fit(View.extend(View.empty, (upTo / 2).toLong.min(m.log.size)), m, high)
+      val start    = View.fit(View.extend(View.empty, (upTo / 2).toLong.min(m.log.size)), m, parts(high))
       val extended = View.extend(start, upTo.toLong.min(m.log.size))
       Prop(extended.parts.startsWith(start.parts)) &&
-      Prop(extended.parts.size > high || View.fit(extended, m, high) == extended)
+      Prop(extended.parts.size > high || View.fit(extended, m, parts(high)) == extended)
     }
   }
 
@@ -170,7 +178,7 @@ class MemoryLaws extends ScalaCheckSuite:
     forAll(Gen.choose(0, 70), Gen.choose(1, 40)) { (n, high) =>
       val m = fullOf(n)
       Memory.roots(n.toLong).size > high / 2 ||
-      View.fit(View.extend(View.empty, n.toLong), m, high).parts.size <= high
+      View.fit(View.extend(View.empty, n.toLong), m, parts(high)).parts.size <= high
     }
   }
 
@@ -217,7 +225,8 @@ class MemoryLaws extends ScalaCheckSuite:
     forAll(Gen.choose(0, 70), Gen.choose(0, 70), Gen.choose(1, 12)) { (a, b, high) =>
       val (k, n) = (a.min(b).toLong, a.max(b).toLong)
       val m      = fullOf(n.toInt)
-      View.advance(View.advance(View.empty, m, high, k), m, high, n) == View.advance(View.empty, m, high, n)
+      View.advance(View.advance(View.empty, m, parts(high), k), m, parts(high), n) ==
+        View.advance(View.empty, m, parts(high), n)
     }
   }
 
@@ -225,14 +234,62 @@ class MemoryLaws extends ScalaCheckSuite:
     forAll(Gen.choose(0, 70), Gen.choose(1, 40)) { (n, high) =>
       val m   = fullOf(n)
       val all = View.extend(View.empty, n.toLong)
-      val fit = View.fit(all, m, high)
+      val fit = View.fit(all, m, parts(high))
       fit == all || fit.parts.size <= (high / 2).max(Memory.roots(n.toLong).size)
     }
   }
 
   property("Memory: in a view of advance, the levels do not grow from the oldest part to the newest") {
     forAll(Gen.choose(0, 200), Gen.choose(2, 40)) { (n, high) =>
-      val levels = View.advance(View.empty, fullOf(n), high, n.toLong).parts.map(_.level)
+      val levels = View.advance(View.empty, fullOf(n), parts(high), n.toLong).parts.map(_.level)
       levels.zip(levels.drop(1)).forall((older, newer) => older >= newer)
+    }
+  }
+
+  // ── A limit in characters (7.2, choice 10) ──
+
+  property("Memory: lineChars is the length of the line of a part and its newline, and 0 for a part with no line") {
+    forAll(withStandIns, nodes) { (m, id) =>
+      val withNewline =
+        Memory.ready(m).foldLeft(m)((acc, r) => Memory.buildNode(acc, r, MemoryLine.of(s"a\nb ${r.ref}")))
+      Vector(m, withNewline).forall { at =>
+        val shown = at.built.keys.toVector :+ id
+        shown.forall(p => ViewLimit.lineChars(at, p) == View.line(at, p).fold(0)(_.length + 1)) &&
+        shown.forall(p => View.line(at, p).forall(!_.exists(c => c == '\n' || c == '\r')))
+      }
+    }
+  }
+
+  property("Memory: with a limit in characters, a view of the limit or less stays the same in a fit") {
+    forAll(memories, Gen.choose(0, 3_000)) { (m, units) =>
+      val all = View.extend(View.empty, m.log.size.toLong)
+      charsOf(m, all) > units || View.fit(all, m, ViewLimit.chars(units)) == all
+    }
+  }
+
+  property(
+    "Memory: with a limit in characters, a fit that changes a view drops it to half of the limit, or the roots"
+  ) {
+    forAll(Gen.choose(0, 70), Gen.choose(0, 3_000)) { (n, units) =>
+      val m   = fullOf(n)
+      val all = View.extend(View.empty, n.toLong)
+      val fit = View.fit(all, m, ViewLimit.chars(units))
+      fit == all || charsOf(m, fit) <= units / 2 || fit.parts == Memory.roots(n.toLong)
+    }
+  }
+
+  property("Memory: with a limit in characters, the view of advance takes at most the limit, or it is the roots") {
+    forAll(Gen.choose(0, 200), Gen.choose(0, 3_000)) { (n, units) =>
+      val m = fullOf(n)
+      val v = View.advance(View.empty, m, ViewLimit.chars(units), n.toLong)
+      charsOf(m, v) <= units || v.parts == Memory.roots(n.toLong)
+    }
+  }
+
+  property("Memory: the text of a view has the characters of its parts, less one newline") {
+    forAll(Gen.choose(1, 200), Gen.choose(0, 3_000)) { (n, units) =>
+      val m = fullOf(n)
+      val v = View.advance(View.empty, m, ViewLimit.chars(units), n.toLong)
+      MemoryTree.render(m, v).length == charsOf(m, v) - 1
     }
   }

@@ -219,23 +219,32 @@ object View:
         if at >= 0 && v.parts.lift(at + 1).contains(b) then View(v.parts.patch(at, Vector(id), 2)) else v
       case _ => v
 
-  /** The view with at most `high` parts, when the parents that it needs are built. A view of `high` parts or fewer
-    * stays the same. A longer view joins two adjacent halves of a built node, the oldest pair first, until it has at
-    * most `high / 2` parts or no pair can join.
+  /** The line of the part `id` in the text of a view: `[ref] line`, with each newline of the line as a space, so each
+    * part is one line of the text. A part with no built line gives none.
     */
-  def fit(v: View, m: Memory, high: Int): View =
+  def line(m: Memory, id: NodeId): Option[String] =
+    m.built.get(id).map(l => s"[${id.ref}] ${l.text.replace('\n', ' ').replace('\r', ' ')}")
+
+  /** The view whose parts take at most `limit.units`, when the parents that it needs are built (7.2, choice 10). A view
+    * of `limit.units` or less stays the same. A larger view joins two adjacent halves of a built node, the oldest pair
+    * first, until its parts take at most `limit.units / 2` or no pair can join.
+    */
+  def fit(v: View, m: Memory, limit: ViewLimit): View =
+    val size = (id: NodeId) => limit.size(m, id)
     // One pass with a stack, the newest part on top. The parts under the top have no pair that can join, so the
     // pair of the top two is always the oldest pair that can join.
     @tailrec
-    def go(stack: List[NodeId], rest: List[NodeId], size: Int): Vector[NodeId] =
-      if size <= high / 2 then (stack.reverse ++ rest).toVector
+    def go(stack: List[NodeId], rest: List[NodeId], total: Long): Vector[NodeId] =
+      if total <= limit.units / 2 then (stack.reverse ++ rest).toVector
       else
         stack match
-          case newer :: older :: below if joins(older, newer, m) => go(older.parent :: below, rest, size - 1)
-          case _                                                 => rest match
-              case part :: more => go(part :: stack, more, size)
+          case newer :: older :: below if joins(older, newer, m) =>
+            go(older.parent :: below, rest, total - size(older) - size(newer) + size(older.parent))
+          case _ => rest match
+              case part :: more => go(part :: stack, more, total)
               case Nil          => stack.reverse.toVector
-    if v.parts.size <= high then v else View(go(Nil, v.parts.toList, v.parts.size))
+    val total = v.parts.foldLeft(0L)(_ + size(_))
+    if total <= limit.units then v else View(go(Nil, v.parts.toList, total))
 
   /** True when `older` and `newer` are the two halves of a node that `m` has built. */
   private def joins(older: NodeId, newer: NodeId, m: Memory): Boolean =
@@ -243,13 +252,33 @@ object View:
       m.built.contains(older.parent)
 
   /** The view after one `extend` and one `fit` for each message from `v.upTo + 1` to `until`. The result of `fit`
-    * depends on the earlier view, so the view of a session is `advance(View.empty, m, high, n)`, and it depends only on
-    * `n`: `advance(advance(v, m, high, k), m, high, n) == advance(v, m, high, n)`. The strategy keeps the view of the
-    * last update, and it advances that view to the new messages.
+    * depends on the earlier view, so the view of a session is `advance(View.empty, m, limit, n)`:
+    * `advance(advance(v, m, limit, k), m, limit, n) == advance(v, m, limit, n)`. With the characters of the lines as
+    * the size, the view also depends on the lines of `m`, so the strategy advances `View.empty` at each update.
     */
-  def advance(v: View, m: Memory, high: Int, until: Long): View = (v.upTo + 1 to until).foldLeft(v)((view, count) =>
-    fit(extend(view, count), m, high)
+  def advance(v: View, m: Memory, limit: ViewLimit, until: Long): View = (v.upTo + 1 to until).foldLeft(v)(
+    (view, count) => fit(extend(view, count), m, limit)
   )
+
+/** The limit of a view (7.2, choice 10): at most `units`, where `size` gives the units of one part of a memory. The
+  * memory tree counts the characters of the lines of the parts (`ViewLimit.chars`).
+  */
+final case class ViewLimit(units: Int, size: (Memory, NodeId) => Int)
+
+object ViewLimit:
+
+  /** At most `n` characters of the lines of the parts and their newlines (`lineChars`). */
+  def chars(n: Int): ViewLimit = ViewLimit(n, lineChars)
+
+  /** The characters of the part `id` in the text of a view: its line `[ref] line` and one newline, or 0 for a part with
+    * no built line. A newline of a line becomes a space, so the count is the same. The count makes no new string,
+    * because `fit` counts each part of each view of `advance`.
+    */
+  def lineChars(m: Memory, id: NodeId): Int =
+    m.built.get(id).fold(0)(l => digits(id.level.toLong) + 1 + digits(id.index) + 4 + l.text.length)
+
+  /** The number of decimal digits of `n`, which is 0 or more. */
+  private def digits(n: Long): Int = if n < 10 then 1 else 1 + digits(n / 10)
 
 /** The memory log from a journal (7.1): one message for each step. */
 object MemoryLog:

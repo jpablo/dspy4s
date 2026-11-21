@@ -105,14 +105,15 @@ object MemoryProgress:
 /** The memory tree (CODE_HARNESS.md, 6; CODE_HARNESS_DESIGN.md, 7.1): the strategy of a long work session.
   *
   *   - `update` takes the stand-ins out of the memory (`Memory.withoutStandIns`) when the budget of the summaries has a
-  *     call, appends the new messages of the journal (`MemoryLog`), builds each ready node, and advances the view to
-  *     `MemoryLog.beforeOpenTurn` with `View.advance` and `high`. So two updates give the same state as one update on
-  *     the full journal. The rounds build each stand-in again, so each part of the last view is built again. A node
-  *     gets the line of the store for its key, or a new line: a message of 512 bytes or less is its own line,
-  *     `compress` makes the line of a longer message, and `merge` makes the line of a node from the lines of its
-  *     halves. The nodes of one round do not need each other, so their leaf calls run at the same time, at most `width`
-  *     at a time. The new lines of each round go to the store with one `putAll`, so a long update keeps the rounds that
-  *     it ended.
+  *     call, appends the new messages of the journal (`MemoryLog`), builds each ready node, and advances `View.empty`
+  *     to `MemoryLog.beforeOpenTurn` with `View.advance` and at most `viewChars` characters (7.2, choice 10). The size
+  *     of a part is the length of its line, and the view of the last update can have its sizes from stand-ins. So each
+  *     update makes the view again, and two updates give the same state as one update on the full journal. The rounds
+  *     build each stand-in again, so each part of the last view is built again. A node gets the line of the store for
+  *     its key, or a new line: a message of 512 bytes or less is its own line, `compress` makes the line of a longer
+  *     message, and `merge` makes the line of a node from the lines of its halves. The nodes of one round do not need
+  *     each other, so their leaf calls run at the same time, at most `width` at a time. The new lines of each round go
+  *     to the store with one `putAll`, so a long update keeps the rounds that it ended.
   *   - A leaf runs through `leafRunner`, so a hard stop cuts it, and each call spends one call of `summaries`, the
   *     budget of the summaries of the turn, apart from the model calls of the policy. A reply of `compress` or `merge`
   *     with more than `MemoryLine.MaxBytes` bytes gets exactly one call of the third leaf, `shorten`, with the reply as
@@ -128,9 +129,10 @@ object MemoryProgress:
   *   - Before its first round, `update` counts the leaf calls of its rounds. Then `progress` gets 0 of that total, each
   *     end of a leaf call, and the end of the update, also after a failed or a stopped call (10.6). A node with a
   *     `shorten` call is one summary in this count. An update with no leaf call reports nothing.
-  *   - `project` reserves `MemoryTree.room(high)` characters of the budget for the view first, and never cuts or drops
-  *     it, so the prompt cache keeps it. The view is the first message of the history, with `render`. The rest of the
-  *     budget goes to the open turn, as the window strategy gives it. The view stays the same during a turn.
+  *   - `project` gives the view its own room of at most `MemoryTree.room(viewChars)` characters, on top of the budget
+  *     (7.2, choice 10), and never cuts or drops it, so the prompt cache keeps it. The view is the field memory, with
+  *     `render`. The whole budget goes to the open turn, as the window strategy gives it. The view stays the same
+  *     during a turn.
   *   - `zoom` gives the message of a node of level 0, or the lines of the two halves of a built node, each with its
   *     reference.
   */
@@ -139,7 +141,7 @@ final class MemoryTree(
     merge     : Predict[MergeInput, Summary],
     shorten   : Predict[ShortenInput, Summary],
     lines     : LineStore,
-    high      : Int,
+    viewChars : Int,
     leafRunner: PolicyRunner,
     summaries : () => Budget,
     width     : Int,
@@ -158,14 +160,18 @@ final class MemoryTree(
     val added  = MemoryLog.messages(journal).drop(d.memory.log.size)
     val start  = added.foldLeft(kept)(Memory.append)
     val memory = counted(start)(count => settle(start, budget, count))
-    Right(MemoryState(memory, View.advance(d.view, memory, high, MemoryLog.beforeOpenTurn(journal))))
+    val view   = View.advance(View.empty, memory, ViewLimit.chars(viewChars), MemoryLog.beforeOpenTurn(journal))
+    Right(MemoryState(memory, view))
 
   def project(journal: Vector[Logged], d: MemoryState, budget: Int): Projection =
-    val open = Window.openTurn(journal, (budget - MemoryTree.room(high)).max(0))
+    val open = Window.openTurn(journal, budget)
     val view = MemoryTree.render(d.memory, d.view)
     // The view is the field memory, and the history holds only the steps of the open turn (CODE_HARNESS_DESIGN.md,
     // 10.6). A view as a first step of the history had an empty reply and the code None.
     if view.isEmpty then open else open.copy(memory = s"${MemoryTree.Header}\n$view")
+
+  /** The budget of the open turn and the room of the view (7.2, choice 10). */
+  override def maxSize(budget: Int): Int = budget + MemoryTree.room(viewChars)
 
   /** The text of the part `ref` of the memory: the message of a part of level 0, or the lines of its two halves with
     * their references. A part that the memory does not have, or a text that is not a reference, gives an error with the
@@ -325,8 +331,10 @@ private final class SummaryCount(total: Int, progress: MemoryProgress):
 
 object MemoryTree:
 
-  /** The default size of a view, in parts: about 12,600 characters of the budget of 40,000 (7.1). */
-  val DefaultHigh = 24
+  /** The default limit of a view, in characters (7.2, choice 10). The view of 200 parts of the large-view test took
+    * 46,000 to 52,000 characters, and UniiChat uses 64 to 128 KB.
+    */
+  val DefaultViewChars = 100_000
 
   /** The most characters of a message that `compress` gets. */
   val MaxSource = 16_000
@@ -351,15 +359,15 @@ object MemoryTree:
     "Write the same content as the summary in one line of at most 400 characters. Keep who wrote each part, and " +
       "each name, number, path, decision and error."
 
-  /** A memory tree with the three leaves of these instructions, the store `lines`, a view of at most `high` parts, the
-    * runner of the activation, the budget of the summaries of the turn, and at most `width` leaf calls at a time. A
-    * program call has `PolicyRunner.Direct`. Each leaf request has the option bag `options` of the provider, for
-    * example `{"chat_template_kwargs": {"enable_thinking": false}}` for a model of vLLM that reasons: a summary needs
-    * no reasoning, and the reasoning made a merge 50 times slower in the live run.
+  /** A memory tree with the three leaves of these instructions, the store `lines`, a view of at most `viewChars`
+    * characters, the runner of the activation, the budget of the summaries of the turn, and at most `width` leaf calls
+    * at a time. A program call has `PolicyRunner.Direct`. Each leaf request has the option bag `options` of the
+    * provider, for example `{"chat_template_kwargs": {"enable_thinking": false}}` for a model of vLLM that reasons: a
+    * summary needs no reasoning, and the reasoning made a merge 50 times slower in the live run.
     */
   def withLeaves(
       lines     : LineStore,
-      high      : Int                 = DefaultHigh,
+      viewChars : Int                 = DefaultViewChars,
       leafRunner: PolicyRunner        = PolicyRunner.Direct,
       summaries : () => Budget        = () => Budget(Int.MaxValue),
       width     : Int                 = 4,
@@ -374,7 +382,7 @@ object MemoryTree:
       Predict(merge, name = Some("merge"), config = options),
       Predict(shorten, name = Some("shorten"), config = options),
       lines,
-      high,
+      viewChars,
       leafRunner,
       summaries,
       width.max(1),
@@ -418,17 +426,16 @@ object MemoryTree:
         "zoom a top part, and then zoom a half of it."
     }
 
-  /** The characters that a view of `high` parts can take: each line of 512 bytes, and its reference. */
-  def room(high: Int): Int = high * (MemoryLine.MaxBytes + 32) + Header.length
+  /** The characters of the field memory with a view of at most `viewChars` characters: the header, its newline and the
+    * view.
+    */
+  def room(viewChars: Int): Int = Header.length + 1 + viewChars
 
   /** The first line of the view in the history. */
   val Header: String =
     "The memory of this session before this turn, oldest first. Each line is [ref] summary. Read a part with zoom(ref)."
 
-  /** The text of a view: one line for each part, `[ref] line`, oldest first. A newline of a line becomes a space, so
-    * each part is one line of the text. A part with no built line gives none.
+  /** The text of a view: one line for each part, `[ref] line`, oldest first (`View.line`). A newline of a line becomes
+    * a space, so each part is one line of the text. A part with no built line gives none.
     */
-  def render(m: Memory, v: View): String =
-    v.parts
-      .flatMap(id => m.built.get(id).map(line => s"[${id.ref}] ${line.text.replace('\n', ' ').replace('\r', ' ')}"))
-      .mkString("\n")
+  def render(m: Memory, v: View): String = v.parts.flatMap(View.line(m, _)).mkString("\n")

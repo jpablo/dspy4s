@@ -68,6 +68,11 @@ trait ContextStrategy extends Derivation:
   def name: StrategyName
   def project(journal: Vector[Logged], d: D, budget: Int): Projection
 
+  /** The most characters of a projection with `budget`: the budget, and the field memory of a strategy that puts it on
+    * top of the budget (7.2, choice 10).
+    */
+  def maxSize(budget: Int): Int = budget
+
   /** The text of the part `ref` of the derived data, for `zoom` of a cell (7.1). A strategy with no memory gives an
     * error with a plain message.
     */
