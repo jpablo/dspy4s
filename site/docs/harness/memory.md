@@ -121,8 +121,11 @@ In the terminal client, each `zoom` call of a cell has a line such as `zoom 0.0`
 
 ## When the summary calls run
 
-- Before each step, the memory tree adds the new messages of the journal to its log, and it builds each part that the
-  view needs. Then the policy call of the step starts.
+- At the first step of each turn, the memory tree adds the new messages of the journal to its log, and it builds each
+  part that the view needs. Then the policy call of the step starts. The later steps of the turn use the same memory,
+  so a long cell output gets its line at the first step of the next turn.
+- The journal records the build number of the lines that the first step read, in a `DerivedRead` entry. The inspector
+  shows it as a part of the step.
 - The summary calls of one round do not need each other, so they run at the same time, at most 4
   (`HarnessLimits.batch`). The rounds run one after the other.
 - While the summary calls run, the status line of the turn shows a label, for example

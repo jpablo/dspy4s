@@ -189,7 +189,7 @@ enum LoopEnd derives Schema, CanEqual:
 /** The entries of a journal (4.1). The entries of one turn form a small language:
   * {{{
   * Turn ::= TurnStarted Step* TurnEnded
-  * Step ::= StepStarted [ Acted [ Cell ] ]
+  * Step ::= StepStarted DerivedRead* [ Acted [ Cell ] ]
   * Cell ::= ( EffectStarted | EffectDone )* Observed
   * }}}
   * `Input`, `StopRequested`, `JobsStopRequested`, `JobEnded`, `Granted`, `ScopeRecorded`, `ModelChanged` and the
@@ -273,6 +273,21 @@ enum Entry derives Schema, CanEqual:
 
   /** The end of the goal loop (8.5). */
   case GoalLoopEnded(end: LoopEnd)
+
+  /** The derived data that the first step of a turn read (CODE_HARNESS_DESIGN.md, 7.2, choice 3): the derivation and
+    * the newest build number of its store. A later read up to the same number gives the same lines, so a replay can
+    * make the same prompt again. It comes after the `StepStarted` and before the `Acted` of the step, and the fold
+    * ignores it. This case is the last one, so the earlier cases keep their places.
+    */
+  case DerivedRead(derivation: DerivationName, build: Long)
+
+/** A derivation of the journal (CODE_HARNESS_DESIGN.md, 7.2): a fold that makes derived data, with a store of its own.
+  * The memory tree is the first one.
+  */
+enum DerivationName derives Schema, CanEqual:
+
+  /** The built lines of the memory tree (7.1). */
+  case Memory
 
 /** One line of the journal: an entry with its `seq` and its meta (4.1). */
 final case class Logged(seq: Long, meta: Meta, entry: Entry) derives Schema, CanEqual

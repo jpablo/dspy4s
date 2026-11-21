@@ -503,8 +503,18 @@ kind = "data"
 name = "Entry"
 ref = "4.1"
 spec = true
-uses = ["versions", "session-config", "request-id", "json", "effect-id", "effect-result", "cell-outcome", "job-selector", "guard-rule", "grant-lifetime", "turn-outcome", "session-outcome", "release-step", "job-end", "goal-check", "loop-end"]
-text = "The 18 kinds of entry. The entries of one turn form the small language of 4.1. Releasing and Released come with phase 9 (8.7). ModelChanged changes the model of the configuration, for example its reasoning effort (CLI_SCREEN.md, 14.4). JobEnded records the end of a job, so a later host gives its status and not Lost (10.3, 2026-11-15)."
+uses = ["versions", "session-config", "request-id", "json", "effect-id", "effect-result", "cell-outcome", "job-selector", "guard-rule", "grant-lifetime", "turn-outcome", "session-outcome", "release-step", "job-end", "goal-check", "loop-end", "derivation-name"]
+text = "The 18 kinds of entry. The entries of one turn form the small language of 4.1. Releasing and Released come with phase 9 (8.7). ModelChanged changes the model of the configuration, for example its reasoning effort (CLI_SCREEN.md, 14.4). JobEnded records the end of a job, so a later host gives its status and not Lost (10.3, 2026-11-15). DerivedRead, the last case, records the derived data that the first step of a turn read, with its newest build number (7.2, choice 3)."
+
+[[node]]
+id = "derivation-name"
+group = "journal"
+kind = "data"
+name = "DerivationName"
+ref = "7.2"
+spec = true
+uses = []
+text = "A derivation of the journal, with a store of its own (7.2): Memory, the built lines of the memory tree. A DerivedRead names it."
 
 [[node]]
 id = "logged"
@@ -725,7 +735,7 @@ name = "decide"
 ref = "4.5"
 uses = ["command", "session-state", "rejection", "entry", "repair", "approved-text", "goal-check", "goal-loop", "loop-end"]
 proof_uses = ["evolve", "guard-rule", "goal-check-due", "goal-text"]
-text = "Says which entries a command can commit. It keeps each journal inside the language of 4.1. ChangeModel gives ModelChanged in an open session, also during a turn. The model of the session gives nothing, and a session that has ended gives SessionClosed (CLI_SCREEN.md, 14.4). RecordJobEnd gives one JobEnded for each job of the session, also with no turn, and a session that has ended gives SessionClosed (10.3). StopJobs of one job that has ended gives the rejection JobEnded, and OfLastTurn and All stay valid (10.3, 2026-11-16)."
+text = "Says which entries a command can commit. It keeps each journal inside the language of 4.1. ChangeModel gives ModelChanged in an open session, also during a turn. The model of the session gives nothing, and a session that has ended gives SessionClosed (CLI_SCREEN.md, 14.4). RecordJobEnd gives one JobEnded for each job of the session, also with no turn, and a session that has ended gives SessionClosed (10.3). StopJobs of one job that has ended gives the rejection JobEnded, and OfLastTurn and All stay valid (10.3, 2026-11-16). A DerivedRead is valid only during a policy call (7.2, choice 3)."
 
 [[node]]
 id = "approved-text"
@@ -924,7 +934,7 @@ name = "Decide table:"
 ref = "4.5"
 spec = true
 uses = ["decide", "state"]
-text = "Each row of the table of decide in 4.5 holds, for example: a Send to a session that has ended commits nothing and gets SessionClosed."
+text = "Each row of the table of decide in 4.5 holds, for example: a Send to a session that has ended commits nothing and gets SessionClosed. A DerivedRead is valid only during a policy call, and it changes no part of the state."
 
 [[node]]
 id = "law-input"
@@ -2378,11 +2388,11 @@ id = "context-strategy"
 group = "context"
 kind = "data"
 name = "ContextStrategy"
-ops = ["zoom", "maxSize"]
+ops = ["zoom", "maxSize", "reads"]
 ref = "7"
 spec = true
-uses = ["derivation", "strategy-name", "projection"]
-text = "A strategy: derived data and a pure projection into a budget. maxSize gives the largest projection: the budget, and for the memory tree also the room of its view (7.2, choice 10). A proposal: the derived data is a type member, guestApi waits for the memory tree, and the strategies are in harness, because they need the types of dspy4s."
+uses = ["derivation", "strategy-name", "projection", "derivation-name"]
+text = "A strategy: derived data and a pure projection into a budget. maxSize gives the largest projection: the budget, and for the memory tree also the room of its view (7.2, choice 10). A proposal: the derived data is a type member, guestApi waits for the memory tree, and the strategies are in harness, because they need the types of dspy4s. reads gives the derivations that the strategy reads, with the newest build number of each (7.2, choice 3)."
 
 [[node]]
 id = "status"
@@ -2513,7 +2523,7 @@ uses = ["turn-effects", "predict", "policy-input", "policy-step", "context-strat
         "policy-runner", "zoom-source", "memory-progress", "drafts", "goal-answer", "goal-check", "goal-question"]
 proof_uses = ["cell-result", "policy-reply", "window", "recorder", "snapshot-store", "lost-names", "budget",
               "host-threads", "zoom-source", "memory-progress", "policy-stream", "turn-text"]
-text = "callPolicy projects the log with the strategy, spends one call of the budget, and calls the policy leaf through the PolicyRunner, so the trace reaches the RuntimeContext. A spent budget fails the call, and the turn ends Failed. runCell starts the calls of the cell, takes the snapshot of the store, runs the code in the REPL, and joins the trace of the host threads. After the error of the compiler defect, it starts a new REPL and adds the note of the lost names. With drafts, the call to the policy streams its draft through a PolicyStream, and the step does not change. Each call to the policy has the options of the model of the session in the state of the journal, so a ModelChanged of the activation applies to the next call, and the progress gets the tokens of its last model call (CLI_SCREEN.md, 14.4)."
+text = "callPolicy projects the log with the strategy, spends one call of the budget, and calls the policy leaf through the PolicyRunner, so the trace reaches the RuntimeContext. A spent budget fails the call, and the turn ends Failed. runCell starts the calls of the cell, takes the snapshot of the store, runs the code in the REPL, and joins the trace of the host threads. After the error of the compiler defect, it starts a new REPL and adds the note of the lost names. With drafts, the call to the policy streams its draft through a PolicyStream, and the step does not change. Each call to the policy has the options of the model of the session in the state of the journal, so a ModelChanged of the activation applies to the next call, and the progress gets the tokens of its last model call (CLI_SCREEN.md, 14.4). callPolicy updates the derived data only at the first step of a turn, and that step commits a DerivedRead for each derivation that the strategy reads (7.2, choices 2 and 3)."
 
 [[group]]
 id = "harness"
@@ -2729,7 +2739,7 @@ kind = "law"
 name = "Harness:"
 ref = "9"
 uses = ["harness"]
-text = "A policy that submits gives the output through Data, and in RawPrediction.values. A reply with no code and the step limit run the finisher. The call works in a copy of the workspace, exec runs in the sandbox, and a failed model call gives a DspyError. The store keeps only the writes of a cell that completed. A code of null or None is no code. The task of the policy shows the preamble, and the reasoning of a reply, native or written, goes into the Acted. After the heap guard closes the REPL, the turn stops. The policy sees the hint of a compile error and the note of a timeout. After a cell that confuses the compiler, a new REPL runs the next cells, and the policy learns the lost names; another compile error starts no new REPL. A full REPL leads to a new REPL, and the hint of a compile error stays in the observation after the cut. A workspace that cannot be copied gives a DspyError and leaves no copy, and the copy leaves out a named pipe. The journal of a call is one turn, and it holds no known secret. The REPL has only the givens of the task mode. callPolicy gives its progress the size of its projection and the budget."
+text = "A policy that submits gives the output through Data, and in RawPrediction.values. A reply with no code and the step limit run the finisher. The call works in a copy of the workspace, exec runs in the sandbox, and a failed model call gives a DspyError. The store keeps only the writes of a cell that completed. A code of null or None is no code. The task of the policy shows the preamble, and the reasoning of a reply, native or written, goes into the Acted. After the heap guard closes the REPL, the turn stops. The policy sees the hint of a compile error and the note of a timeout. After a cell that confuses the compiler, a new REPL runs the next cells, and the policy learns the lost names; another compile error starts no new REPL. A full REPL leads to a new REPL, and the hint of a compile error stays in the observation after the cut. A workspace that cannot be copied gives a DspyError and leaves no copy, and the copy leaves out a named pipe. The journal of a call is one turn, and it holds no known secret. The REPL has only the givens of the task mode. callPolicy gives its progress the size of its projection and the budget. The strategy updates only at the first step of a turn, and that step commits a DerivedRead for each derivation that the strategy reads."
 
 [[group]]
 id = "structure-laws"
@@ -3697,7 +3707,7 @@ kind = "law"
 name = "File:"
 ref = "10.2"
 uses = ["session-file"]
-text = "The rows come back in the order of seq, also after a new open. A commit with a seq that the file has adds nothing. WAL and synchronous NORMAL stay after a flush. A copy holds the same journal only for its session. A row that does not decode is skipped when it is not required, and lastSeq counts it. A file that is not a journal gives an error."
+text = "The rows come back in the order of seq, also after a new open. A commit with a seq that the file has adds nothing. WAL and synchronous NORMAL stay after a flush. A copy holds the same journal only for its session. A row that does not decode is skipped when it is not required, and lastSeq counts it. A file that is not a journal gives an error. Each write of new lines of the table memory gets the next build number, get reads only the lines up to a number, and a file from before the column build opens with the build number 0 for each line."
 
 [[group]]
 id = "writer-laws"
@@ -3817,7 +3827,7 @@ kind = "law"
 name = "Work:"
 ref = "8.1"
 uses = ["work-runtime", "local-host"]
-text = "config and workMode, with no Sessions^ and no Children^, and defaultGuard. A cell runs in the scope, a val stays for the next turn, and rlm does not compile. Each turn gets a new budget. An Ask call does not run, pending holds its rule, and a Grant lets the new turn run it. A catch does not hide it. Under the sandbox a job runs on after its cell, Abort during a cell stops no job, and StopJobs(OfLastTurn) stops it. A report starts a turn. stopJob stops the job, and stopJob of a job that has ended does nothing, so the cell goes on. jobStatus gives Running for a job that runs, and Stopped after StopJobs. A stop ends a long exec and its process. A stop during a long policy call ends the call, the turn ends Aborted before the grace period, and the REPL stays. The handle gives the summaries of the memory while they run, and memoryUse after the first policy call. The handle gives the draft of the policy while the model writes it, and none after the turn or after a stop, also when the thread of the cut call goes on."
+text = "config and workMode, with no Sessions^ and no Children^, and defaultGuard. A cell runs in the scope, a val stays for the next turn, and rlm does not compile. Each turn gets a new budget. An Ask call does not run, pending holds its rule, and a Grant lets the new turn run it. A catch does not hide it. Under the sandbox a job runs on after its cell, Abort during a cell stops no job, and StopJobs(OfLastTurn) stops it. A report starts a turn. stopJob stops the job, and stopJob of a job that has ended does nothing, so the cell goes on. jobStatus gives Running for a job that runs, and Stopped after StopJobs. A stop ends a long exec and its process. A stop during a long policy call ends the call, the turn ends Aborted before the grace period, and the REPL stays. The handle gives the summaries of the memory while they run, and memoryUse after the first policy call. The handle gives the draft of the policy while the model writes it, and none after the turn or after a stop, also when the thread of the cut call goes on. Each turn of a work session has one DerivedRead before its first Acted, with the newest build number of the store, and a cell output gets its compress call at the first step of the next turn."
 
 [[group]]
 id = "crash-laws"
@@ -4186,10 +4196,10 @@ id = "line-store"
 group = "memory-tree"
 kind = "data"
 name = "LineStore"
-ops = ["inMemory"]
+ops = ["get", "newest", "putAll", "inMemory"]
 ref = "7"
 uses = ["line-key", "memory-line"]
-text = "The built lines of a session: derived data with a journal of its own. The host keeps them in the session file, and a program call keeps them in memory. A store keeps the first line of a key."
+text = "The built lines of a session: derived data with a journal of its own. The host keeps them in the session file, and a program call keeps them in memory. A store keeps the first line of a key. Each line has the build number of the write that added it: get reads only the lines up to a number, newest gives the last number, and putAll gives the next number to a write with a new line (7.2, choice 3)."
 
 [[node]]
 id = "memory-state"
@@ -4225,14 +4235,14 @@ id = "memory-tree"
 group = "memory-tree"
 kind = "data"
 name = "MemoryTree"
-ops = ["update", "project", "zoom", "withLeaves", "room", "render"]
+ops = ["update", "project", "zoom", "withLeaves", "room", "render", "reads"]
 ref = "7.1"
 spec = true
 uses = ["context-strategy", "predict", "compress-input", "merge-input", "shorten-input", "summary", "line-store", "memory-state",
         "runtime-context", "dspy-error", "logged", "projection", "strategy-name", "signature", "policy-runner", "budget", "memory-log", "window",
-        "memory-progress"]
+        "memory-progress", "derivation-name"]
 proof_uses = ["budget", "memory", "memory-log", "node-id", "view", "view-limit", "in-batch", "text-prefix"]
-text = "update takes the stand-ins out when the summary budget has a call, appends the new messages, advances the view to the last reply, with at most viewChars characters (100,000 by default) on Memory.planned, and builds with the store or a leaf, through the runner and the summary budget, only the nodes that the newest view of all the messages needs (7.2, choice 9). A failed leaf gives the line of the source, for the store. A stop or a spent budget gives a stand-in, and a node above a stand-in is a stand-in with no leaf call. A stand-in never goes to the store. A reply of compress or merge of more than 512 bytes gets one shorten call through the runner and the budget. A spent budget or a stop of that call gives a stand-in, and a failed call gives the cut of the first reply, for the store. project gives the view its own room on top of the budget, and the whole budget to the open turn as the window gives it, and maxSize is the budget and the room. zoom gives a message or the lines of two halves, and its error names the parts of the view and the messages. project gives the view as the field memory, and the history holds only the steps of the open turn. compress, merge and shorten keep who wrote each part."
+text = "update takes the stand-ins out when the summary budget has a call, appends the new messages, advances the view to the last reply, with at most viewChars characters (100,000 by default) on Memory.planned, and builds with the store or a leaf, through the runner and the summary budget, only the nodes that the newest view of all the messages needs (7.2, choice 9). A failed leaf gives the line of the source, for the store. A stop or a spent budget gives a stand-in, and a node above a stand-in is a stand-in with no leaf call. A stand-in never goes to the store. A reply of compress or merge of more than 512 bytes gets one shorten call through the runner and the budget. A spent budget or a stop of that call gives a stand-in, and a failed call gives the cut of the first reply, for the store. project gives the view its own room on top of the budget, and the whole budget to the open turn as the window gives it, and maxSize is the budget and the room. zoom gives a message or the lines of two halves, and its error names the parts of the view and the messages. project gives the view as the field memory, and the history holds only the steps of the open turn. compress, merge and shorten keep who wrote each part. It reads the store only up to the build number upTo, and reads gives Memory with the newest number of the store, at most upTo."
 
 [[group]]
 id = "file-lines"
@@ -4246,10 +4256,10 @@ id = "file-lines"
 group = "file-lines"
 kind = "data"
 name = "FileLines"
-ops = ["get", "putAll", "close", "open"]
+ops = ["get", "newest", "putAll", "close", "readOnly", "open"]
 ref = "7.1"
 uses = ["line-store", "line-key", "memory-line", "session-id"]
-text = "The table memory of the session file, with a connection of its own and a busy timeout, so a reopen reads the built lines and makes no new LM call. The lines of one update go in one transaction, and a line never changes."
+text = "The table memory of the session file, with a connection of its own and a busy timeout, so a reopen reads the built lines and makes no new LM call. The lines of one update go in one transaction, and a line never changes. The column build holds the build number of each line. A file from before the column gets it when it opens, with 0 for each line, and a file that opens to read only gives 0 to each line of an old table."
 
 [[group]]
 id = "memory-laws"
@@ -4300,7 +4310,7 @@ kind = "law"
 name = "Memory tree:"
 ref = "7.1"
 uses = ["memory-tree", "line-store", "memory-log", "window"]
-text = "A short message is its own line with no LM call. Two updates give the same state as one. A second tree with the same store makes no LM call, and a line of other messages is not used. A failed leaf gives the line of the source. After a stop or a spent budget, the next update with a budget gives the lines of an update with no stop, and a node above a stand-in makes no leaf call. While the budget is spent, the stand-ins stay with no report. The view takes at most viewChars characters, takes its own room on top of the budget in full, and stays the same during a turn, and the open turn gets the whole budget. With the default limit, a session of the shape of the 50-turn task keeps each message as a part. render gives one line for each part. zoom gives a message or two lines, and its error names the parts of the view and the messages, which zoom. update makes a merge only for the newest view, a summary does not change the view, each message of the open turn gets its line, and the count of the leaf calls has only the needed merges. An update with leaf calls reports 0 of their number, each end in order, and the end, also after a failed, a stopped or a broken call. An update with no leaf call reports nothing. A reply of compress or merge of more than 512 bytes gets one shorten call with the option bag, and the store keeps its line. A long shorten reply is cut, with no second call. The shorten call spends one call of the budget. A failed shorten call gives the cut of the first reply, and a stop or a spent budget gives a stand-in."
+text = "A short message is its own line with no LM call. Two updates give the same state as one. A second tree with the same store makes no LM call, and a line of other messages is not used. A failed leaf gives the line of the source. After a stop or a spent budget, the next update with a budget gives the lines of an update with no stop, and a node above a stand-in makes no leaf call. While the budget is spent, the stand-ins stay with no report. The view takes at most viewChars characters, takes its own room on top of the budget in full, and stays the same during a turn, and the open turn gets the whole budget. With the default limit, a session of the shape of the 50-turn task keeps each message as a part. render gives one line for each part. zoom gives a message or two lines, and its error names the parts of the view and the messages, which zoom. update makes a merge only for the newest view, a summary does not change the view, each message of the open turn gets its line, and the count of the leaf calls has only the needed merges. An update with leaf calls reports 0 of their number, each end in order, and the end, also after a failed, a stopped or a broken call. An update with no leaf call reports nothing. A reply of compress or merge of more than 512 bytes gets one shorten call with the option bag, and the store keeps its line. A long shorten reply is cut, with no second call. The shorten call spends one call of the budget. A failed shorten call gives the cut of the first reply, and a stop or a spent budget gives a stand-in. The store gives each write of new lines the next build number, and an update up to a build number gives the same state after later writes."
 
 [[group]]
 id = "memory-tasks"

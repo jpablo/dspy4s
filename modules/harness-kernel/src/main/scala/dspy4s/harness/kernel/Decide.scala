@@ -210,6 +210,11 @@ private def allowed(s: SessionState, entry: Entry): Boolean =
       (s.position match
         case Position.InPolicy(_) => true
         case _                    => false)
+    // The read of the derived data of a step comes before its `Acted` (7.2, choice 3).
+    case Entry.DerivedRead(_, _) => !s.stopping &&
+      (s.position match
+        case Position.InPolicy(_) => true
+        case _                    => false)
     case Entry.EffectStarted(id, _, _) => !s.stopping && id.n > s.lastCall &&
       (s.position match
         case Position.InCell(_, cell, _) => id.cell == cell

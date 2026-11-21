@@ -132,7 +132,7 @@ class MemoryTreeLaws extends munit.FunSuite:
 
   test("Memory tree: a store line of other messages is not used, because its key has another digest") {
     val store = LineStore.inMemory()
-    store.putAll(Vector(LineKey(NodeId(0, 1), "FAKE-OTHER-DIGEST") -> MemoryLine.of("FAKE-WRONG-LINE")))
+    store.putAll(Vector(LineKey(NodeId(0, 1), "FAKE-OTHER-DIGEST") -> MemoryLine.of("FAKE-WRONG-LINE"))): Unit
     Models.withModel(summaries()) {
       val tree = MemoryTree.withLeaves(store, viewChars = AllMerges)
       val d    = updated(tree, chat(2, output = 700), tree.empty)
@@ -151,7 +151,7 @@ class MemoryTreeLaws extends munit.FunSuite:
         val id = NodeId(0, i.toLong)
         assertEquals(d.memory.built.get(id), Some(MemoryLine.of(message.text)))
         if message.text.getBytes(UTF_8).length > 512 then
-          assertEquals(Memory.key(d.memory, id).flatMap(store.get), Some(MemoryLine.of(message.text)))
+          assertEquals(Memory.key(d.memory, id).flatMap(store.get(_, Long.MaxValue)), Some(MemoryLine.of(message.text)))
       }
     }
   }
@@ -167,7 +167,9 @@ class MemoryTreeLaws extends munit.FunSuite:
         d.memory.built.get(NodeId(0, i.toLong)).contains(MemoryLine.of(message.text)) && message.text.length > 512
       )
       assert(sourced.nonEmpty, d.memory.built.toString)
-      sourced.foreach((_, i) => assertEquals(Memory.key(d.memory, NodeId(0, i.toLong)).flatMap(store.get), None))
+      sourced.foreach((_, i) =>
+        assertEquals(Memory.key(d.memory, NodeId(0, i.toLong)).flatMap(store.get(_, Long.MaxValue)), None)
+      )
     }
   }
 
@@ -181,9 +183,11 @@ class MemoryTreeLaws extends munit.FunSuite:
       d.memory.log.zipWithIndex.foreach { (message, i) =>
         val id = NodeId(0, i.toLong)
         assertEquals(d.memory.built.get(id), Some(MemoryLine.of(message.text)))
-        assertEquals(Memory.key(d.memory, id).flatMap(store.get), None)
+        assertEquals(Memory.key(d.memory, id).flatMap(store.get(_, Long.MaxValue)), None)
       }
-      assert(d.memory.built.keys.filter(_.level > 0).forall(id => Memory.key(d.memory, id).flatMap(store.get).isEmpty))
+      assert(d.memory.built.keys.filter(_.level > 0).forall(id =>
+        Memory.key(d.memory, id).flatMap(store.get(_, Long.MaxValue)).isEmpty
+      ))
     }
   }
 
@@ -260,7 +264,9 @@ class MemoryTreeLaws extends munit.FunSuite:
       // The cut call is the compress of 0.1. The nodes 1.0 and 2.0 are above it, and only 1.1 and 1.2 merge.
       assertEquals(d.memory.standIns, Set(NodeId(0, 1), NodeId(1, 0), NodeId(2, 0)))
       assertEquals(calls(lm, MemoryTree.mergeInstructions), 2)
-      d.memory.standIns.foreach(id => assertEquals(Memory.key(d.memory, id).flatMap(store.get), None, id.ref))
+      d.memory.standIns.foreach(id =>
+        assertEquals(Memory.key(d.memory, id).flatMap(store.get(_, Long.MaxValue)), None, id.ref)
+      )
     }
   }
 
@@ -504,6 +510,49 @@ class MemoryTreeLaws extends munit.FunSuite:
     assert(Window.zoom((), "0.0").isLeft)
   }
 
+  // ── The build numbers of the store (7.2, choice 3) ──
+
+  test("Memory tree: the store gives each write of new lines the next build number, and get reads up to a number") {
+    val store = LineStore.inMemory()
+    val key   = (k: Int) => LineKey(NodeId(0, k.toLong), s"FAKE-DIGEST-$k")
+    assertEquals(store.newest, 0L)
+    assertEquals(store.putAll(Vector(key(0) -> MemoryLine.of("FAKE-ZERO"))), 1L)
+    // A write with no new line adds no build number.
+    assertEquals(store.putAll(Vector(key(0) -> MemoryLine.of("FAKE-OTHER"))), 1L)
+    assertEquals(store.putAll(Vector.empty), 1L)
+    assertEquals(store.putAll(Vector(key(1) -> MemoryLine.of("FAKE-ONE"))), 2L)
+    assertEquals(store.get(key(0), 1), Some(MemoryLine.of("FAKE-ZERO")))
+    assertEquals(store.get(key(1), 1), None)
+    assertEquals(store.get(key(1), 2), Some(MemoryLine.of("FAKE-ONE")))
+    assertEquals(store.get(key(0), 0), None)
+    assertEquals(store.newest, 2L)
+  }
+
+  test("Memory tree: update up to a build number gives the same state after later writes to the store") {
+    val store = LineStore.inMemory()
+    val short = chat(3, output = 700)
+    val long  = chat(6, output = 700)
+    Models.withModel(summaries()) {
+      val tree  = MemoryTree.withLeaves(store, viewChars = AllMerges)
+      val first = updated(tree, short, tree.empty)
+      val build = store.newest
+      assert(build > 0, "the first update wrote no line")
+      assertEquals(tree.reads, Vector(DerivationName.Memory -> build))
+      val full = updated(tree, long, tree.empty)
+      assert(store.newest > build, "the later update wrote no line")
+      // A tree that reads up to the first number, with no summary call, makes the state of the first update again.
+      val replay = MemoryTree.withLeaves(store, viewChars = AllMerges, summaries = () => Budget(0), upTo = build)
+      assertEquals(updated(replay, short, replay.empty), first)
+      assertEquals(replay.reads, Vector(DerivationName.Memory -> build))
+      // It reads no line of the later writes, so their nodes are stand-ins.
+      val later = updated(replay, long, replay.empty)
+      assert(later.memory.standIns.nonEmpty, "the read up to the first number saw a later line")
+      // With no limit, the same store gives each line.
+      val all = MemoryTree.withLeaves(store, viewChars = AllMerges, summaries = () => Budget(0))
+      assertEquals(updated(all, long, all.empty), full)
+    }
+  }
+
   // ── The speed of the summaries (the live run of 7.1) ──
 
   test("Memory tree: each leaf request has the option bag of the summaries, so a model can skip its reasoning") {
@@ -537,7 +586,9 @@ class MemoryTreeLaws extends munit.FunSuite:
     val memory = MemoryLog.messages(journal).foldLeft(Memory.empty)(Memory.append)
     val long   = memory.log.indices.filter(i => memory.log(i).text.getBytes(UTF_8).length > 512)
     assertEquals(long.size, 3)
-    long.foreach(i => assert(Memory.key(memory, NodeId(0, i.toLong)).flatMap(store.get).nonEmpty, s"no line for 0.$i"))
+    long.foreach(i =>
+      assert(Memory.key(memory, NodeId(0, i.toLong)).flatMap(store.get(_, Long.MaxValue)).nonEmpty, s"no line for 0.$i")
+    )
   }
 
   test("Memory tree: the leaf calls of one round run at the same time, at most width at a time") {
@@ -600,7 +651,7 @@ class MemoryTreeLaws extends munit.FunSuite:
       summarized(d).foreach { id =>
         val line = d.memory.built(id)
         assert(line.text.startsWith("short-"), s"${id.ref}: ${line.text}")
-        assertEquals(Memory.key(d.memory, id).flatMap(store.get), Some(line), id.ref)
+        assertEquals(Memory.key(d.memory, id).flatMap(store.get(_, Long.MaxValue)), Some(line), id.ref)
       }
       // A summary with its shorten call is one summary for the client.
       assertEquals(reports.all, counted(10))
@@ -618,7 +669,7 @@ class MemoryTreeLaws extends munit.FunSuite:
       assertEquals(summarized(d).size, 10)
       summarized(d).foreach { id =>
         assertEquals(d.memory.built.get(id), Some(MemoryLine.of(long)), id.ref)
-        assertEquals(Memory.key(d.memory, id).flatMap(store.get), Some(MemoryLine.of(long)), id.ref)
+        assertEquals(Memory.key(d.memory, id).flatMap(store.get(_, Long.MaxValue)), Some(MemoryLine.of(long)), id.ref)
       }
     }
   }
@@ -636,12 +687,12 @@ class MemoryTreeLaws extends munit.FunSuite:
       assertEquals(lm.requests.size, 1)
       assert(spent.memory.standIns.contains(cell), spent.memory.standIns.toString)
       assertEquals(spent.memory.built.get(cell), Some(MemoryLine.of(spent.memory.log(1).text)))
-      assertEquals(Memory.key(spent.memory, cell).flatMap(store.get), None)
+      assertEquals(Memory.key(spent.memory, cell).flatMap(store.get(_, Long.MaxValue)), None)
       // The next turn has a new budget, so the compress call comes again, and then its shorten call.
       budget.set(Budget(Int.MaxValue))
       val next = updated(tree, journal, spent)
       assertEquals(next.memory.built.get(cell), Some(MemoryLine.of("short")))
-      assertEquals(Memory.key(next.memory, cell).flatMap(store.get), Some(MemoryLine.of("short")))
+      assertEquals(Memory.key(next.memory, cell).flatMap(store.get(_, Long.MaxValue)), Some(MemoryLine.of("short")))
     }
     // With 2 calls, the compress call and its shorten call spend the budget, so the merge of 1.0 makes no call.
     val two = tooLong(_ => Right("short"))
@@ -667,7 +718,7 @@ class MemoryTreeLaws extends munit.FunSuite:
       assert(expected.nonEmpty, "no compress call")
       assertEquals(shortenCalls(lm), 2)
       assertEquals(d.memory.built.get(cell), expected)
-      assertEquals(Memory.key(d.memory, cell).flatMap(store.get), expected)
+      assertEquals(Memory.key(d.memory, cell).flatMap(store.get(_, Long.MaxValue)), expected)
       assert(!d.memory.standIns.contains(cell), d.memory.standIns.toString)
     }
     // The runner runs the compress call of 0.1 and cuts the next call, its shorten call, as a stop does.
@@ -682,7 +733,7 @@ class MemoryTreeLaws extends munit.FunSuite:
       assertEquals(made.get, 2)
       assert(d.memory.standIns.contains(cell), d.memory.standIns.toString)
       assertEquals(d.memory.built.get(cell), Some(MemoryLine.of(d.memory.log(1).text)))
-      assertEquals(Memory.key(d.memory, cell).flatMap(other.get), None)
+      assertEquals(Memory.key(d.memory, cell).flatMap(other.get(_, Long.MaxValue)), None)
     }
   }
 

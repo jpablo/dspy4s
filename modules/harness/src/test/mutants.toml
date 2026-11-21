@@ -1111,3 +1111,54 @@ name = "Mutant: the mask does not reach the check of a goal"
 file = "Secrets.scala"
 old = "Entry.GoalChecked(c.copy(reason = maskText(c.reason), blocker = maskText(c.blocker)))"
 new = "Entry.GoalChecked(c)"
+
+# ── The build numbers and the read of a turn (7.2, choices 2 and 3) ──
+
+[[mutant]]
+name = "Mutant: the effects update the derived data at each step"
+[[mutant.edit]]
+file = "HarnessEffects.scala"
+old = "if turn.isDefined && updatedFor == turn then Right(derived)"
+new = "if turn.isDefined && updatedFor == turn && updatedFor.isEmpty then Right(derived)"
+
+[[mutant]]
+name = "Mutant: the first step of a turn records no read"
+[[mutant.edit]]
+file = "HarnessEffects.scala"
+old = "if reads.nonEmpty then journal.commit(reads*): Unit"
+new = "if reads.isEmpty then journal.commit(reads*): Unit"
+
+[[mutant]]
+name = "Mutant: a read records the build number 0"
+[[mutant.edit]]
+file = "HarnessEffects.scala"
+old = "Entry.DerivedRead(derivation, build))"
+new = "Entry.DerivedRead(derivation, build * 0))"
+
+[[mutant]]
+name = "Mutant: the store in memory reads the lines of later builds"
+[[mutant.edit]]
+file = "MemoryTree.scala"
+old = "case (line, build) if build <= upTo => line"
+new = "case (line, build) if build >= 0 || build <= upTo => line"
+
+[[mutant]]
+name = "Mutant: the store in memory gives a new number to a write with no new line"
+[[mutant.edit]]
+file = "MemoryTree.scala"
+old = "if kept > 0 then last.set(fresh)"
+new = "if kept >= 0 then last.set(fresh)"
+
+[[mutant]]
+name = "Mutant: the memory tree reads with no limit of build number"
+[[mutant.edit]]
+file = "MemoryTree.scala"
+old = "key.flatMap(lines.get(_, upTo)).orElse("
+new = "key.flatMap(lines.get(_, Long.MaxValue)).orElse("
+
+[[mutant]]
+name = "Mutant: the reads of the memory tree ignore its limit"
+[[mutant.edit]]
+file = "MemoryTree.scala"
+old = "Vector(DerivationName.Memory -> lines.newest.min(upTo))"
+new = "Vector(DerivationName.Memory -> lines.newest)"

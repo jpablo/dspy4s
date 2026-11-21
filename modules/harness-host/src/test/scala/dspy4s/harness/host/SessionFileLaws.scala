@@ -28,8 +28,13 @@ class SessionFileLaws extends munit.FunSuite:
         assertEquals(file.append(inputs(3), flush = true), Right(()))
         val lines = FileLines.open(path, id(1)).fold(e => fail(e), identity)
         try
-          lines.putAll(Vector(first -> MemoryLine.of("FAKE-FIRST"), parent -> MemoryLine.of("FAKE-PARENT")))
-          lines.putAll(Vector(first -> MemoryLine.of("FAKE-ANOTHER")))
+          assertEquals(lines.newest, 0L)
+          assertEquals(
+            lines.putAll(Vector(first -> MemoryLine.of("FAKE-FIRST"), parent -> MemoryLine.of("FAKE-PARENT"))),
+            1L
+          )
+          // A write with no new line adds no build number.
+          assertEquals(lines.putAll(Vector(first -> MemoryLine.of("FAKE-ANOTHER"))), 1L)
           // The journal still writes while the store has the file open.
           assertEquals(file.append(inputs(5).drop(3), flush = true), Right(()))
         finally lines.close()
@@ -37,14 +42,71 @@ class SessionFileLaws extends munit.FunSuite:
       finally file.close()
       val again = FileLines.open(path, id(1)).fold(e => fail(e), identity)
       try
-        assertEquals(again.get(first), Some(MemoryLine.of("FAKE-FIRST")))
-        assertEquals(again.get(parent), Some(MemoryLine.of("FAKE-PARENT")))
-        assertEquals(again.get(first.copy(digest = "FAKE-OTHER")), None)
-        assertEquals(again.get(LineKey(NodeId(2, 0), "FAKE-DIGEST-2")), None)
+        assertEquals(again.get(first, 1), Some(MemoryLine.of("FAKE-FIRST")))
+        assertEquals(again.get(parent, Long.MaxValue), Some(MemoryLine.of("FAKE-PARENT")))
+        assertEquals(again.get(first.copy(digest = "FAKE-OTHER"), Long.MaxValue), None)
+        assertEquals(again.get(LineKey(NodeId(2, 0), "FAKE-DIGEST-2"), Long.MaxValue), None)
+        assertEquals(again.newest, 1L)
       finally again.close()
       val other = FileLines.open(path, id(2)).fold(e => fail(e), identity)
-      try assertEquals(other.get(first), None)
+      try
+        assertEquals(other.get(first, Long.MaxValue), None)
+        assertEquals(other.newest, 0L)
       finally other.close()
+    }
+  }
+
+  test("File: each write of new lines gets the next build number, and get reads only the lines up to a number") {
+    val key = (k: Int) => LineKey(NodeId(0, k.toLong), s"FAKE-DIGEST-$k")
+    withRoot { root =>
+      val path  = SessionFile.pathOf(root, id(1))
+      val file  = open(path)
+      val lines = FileLines.open(path, id(1)).fold(e => fail(e), identity)
+      try
+        assertEquals(lines.putAll(Vector(key(0) -> MemoryLine.of("FAKE-ZERO"))), 1L)
+        assertEquals(lines.putAll(Vector.empty), 1L)
+        assertEquals(lines.putAll(Vector(key(0) -> MemoryLine.of("FAKE-X"), key(1) -> MemoryLine.of("FAKE-ONE"))), 2L)
+        assertEquals(lines.get(key(0), 1), Some(MemoryLine.of("FAKE-ZERO")))
+        assertEquals(lines.get(key(1), 1), None)
+        assertEquals(lines.get(key(1), 2), Some(MemoryLine.of("FAKE-ONE")))
+        assertEquals(lines.get(key(0), 0), None)
+      finally
+        lines.close()
+        file.close()
+    }
+  }
+
+  test("File: a session file from before the column build opens, and its lines have the build number 0") {
+    val old = LineKey(NodeId(0, 0), "FAKE-DIGEST-0")
+    val add = LineKey(NodeId(0, 1), "FAKE-DIGEST-1")
+    withRoot { root =>
+      val path = SessionFile.pathOf(root, id(1))
+      Files.createDirectories(path.getParent): Unit
+      val connection = DriverManager.getConnection(s"jdbc:sqlite:$path")
+      try
+        val statement = connection.createStatement()
+        try
+          statement.execute(
+            "create table memory (session text not null, level integer not null, idx integer not null, " +
+              "digest text not null, line text not null, primary key (session, level, idx, digest))"
+          ): Unit
+          statement.execute(s"insert into memory values ('${id(1).value}', 0, 0, 'FAKE-DIGEST-0', 'FAKE-OLD')"): Unit
+        finally statement.close()
+      finally connection.close()
+      // A reader keeps the table as it is.
+      val reader = FileLines.readOnly(path, id(1)).fold(e => fail(e), identity)
+      try
+        assertEquals(reader.get(old, 0), Some(MemoryLine.of("FAKE-OLD")))
+        assertEquals(reader.newest, 0L)
+      finally reader.close()
+      val lines = FileLines.open(path, id(1)).fold(e => fail(e), identity)
+      try
+        assertEquals(lines.get(old, 0), Some(MemoryLine.of("FAKE-OLD")))
+        assertEquals(lines.newest, 0L)
+        assertEquals(lines.putAll(Vector(add -> MemoryLine.of("FAKE-NEW"))), 1L)
+        assertEquals(lines.get(add, 0), None)
+        assertEquals(lines.get(add, 1), Some(MemoryLine.of("FAKE-NEW")))
+      finally lines.close()
     }
   }
 

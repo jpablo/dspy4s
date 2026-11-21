@@ -729,10 +729,64 @@ class WorkLaws extends munit.FunSuite:
           assertEquals(handle.send(message("m3")), Right(()))
           assert(eventually(60)(outcomes(handle).size == 3), entries(handle).toString)
         }
-        assert(!summaryRequests(again).exists(r => r.contains("FAKE-OUT-ONE") || r.contains("FAKE-OUT-TWO")))
+        // The strategy updates at the first step of a turn (7.2, choice 2), so the first host made the line of the cell
+        // of turn 1 in turn 2. The cell of turn 2 gets its line in the next turn, in the second host.
+        assert(!summaryRequests(again).exists(_.contains("FAKE-OUT-ONE")), summaryRequests(again).toString)
+        assert(summaryRequests(again).exists(_.contains("FAKE-OUT-TWO")), summaryRequests(again).toString)
       }
     finally place.close()
   }
+
+  test("Work: each turn has one DerivedRead before its first Acted, with the newest build number of the store") {
+    val long  = "y" * 700
+    val model = sessionModel(
+      policy("one", Some(s"""println("FAKE-OUT-ONE $long")""")),
+      policy("FAKE-ONE", None),
+      policy("FAKE-TWO", None)
+    )
+    val place = Place()
+    try withRoot { root =>
+        val env = WorkEnv(place.home, HostList.empty, Backends.detect(), Secrets.none, root)
+        withHost(root, Models.withModel(model)(WorkRuntime.forWork(env, limits))) { host =>
+          val handle = opened(host, id(1), Some(WorkRuntime.config(place.root, "fake-model", limits)))
+          checkReads(root, model, handle)
+        }
+      }
+    finally place.close()
+  }
+
+  /** The checks of the law of `DerivedRead` for the session of `handle`, whose journals are in `root`. */
+  private def checkReads(root: Path, model: RequestLm, handle: SessionHandle): Unit =
+    assertEquals(handle.send(message("m1")), Right(()))
+    assert(eventually(60)(outcomes(handle).size == 1), entries(handle).toString)
+    // One update for each turn (7.2, choice 2): the second step of turn 1 made no compress call for the cell output.
+    assert(!summaryRequests(model).exists(_.contains("FAKE-OUT-ONE")), summaryRequests(model).toString)
+    assertEquals(handle.send(message("m2")), Right(()))
+    assert(eventually(60)(outcomes(handle).size == 2), entries(handle).toString)
+    assert(summaryRequests(model).exists(_.contains("FAKE-OUT-ONE")), "the next turn made no compress call")
+    val log    = entries(handle)
+    val starts = log.indices.filter(i => log(i) == Entry.TurnStarted) :+ log.size
+    val builds = starts.zip(starts.drop(1)).map { (start, end) =>
+      val turn  = log.slice(start, end)
+      val acted = turn.indexWhere {
+        case Entry.Acted(_, _, _) => true
+        case _                    => false
+      }
+      val reads = turn.zipWithIndex.collect { case (Entry.DerivedRead(derivation, build), at) =>
+        (derivation, build, at)
+      }
+      assertEquals(reads.size, 1, turn.toString)
+      assertEquals(reads.head._1, DerivationName.Memory)
+      assert(reads.head._3 < acted, s"the DerivedRead comes after the first Acted: $turn")
+      reads.head._2
+    }
+    // Turn 1 wrote no line, and turn 2 wrote the line of the cell of turn 1. The store has no later write.
+    assertEquals(builds, Vector(0L, 1L))
+    val newest = FileLines.readOnly(SessionFile.pathOf(root, id(1)), id(1)).map { lines =>
+      try lines.newest
+      finally lines.close()
+    }
+    assertEquals(newest, Right(1L))
 
   test("Work: with summaryCalls 0, a session makes no compress or merge call, and the memory shows each message cut") {
     // The CLI flag --no-memory-calls gives these limits, so a person can compare a session with no memory calls.

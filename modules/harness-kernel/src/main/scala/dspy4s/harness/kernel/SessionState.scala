@@ -200,9 +200,11 @@ def evolve(s: SessionState, logged: Logged): SessionState =
         personWaits = true // only a client of the person sends `Grant` (5.5)
       )
     case Entry.ScopeRecorded(_, _) => base
-    case Entry.Releasing(_)        => base.copy(releasing = true)
-    case Entry.Released(_)         => base
-    case Entry.TurnEnded(_)        => base.copy(
+    // The read of the derived data changes no part of the state (7.2, choice 3).
+    case Entry.DerivedRead(_, _) => base
+    case Entry.Releasing(_)      => base.copy(releasing = true)
+    case Entry.Released(_)       => base
+    case Entry.TurnEnded(_)      => base.copy(
         position = Position.NoTurn,
         stopping = false,
         grants = s.grants.filterNot(_.lifetime == GrantLifetime.Turn)

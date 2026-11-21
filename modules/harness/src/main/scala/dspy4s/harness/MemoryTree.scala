@@ -2,13 +2,14 @@ package dspy4s.harness
 
 import dspy4s.core.contracts.{DspyError, RuntimeContext}
 import dspy4s.harness.guest.StrategyName
-import dspy4s.harness.kernel.Logged
+import dspy4s.harness.kernel.{DerivationName, Logged}
 import dspy4s.programs.strategies.Predict
 import dspy4s.signatures.Signature
 import zio.blocks.schema.{DynamicValue, Schema}
 
 import java.nio.charset.StandardCharsets.UTF_8
 import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.atomic.AtomicLong
 import scala.annotation.tailrec
 
 /** The input of the leaf `compress` (CODE_HARNESS.md, 6.1): one message, longer than a line. The strategy cuts it to
@@ -36,22 +37,45 @@ final case class Summary(line: String) derives Schema
   *
   * A key holds the digest of the texts under the node, so a line of other messages is never used. A line never changes
   * (the law Immutability): `putAll` keeps the line of a key that has one.
+  *
+  * Each line has the build number of the write that added it (7.2, choice 3). The numbers of a store only go up, so a
+  * read up to a number gives the same lines after later writes, and a turn records the number that it read
+  * (`Entry.DerivedRead`).
   */
 trait LineStore:
-  def get(key: LineKey): Option[MemoryLine]
 
-  /** Adds the lines of one update, in one transaction when the store has a file. */
-  def putAll(lines: Vector[(LineKey, MemoryLine)]): Unit
+  /** The line of `key`, when a write with the build number `upTo` or an earlier one added it. */
+  def get(key: LineKey, upTo: Long): Option[MemoryLine]
+
+  /** The newest build number: the number of the last write that added a line, or 0 when no write added one. */
+  def newest: Long
+
+  /** Adds the lines of one update, in one transaction when the store has a file. The new lines get the next build
+    * number. A key that has a line keeps it, so a write with no new line adds no number. It gives `newest` after the
+    * write.
+    */
+  def putAll(lines: Vector[(LineKey, MemoryLine)]): Long
 
 object LineStore:
 
   /** A store in memory, for a program call and for the laws. */
   def inMemory(): LineStore =
     new LineStore:
-      private val lines                                      = ConcurrentHashMap[LineKey, MemoryLine]()
-      def get(key: LineKey): Option[MemoryLine]              = Option(lines.get(key))
-      def putAll(added: Vector[(LineKey, MemoryLine)]): Unit =
-        added.foreach((key, line) => lines.putIfAbsent(key, line): Unit)
+      private val lines = ConcurrentHashMap[LineKey, (MemoryLine, Long)]()
+      private val last  = AtomicLong(0L)
+
+      def get(key: LineKey, upTo: Long): Option[MemoryLine] =
+        Option(lines.get(key)).collect { case (line, build) if build <= upTo => line }
+
+      def newest: Long = last.get
+
+      def putAll(added: Vector[(LineKey, MemoryLine)]): Long =
+        synchronized {
+          val fresh = last.get + 1
+          val kept  = added.count((key, line) => Option(lines.putIfAbsent(key, (line, fresh))).isEmpty)
+          if kept > 0 then last.set(fresh)
+          last.get
+        }
 
 /** The derived data of the memory tree (7.1): the memory, and the view of the messages before the open turn. */
 final case class MemoryState(memory: Memory, view: View) derives CanEqual
@@ -146,7 +170,8 @@ final class MemoryTree(
     leafRunner: PolicyRunner,
     summaries : () => Budget,
     width     : Int,
-    progress  : MemoryProgress = MemoryProgress.none
+    progress  : MemoryProgress = MemoryProgress.none,
+    upTo      : Long           = Long.MaxValue
 ) extends ContextStrategy:
   type D = MemoryState
 
@@ -177,6 +202,9 @@ final class MemoryTree(
   /** The budget of the open turn and the room of the view (7.2, choice 10). */
   override def maxSize(budget: Int): Int = budget + MemoryTree.room(viewChars)
 
+  /** The store of the lines, with its newest build number, at most `upTo` (7.2, choice 3). */
+  override def reads: Vector[(DerivationName, Long)] = Vector(DerivationName.Memory -> lines.newest.min(upTo))
+
   /** The text of the part `ref` of the memory: the message of a part of level 0, or the lines of its two halves with
     * their references. A part that the memory does not have, or a text that is not a reference, gives an error with the
     * parts that zoom (the parts of the view and of level 0), so the model can zoom one of them and go down, and does
@@ -205,7 +233,7 @@ final class MemoryTree(
     else
       val made = inBatch(ready, width)(id => lineOf(m, id, budget, count)).fold((_, error) => throw error, identity)
       val kept = made.flatMap(_.stored)
-      if kept.nonEmpty then lines.putAll(kept)
+      if kept.nonEmpty then lines.putAll(kept): Unit
       val grown = ready.zip(made).foldLeft(m) { case (acc, (id, MemoryTree.Made(line, _, standIn))) =>
         Memory.buildNode(acc, id, line, standIn)
       }
@@ -252,7 +280,7 @@ final class MemoryTree(
     * or less as its own line. None for a node that needs a leaf call.
     */
   private def known(m: Memory, id: NodeId, key: Option[LineKey]): Option[MemoryLine] =
-    key.flatMap(lines.get).orElse(
+    key.flatMap(lines.get(_, upTo)).orElse(
       Option.when(id.level == 0)(sourceText(m, id)).filter(_.getBytes(UTF_8).length <= MemoryLine.MaxBytes)
         .map(MemoryLine.of)
     )
@@ -372,7 +400,9 @@ object MemoryTree:
     * characters, the runner of the activation, the budget of the summaries of the turn, and at most `width` leaf calls
     * at a time. A program call has `PolicyRunner.Direct`. Each leaf request has the option bag `options` of the
     * provider, for example `{"chat_template_kwargs": {"enable_thinking": false}}` for a model of vLLM that reasons: a
-    * summary needs no reasoning, and the reasoning made a merge 50 times slower in the live run.
+    * summary needs no reasoning, and the reasoning made a merge 50 times slower in the live run. The tree reads only
+    * the lines of the store up to the build number `upTo` (7.2, choice 3), so a replay of a `DerivedRead` reads the
+    * same lines.
     */
   def withLeaves(
       lines     : LineStore,
@@ -381,7 +411,8 @@ object MemoryTree:
       summaries : () => Budget        = () => Budget(Int.MaxValue),
       width     : Int                 = 4,
       options   : DynamicValue.Record = DynamicValue.Record.empty,
-      progress  : MemoryProgress      = MemoryProgress.none
+      progress  : MemoryProgress      = MemoryProgress.none,
+      upTo      : Long                = Long.MaxValue
   ): MemoryTree =
     val compress = Signature.derived[CompressInput, Summary]("compress", compressInstructions)
     val merge    = Signature.derived[MergeInput, Summary]("merge", mergeInstructions)
@@ -395,7 +426,8 @@ object MemoryTree:
       leafRunner,
       summaries,
       width.max(1),
-      progress
+      progress,
+      upTo
     )
 
   /** The line that `pending` gives each node of its rounds. Only the set of the built nodes counts there. */

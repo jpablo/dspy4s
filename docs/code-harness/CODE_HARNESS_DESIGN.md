@@ -1667,12 +1667,22 @@ new words:
    and the later steps of the turn use that derived data. A line that the builder stores during the turn comes to the
    view in the next turn. So the memory field of the prompt does not change during a turn, and the prompt cache keeps
    it.
+   - Step 4 built this rule on 2026-11-21 (`HarnessEffects.derivedFor`). Until the builder comes, the update of the
+     first step still makes the summary calls. So a long cell output gets its line at the first step of the next turn,
+     and the cell output of the last turn of a host gets it in the next host.
 3. **Each turn records what it read.** Before the first policy call of a turn, the harness commits
    `DerivedRead(derivation, build)` for each derivation that the strategy reads. `build` is the newest build number of
    the store at that time, and `update` reads only the lines up to it. A later read up to the same number gives the
    same lines. So `project` still depends only on the journal and the derived data, and a replay or the inspector can
    make the same prompt again. The fold of the state ignores the entry. The window strategy reads no derivation, so its
    turns have no such entry.
+   - Step 4 built this rule on 2026-11-21. The kernel accepts a `DerivedRead` only during a policy call, after its
+     `StepStarted`. `ContextStrategy.reads` gives the derivations and their newest build numbers, and the memory tree
+     gives `DerivationName.Memory`. In step 4 the update still writes lines, so the effects commit the read after the
+     update, with the newest number after its writes. `MemoryTree.withLeaves(upTo = n)` reads only the lines up to
+     `n`, so a replay of a `DerivedRead` reads the same lines.
+   - A policy exchange of the first step of a turn starts after the `DerivedRead`, so its `after` is the seq of the
+     `DerivedRead` (law L7 of [OBSERVABILITY.md](OBSERVABILITY.md)). The inspector shows the read as a part of the step.
 4. **The policy call comes first.** The summary calls and the policy calls go to the same endpoint. The builder runs at
    most `HarnessLimits.batch` leaf calls at the same time. It starts no new leaf call while a policy call of its session
    waits for its reply, and the calls that already run go on to their end.
@@ -1795,9 +1805,12 @@ also between turns.
 characters, a `project` that takes the room of the view from the budget of the open turn, an `update` that makes each
 ready merge, a count of the leaf calls with each ready merge, a size that reads the built line, a `needed` with no
 nodes under its parts, a view that joins only the nodes that have a line, a `needed` from the view of the last reply,
-an error of `zoom` that names the roots, an `update` at each step, a turn that waits for the builder, a read with no
-limit of build number, a builder that does not wait for the policy call, a builder that makes each ready merge, a long
-reply with no `shorten` call, a `shorten` call that spends no budget, and a close that does not stop the builder.
+an error of `zoom` that names the roots, an `update` at each step, a first step with no `DerivedRead`, a read with the
+build number 0, a `DerivedRead` with no open policy call, a fold that a `DerivedRead` changes, a store that reads the
+lines of later builds, a store that numbers a write with no new line, a file with no column `build` after its open, a
+file that numbers each write 1, a turn that waits for the builder, a read with no limit of build number, a builder
+that does not wait for the policy call, a builder that makes each ready merge, a long reply with no `shorten` call, a
+`shorten` call that spends no budget, and a close that does not stop the builder.
 
 **The order of the work.** Each step ends with all laws green. The user chose this order on 2026-11-20, after the
 large-view test. Before, the builder came first, and the merges that a view needs came last.
@@ -1810,7 +1823,10 @@ large-view test. Before, the builder came first, and the merges that a view need
    calls and the large view, because the large-view test ran with no summary calls. Done on 2026-11-21, with 8 new
    mutants killed: the 3 live sessions got 42 of 42 points with no merge ("The 50-turn task after step 3").
 4. The build numbers of the store, `DerivedRead`, and one `update` for each turn. In this step, `update` still makes
-   the leaf calls, at the first step of the turn only.
+   the leaf calls, at the first step of the turn only. Done on 2026-11-21, with 12 new mutants killed in the kernel,
+   the harness and the host. A live 50-turn session with the summary calls got 14 of 14 points in 130.0 s, with 45
+   `compress` calls and 50 `DerivedRead` entries for its 50 turns. The last read had the newest build number of the
+   store, 30.
 5. The builder. The leaf calls move to `MemoryBuilder` on the thread of the builder, with the gate and the budget, and
    `update` makes no LM call. `MemoryBuilder` keeps the rule of step 3.
 6. The live comparison of this section again, with the same tasks, so that the numbers can be compared.

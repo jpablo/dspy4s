@@ -66,6 +66,17 @@ class DecideLaws extends ScalaCheckSuite:
     assertEquals(decide(Command.Commit(Vector(Entry.StepStarted(0))), inTurn), Right(Vector(Entry.StepStarted(0))))
   }
 
+  test("Decide table: a DerivedRead is valid only during a policy call, and it changes no part of the state") {
+    // The first step of a turn records the build number of the derived data that it read (7.2, choice 3).
+    val read     = Entry.DerivedRead(DerivationName.Memory, 7L)
+    val inPolicy = commit(inTurn, Vector(Entry.StepStarted(0)))
+    assertEquals(decide(Command.Commit(Vector(read)), inPolicy), Right(Vector(read)))
+    assertEquals(commit(inPolicy, Vector(read)), inPolicy.copy(nextSeq = inPolicy.nextSeq + 1))
+    Vector(inTurn, inCell, afterTurn, releasing).foreach { s =>
+      assertEquals(decide(Command.Commit(Vector(read)), s), Left(Rejection.OutOfOrder(read)))
+    }
+  }
+
   test("Decide table: a Commit of an EffectStarted with the id of an open effect is refused") {
     // A second intent with one id would replace the first, and the first would get no outcome of its own.
     val started = Entry.EffectStarted(EffectId(cell, 0), "read", args)
