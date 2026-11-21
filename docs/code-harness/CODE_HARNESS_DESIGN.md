@@ -1645,6 +1645,24 @@ merges that the view needs. The other columns come from the two paragraphs above
 - So with the large view, the summary calls give the same answers as no summary calls in these 50 turns. They make
   the view smaller, so a longer session can keep each message as a part for longer.
 
+**The 50-turn task after step 5 (2026-11-21).** 3 more live sessions ran the same task with the summary calls and
+the builder of step 5: the summary calls run in the background, and a turn never waits for them.
+
+| | Summary calls, after step 3 | Summary calls, after step 5 | No summary calls, 200 parts |
+|---|---|---|---|
+| Points | 42 of 42 | 42 of 42 (14, 14 and 14) | 42 of 42 |
+| Time in the turns | 145.4 s | 127.3 s | 97.6 s |
+| Mean time of a turn, turns 1 to 10 and turns 41 to 50 | 3.0 s and 3.1 s | 2.4 s and 2.4 s | 2.1 s and 2.1 s |
+| Summary calls of a session, and their time | about 56 `compress`, 28.3 s, in the turns | about 59 `compress` and 0.7 `shorten`, 43.0 s, in the background | none |
+| Time of the policy calls | 108.4 s | 119.2 s | 89.5 s |
+| The last turn | 5.2 s, 1.7 steps, 0.7 `zoom` calls | 2.5 s, 1.3 steps, 0.3 `zoom` calls | 3.5 s, 2.0 steps, 1.3 `zoom` calls |
+
+- The turns took 12% less time than after step 3, because no step waits for a summary call.
+- The policy calls took 11 s more. A summary call that runs goes on when a policy call starts, and both share the
+  endpoint. The gate stops only the start of a new summary call.
+- The script sends the next message right after a turn, so the builder runs during the next turn. With the time of
+  a person between the messages, the builder has the time between the turns (open points).
+
 **The words.** The user calls these folds projections, as the read models of event sourcing
 ([CODE_HARNESS.md](CODE_HARNESS.md), 8.2). In this code, `Projection` is the input of one step, and `project` makes it.
 So this section uses the word derivation, as [CODE_HARNESS.md](CODE_HARNESS.md), 7.2, does. Section 3 has the three
@@ -1691,6 +1709,16 @@ new words:
    texts (`LineKey`), so a reopen makes no new call for a line that the store has. After each commit, the writer wakes
    the builder (`onCommit`). The close of the activation stops the builder and its leaf calls, and the store keeps the
    lines of the rounds that ended. A stop of a turn does not stop the builder, because no turn waits for it.
+   - Step 5 built choices 1 and 4 to 7 on 2026-11-21. `Builder` is a virtual thread for each activation, and
+     `Activation.committed` wakes it after each commit of the writer. `MemoryBuilder` holds a memory tree with the
+     leaves, and the turn gets a tree that only reads (`MemoryTree.withLeaves(readOnly = true)`): it makes no LM call,
+     it gives a stand-in to each needed node with no line, and it takes the stand-ins out at each update. Both trees
+     share the store. `PolicyGate` marks the policy calls, and `GatedRunner` makes each summary call wait at the gate.
+     The summary calls have a runner of their own, so a stop of a turn does not cut them.
+   - The host makes an activation at the first turn after an open, not at the open. So the builder starts at that
+     first turn, and a reopen with no new message starts no builder.
+   - The update of a turn writes no line, so it reads up to the newest build number at its start, and the
+     `DerivedRead` gives that number.
 6. **The budget stays for each turn.** `HarnessLimits.summaryCalls` is now the most leaf calls that the builder makes
    for each turn of the journal. When the budget is spent, the builder waits for the next `TurnStarted`. With
    `--no-memory-calls`, the limit is 0, so the host starts no builder, and each line is a stand-in, as before.
@@ -1758,7 +1786,7 @@ new words:
 | The merges that a view needs | `View.needed`: the parts of the newest view and the nodes under them. `Memory.planned` gives the newest view, `MemoryLine.fits` the short messages, and the errors of `zoom` name the parts of the view. `update` uses them first, and `MemoryBuilder` later. | `Memory:`, `Memory tree:` |
 | The store | `LineStore.get(key, upTo)`, `LineStore.newest`, `putAll` that gives the build number of the write, the column `build` of the table `memory`, with 0 for a line of an older file | `Memory tree:`, `File:` |
 | The read of a turn | `Entry.DerivedRead`, the last case of `Entry`, and one `update` for each turn in `HarnessEffects` | `Decide:`, `Memory tree:`, `Work:` |
-| The builder | `DerivationName`, `BuiltDerivation` with `build` and `newest`, `MemoryBuilder`, `Builder`, the gate of the policy calls, and the wake in `onCommit` | `Builder:`, `Work:` |
+| The builder | `DerivationName`, `BuiltDerivation` with `build` and `newest`, `MemoryBuilder`, `Builder`, `PolicyGate` and `GatedRunner`, the tree of a turn that only reads, and the wake in `Activation.committed` | `Builder:`, `Gate:`, `Memory builder:`, `Work:` |
 
 `Derivation.update` of section 7 can call `Predict` leaves. After this choice, `update` makes no LM call, and
 `BuiltDerivation.build` makes them. The builder has the `RuntimeContext` of the activation, so its calls go to the
@@ -1798,7 +1826,10 @@ also between turns.
   starts.
 - `Work:` the close of a session stops the leaf calls of the builder, and the store keeps the lines of the rounds that
   ended. A reopen makes no leaf call for a line that the store has.
-- `Work:` `zoom` in a cell reads a line that the builder stored after the first step of the turn.
+- `Memory builder:` a build stores the lines that the view needs, and `zoom` reads the newest memory of the builder.
+  A tree that only reads makes no LM call, and it reads the lines that the builder stored.
+- `Builder:` a build runs at the start, many wakes during a build give one more build, and the close stops the calls
+  and the builds. `Gate:` a summary call waits while a policy call runs, and a closed gate never waits.
 - `File:` a session file from before the column `build` opens, and its lines have the build number 0.
 
 **The mutants.** Each one must die: a `fit` that joins a view under its limit, a `fit` that counts parts in place of
@@ -1808,7 +1839,9 @@ nodes under its parts, a view that joins only the nodes that have a line, a `nee
 an error of `zoom` that names the roots, an `update` at each step, a first step with no `DerivedRead`, a read with the
 build number 0, a `DerivedRead` with no open policy call, a fold that a `DerivedRead` changes, a store that reads the
 lines of later builds, a store that numbers a write with no new line, a file with no column `build` after its open, a
-file that numbers each write 1, a turn that waits for the builder, a read with no limit of build number, a builder
+file that numbers each write 1, a tree of a turn that keeps its stand-ins, a `zoom` that does not read the memory
+of the builder, a build that does not clear its wake, a writer that does not wake the builder, a turn that waits for
+the builder, a read with no limit of build number, a builder
 that does not wait for the policy call, a builder that makes each ready merge, a long reply with no `shorten` call, a
 `shorten` call that spends no budget, and a close that does not stop the builder.
 
@@ -1828,7 +1861,9 @@ large-view test. Before, the builder came first, and the merges that a view need
    `compress` calls and 50 `DerivedRead` entries for its 50 turns. The last read had the newest build number of the
    store, 30.
 5. The builder. The leaf calls move to `MemoryBuilder` on the thread of the builder, with the gate and the budget, and
-   `update` makes no LM call. `MemoryBuilder` keeps the rule of step 3.
+   `update` makes no LM call. `MemoryBuilder` keeps the rule of step 3. Done on 2026-11-21, with 11 new mutants
+   killed in the harness and the host. The 3 live sessions got 42 of 42 points in 127.3 s ("The 50-turn task after
+   step 5").
 6. The live comparison of this section again, with the same tasks, so that the numbers can be compared.
 
 **Open points.**
@@ -1847,6 +1882,10 @@ large-view test. Before, the builder came first, and the merges that a view need
   - New calls with the cut point in place of `shorten`, and a ruler in the task.
   - A summary input with the system prompt and a view, so the prompt cache holds most of it, and a merge reads more
     detail.
+- A stop that comes after the `EffectStarted` of an `exec` and before the start of its process leaves the process.
+  The law "Work: a stop during a long exec ends the command and its process" fails then. It failed under load before
+  the builder, and the builds after each commit add load, so it fails more often. It is a defect of the stop path
+  (10.3), apart from choice 20.
 - The gate can hold the builder for a long time in a turn with many short steps. The live comparison of step 6 checks
   it.
 - The controller has the memory tree too, so it gets the builder too.

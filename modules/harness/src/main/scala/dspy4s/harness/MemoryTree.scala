@@ -171,7 +171,8 @@ final class MemoryTree(
     summaries : () => Budget,
     width     : Int,
     progress  : MemoryProgress = MemoryProgress.none,
-    upTo      : Long           = Long.MaxValue
+    upTo      : Long           = Long.MaxValue,
+    readOnly  : Boolean        = false
 ) extends ContextStrategy:
   type D = MemoryState
 
@@ -179,17 +180,31 @@ final class MemoryTree(
 
   def empty: MemoryState = MemoryState(Memory.empty, View.empty)
 
+  /** The build number that the last update read (7.2, choice 3): the newest number of the store at its start, or the
+    * number of its own last write. A `DerivedRead` records it.
+    */
+  @volatile private var pinned: Long = 0L
+
+  /** The newest build number of the writes of this tree. */
+  private val written = AtomicLong(0L)
+
   def update(journal: Vector[Logged], d: MemoryState)(using RuntimeContext): Either[DspyError, MemoryState] =
-    val budget = summaries()
+    // A tree that only reads makes no leaf call (7.2, choice 1). Each needed node with no line of the store gets a
+    // stand-in, and each update takes the stand-ins out first, so a line that the builder stored since comes in.
+    val budget = if readOnly then Budget(0) else summaries()
     // With a spent budget, a stand-in can only build as a stand-in again, so the stand-ins stay until the next turn.
-    val kept   = if budget.check().isRight then Memory.withoutStandIns(d.memory) else d.memory
+    val kept = if readOnly || budget.check().isRight then Memory.withoutStandIns(d.memory) else d.memory
+    // The update reads only the lines up to the newest build number at its start, so a line that the builder stores
+    // during the update does not come into it (7.2, choice 3).
+    val bound  = lines.newest.min(upTo)
     val added  = MemoryLog.messages(journal).drop(d.memory.log.size)
     val start  = added.foldLeft(kept)(Memory.append)
     val shape  = Memory.planned(start)
     val limit  = ViewLimit.chars(viewChars)
     val view   = View.advance(d.view, shape, limit, MemoryLog.beforeOpenTurn(journal))
     val needed = View.needed(View.advance(view, shape, limit, start.log.size.toLong))
-    val memory = counted(start, needed)(count => settle(start, needed, budget, count))
+    val memory = counted(start, needed, bound)(count => settle(start, needed, budget, count, bound))
+    pinned = bound.max(written.get).min(upTo)
     Right(MemoryState(memory, view))
 
   def project(journal: Vector[Logged], d: MemoryState, budget: Int): Projection =
@@ -202,8 +217,8 @@ final class MemoryTree(
   /** The budget of the open turn and the room of the view (7.2, choice 10). */
   override def maxSize(budget: Int): Int = budget + MemoryTree.room(viewChars)
 
-  /** The store of the lines, with its newest build number, at most `upTo` (7.2, choice 3). */
-  override def reads: Vector[(DerivationName, Long)] = Vector(DerivationName.Memory -> lines.newest.min(upTo))
+  /** The store of the lines, with the build number that the last update read (7.2, choice 3). */
+  override def reads: Vector[(DerivationName, Long)] = Vector(DerivationName.Memory -> pinned)
 
   /** The text of the part `ref` of the memory: the message of a part of level 0, or the lines of its two halves with
     * their references. A part that the memory does not have, or a text that is not a reference, gives an error with the
@@ -225,26 +240,27 @@ final class MemoryTree(
     * stand-in.
     */
   @tailrec
-  private def settle(m: Memory, needed: Set[NodeId], budget: Budget, count: SummaryCount)(using
+  private def settle(m: Memory, needed: Set[NodeId], budget: Budget, count: SummaryCount, bound: Long)(using
       RuntimeContext
   ): Memory =
     val ready = Memory.ready(m).filter(needed)
     if ready.isEmpty then m
     else
-      val made = inBatch(ready, width)(id => lineOf(m, id, budget, count)).fold((_, error) => throw error, identity)
+      val made =
+        inBatch(ready, width)(id => lineOf(m, id, budget, count, bound)).fold((_, error) => throw error, identity)
       val kept = made.flatMap(_.stored)
-      if kept.nonEmpty then lines.putAll(kept): Unit
+      if kept.nonEmpty then written.accumulateAndGet(lines.putAll(kept), math.max): Unit
       val grown = ready.zip(made).foldLeft(m) { case (acc, (id, MemoryTree.Made(line, _, standIn))) =>
         Memory.buildNode(acc, id, line, standIn)
       }
-      settle(grown, needed, budget, count)
+      settle(grown, needed, budget, count, bound)
 
   /** Runs `build` with the count of the leaf calls that `settle` makes from `m` for `needed` (`pending`), for
     * `progress`. The count closes after `build`, also after a throw, so a failed or a stopped call also ends the
-    * summaries.
+    * summaries. A tree that only reads makes no leaf call, so it reports nothing.
     */
-  private def counted(m: Memory, needed: Set[NodeId])(build: SummaryCount => Memory): Memory =
-    val count = SummaryCount(pending(m, needed), progress)
+  private def counted(m: Memory, needed: Set[NodeId], bound: Long)(build: SummaryCount => Memory): Memory =
+    val count = SummaryCount(if readOnly then 0 else pending(m, needed, bound), progress)
     try build(count)
     finally count.close()
 
@@ -253,34 +269,34 @@ final class MemoryTree(
     * `settle`. They give each node a line of no text, so the count makes no leaf call. A node of a spent budget counts,
     * and it ends at once. A node with a half that is a stand-in also counts, and it ends at once.
     */
-  private def pending(m: Memory, needed: Set[NodeId]): Int =
+  private def pending(m: Memory, needed: Set[NodeId], bound: Long): Int =
     @tailrec
     def rounds(at: Memory, total: Int): Int =
       val ready = Memory.ready(at).filter(needed)
       if ready.isEmpty then total
       else
-        val leaves = ready.count(id => known(at, id, Memory.key(at, id)).isEmpty)
+        val leaves = ready.count(id => known(at, id, Memory.key(at, id), bound).isEmpty)
         rounds(ready.foldLeft(at)((acc, id) => Memory.buildNode(acc, id, MemoryTree.NoLine)), total + leaves)
     rounds(m, 0)
 
   /** The line of the ready node `id`. The store comes first. A short message is its own line. Else the line comes from
     * a leaf call (`leafLine`), and `count` gets its end, also after a throw.
     */
-  private def lineOf(m: Memory, id: NodeId, budget: Budget, count: SummaryCount)(using
+  private def lineOf(m: Memory, id: NodeId, budget: Budget, count: SummaryCount, bound: Long)(using
       RuntimeContext
   ): MemoryTree.Made =
     val key = Memory.key(m, id)
-    known(m, id, key) match
+    known(m, id, key, bound) match
       case Some(line) => MemoryTree.Made(line, None, standIn = false)
       case None       =>
         try leafLine(m, id, key, budget)
         finally count.ended()
 
-  /** The line of `id` with no leaf call: the line of the store for `key`, or a message of `MemoryLine.MaxBytes` bytes
-    * or less as its own line. None for a node that needs a leaf call.
+  /** The line of `id` with no leaf call: the line of the store for `key` up to the build number `bound`, or a message
+    * of `MemoryLine.MaxBytes` bytes or less as its own line. None for a node that needs a leaf call.
     */
-  private def known(m: Memory, id: NodeId, key: Option[LineKey]): Option[MemoryLine] =
-    key.flatMap(lines.get(_, upTo)).orElse(
+  private def known(m: Memory, id: NodeId, key: Option[LineKey], bound: Long): Option[MemoryLine] =
+    key.flatMap(lines.get(_, bound)).orElse(
       Option.when(id.level == 0)(sourceText(m, id)).filter(_.getBytes(UTF_8).length <= MemoryLine.MaxBytes)
         .map(MemoryLine.of)
     )
@@ -412,7 +428,8 @@ object MemoryTree:
       width     : Int                 = 4,
       options   : DynamicValue.Record = DynamicValue.Record.empty,
       progress  : MemoryProgress      = MemoryProgress.none,
-      upTo      : Long                = Long.MaxValue
+      upTo      : Long                = Long.MaxValue,
+      readOnly  : Boolean             = false
   ): MemoryTree =
     val compress = Signature.derived[CompressInput, Summary]("compress", compressInstructions)
     val merge    = Signature.derived[MergeInput, Summary]("merge", mergeInstructions)
@@ -427,7 +444,8 @@ object MemoryTree:
       summaries,
       width.max(1),
       progress,
-      upTo
+      upTo,
+      readOnly
     )
 
   /** The line that `pending` gives each node of its rounds. Only the set of the built nodes counts there. */

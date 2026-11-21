@@ -801,14 +801,14 @@ new = "case Left(PolicyRunner.Stopped) => MemoryTree.Made(fallback, key.map(_ ->
 name = "Mutant: the next update keeps the stand-ins of a stop"
 [[mutant.edit]]
 file = "MemoryTree.scala"
-old = "if budget.check().isRight then Memory.withoutStandIns(d.memory) else d.memory"
+old = "if readOnly || budget.check().isRight then Memory.withoutStandIns(d.memory) else d.memory"
 new = "d.memory"
 
 [[mutant]]
 name = "Mutant: an update with a spent summary budget takes the stand-ins out"
 [[mutant.edit]]
 file = "MemoryTree.scala"
-old = "if budget.check().isRight then Memory.withoutStandIns(d.memory) else d.memory"
+old = "if readOnly || budget.check().isRight then Memory.withoutStandIns(d.memory) else d.memory"
 new = "Memory.withoutStandIns(d.memory)"
 
 [[mutant]]
@@ -843,15 +843,15 @@ new = "if true then open"
 name = "Mutant: a round of the memory tree makes one leaf call at a time"
 [[mutant.edit]]
 file = "MemoryTree.scala"
-old = "inBatch(ready, width)(id => lineOf(m, id, budget, count))"
-new = "inBatch(ready, width.min(1))(id => lineOf(m, id, budget, count))"
+old = "inBatch(ready, width)(id => lineOf(m, id, budget, count, bound))"
+new = "inBatch(ready, width.min(1))(id => lineOf(m, id, budget, count, bound))"
 
 [[mutant]]
 name = "Mutant: the store gets no line of a round"
 [[mutant.edit]]
 file = "MemoryTree.scala"
-old = "if kept.nonEmpty then lines.putAll(kept)"
-new = "if kept.nonEmpty && ready.isEmpty then lines.putAll(kept)"
+old = "if kept.nonEmpty then written.accumulateAndGet(lines.putAll(kept), math.max)"
+new = "if kept.nonEmpty && ready.isEmpty then written.accumulateAndGet(lines.putAll(kept), math.max)"
 
 [[mutant]]
 name = "Mutant: the leaf requests have no summary options"
@@ -1153,12 +1153,63 @@ new = "if kept >= 0 then last.set(fresh)"
 name = "Mutant: the memory tree reads with no limit of build number"
 [[mutant.edit]]
 file = "MemoryTree.scala"
-old = "key.flatMap(lines.get(_, upTo)).orElse("
-new = "key.flatMap(lines.get(_, Long.MaxValue)).orElse("
+old = "key.flatMap(lines.get(_, bound)).orElse("
+new = "key.flatMap(lines.get(_, bound.max(Long.MaxValue))).orElse("
 
 [[mutant]]
-name = "Mutant: the reads of the memory tree ignore its limit"
+name = "Mutant: the reads of the memory tree give the newest number, not the number that the update read"
 [[mutant.edit]]
 file = "MemoryTree.scala"
-old = "Vector(DerivationName.Memory -> lines.newest.min(upTo))"
-new = "Vector(DerivationName.Memory -> lines.newest)"
+old = "Vector(DerivationName.Memory -> pinned)"
+new = "Vector(DerivationName.Memory -> lines.newest.max(pinned))"
+
+# ── The builder (7.2, choices 1, 4, 5 and 7) ──
+
+[[mutant]]
+name = "Mutant: the tree of a turn makes the summary calls"
+[[mutant.edit]]
+file = "MemoryTree.scala"
+old = "val budget = if readOnly then Budget(0) else summaries()"
+new = "val budget = summaries()"
+
+[[mutant]]
+name = "Mutant: the tree of a turn keeps its stand-ins"
+[[mutant.edit]]
+file = "MemoryTree.scala"
+old = "val kept = if readOnly || budget.check().isRight then"
+new = "val kept = if budget.check().isRight then"
+
+[[mutant]]
+name = "Mutant: a summary call of the builder does not wait at the gate"
+[[mutant.edit]]
+file = "Builder.scala"
+old = "    gate.awaitOpen()\n"
+new = "    if closed then gate.awaitOpen()\n"
+
+[[mutant]]
+name = "Mutant: the gate does not count a policy call"
+[[mutant.edit]]
+file = "Builder.scala"
+old = "    locked(busy += 1)"
+new = "    locked(busy += 0)"
+
+[[mutant]]
+name = "Mutant: the zoom of a cell does not read the memory of the builder"
+[[mutant.edit]]
+file = "Builder.scala"
+old = "zooms.setReader(ref => tree.zoom(fresh, ref))"
+new = "zooms.setReader(ref => tree.zoom(tree.empty, ref))"
+
+[[mutant]]
+name = "Mutant: a build does not clear the wake"
+[[mutant.edit]]
+file = "Builder.scala"
+old = "      dirty = false\n"
+new = "      dirty = !closed\n"
+
+[[mutant]]
+name = "Mutant: the close of the builder does not stop its calls"
+[[mutant.edit]]
+file = "Builder.scala"
+old = "    stopCalls()\n"
+new = "    if label.isEmpty then stopCalls()\n"

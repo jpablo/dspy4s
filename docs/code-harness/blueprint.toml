@@ -3231,9 +3231,10 @@ id = "activation"
 group = "host"
 kind = "data"
 name = "Activation"
+ops = ["committed"]
 ref = "11"
 uses = ["turn-effects"]
-text = "The live part of one activation: the effects of a turn, the stop of steps 2 and 3 of 10.3 through the PolicyRunner of the session, ScalaRepl.stopCell and SandboxedShell.stopAll, and the flag of a cell that did not end."
+text = "The live part of one activation: the effects of a turn, the stop of steps 2 and 3 of 10.3 through the PolicyRunner of the session, ScalaRepl.stopCell and SandboxedShell.stopAll, and the flag of a cell that did not end. committed runs after each commit of the writer, and the activation of a work session wakes its builder there (7.2, choice 5)."
 
 [[node]]
 id = "session-runtime"
@@ -3327,7 +3328,7 @@ kind = "data"
 name = "WorkEnv"
 ref = "8.1"
 uses = ["host-list", "backend", "secrets"]
-text = "The home folder, the host list, the backend of the sandbox and the secrets of a work session."
+text = "The home folder, the host list, the backend of the sandbox and the secrets of a work session. With summary calls in the budget of a turn, the memory tree of the turn only reads, and a Builder runs a MemoryBuilder in the background, with its own runner of calls behind a PolicyGate that the policy calls pass (7.2, choices 1 and 4 to 6)."
 
 [[node]]
 id = "work-runtime"
@@ -3337,8 +3338,8 @@ name = "WorkRuntime"
 ops = ["activate", "defaultGuard", "config", "forWork", "taskOf", "shellWords", "ownedConfig", "forHost"]
 ref = "8.1"
 spec = true
-uses = ["work-env", "harness-limits", "predict", "policy-input", "policy-step", "sub-query", "sub-answer", "runtime-context", "session-runtime", "session-id", "session-config", "journal-trait", "job-table", "activation", "mode", "guard", "access", "harness", "line-store", "file-lines", "memory-tree", "session-file", "peers", "host-sessions", "harness-probe", "scope", "strategy-name", "activity", "memory-progress", "memory-use", "drafts", "draft", "context-use", "project-files", "goal-answer", "goal-question"]
-proof_uses = ["harness-effects", "recorded", "recorder", "guarded", "window", "scala-repl", "job-shell", "sandboxed-shell", "leaf-llm", "budget", "local-files", "snapshot-store", "journal-turn", "preamble", "memory-tree", "controller", "project-files", "layout"]
+uses = ["work-env", "harness-limits", "predict", "policy-input", "policy-step", "sub-query", "sub-answer", "runtime-context", "session-runtime", "session-id", "session-config", "journal-trait", "job-table", "activation", "mode", "guard", "access", "harness", "line-store", "file-lines", "memory-tree", "session-file", "peers", "host-sessions", "harness-probe", "scope", "strategy-name", "activity", "memory-progress", "memory-use", "drafts", "draft", "context-use", "project-files", "goal-answer", "goal-question", "builder", "built-derivation", "gated-runner", "memory-builder", "policy-gate"]
+proof_uses = ["harness-effects", "recorded", "recorder", "guarded", "window", "scala-repl", "job-shell", "sandboxed-shell", "leaf-llm", "budget", "local-files", "snapshot-store", "journal-turn", "preamble", "memory-tree", "controller", "project-files", "layout", "policy-gate"]
 text = "A chat turn of the user with the effects of a harness: the policy leaf, the window with the earlier turns, a REPL for the activation, the handlers of workMode through recorded and guarded, and JobShell. workMode is local mode with no Sessions^ and no Children^, so a work session has no rlm. Each turn gets a new budget of model calls. The first rules of 5.5: git push gets Ask in a mode with Network^. The task of a session with a shell gives the words of the profile of its activation (shellWords), and tells the model to tell the person when a task needs a write that the shell refuses. config takes the option bag of the model, and contextUse gives the tokens of the last call to the policy (CLI_SCREEN.md, 14.4). The task of a work session also holds the files of the project (ProjectFiles), read once at each activation. When a rule of the guard of a work session can ask, its task also holds the rule of an approval of the controller (Controller.approvalRule): the person types /allow, and a message refuses the call. The default guard of a work session asks for no call, so its task has no such text. The task holds no instructions: they come one time, in the system message. The layout of an activation holds the hooks folder of the scope (Layout.hooksFolder, choice 19)."
 
 [[group]]
@@ -3827,7 +3828,7 @@ kind = "law"
 name = "Work:"
 ref = "8.1"
 uses = ["work-runtime", "local-host"]
-text = "config and workMode, with no Sessions^ and no Children^, and defaultGuard. A cell runs in the scope, a val stays for the next turn, and rlm does not compile. Each turn gets a new budget. An Ask call does not run, pending holds its rule, and a Grant lets the new turn run it. A catch does not hide it. Under the sandbox a job runs on after its cell, Abort during a cell stops no job, and StopJobs(OfLastTurn) stops it. A report starts a turn. stopJob stops the job, and stopJob of a job that has ended does nothing, so the cell goes on. jobStatus gives Running for a job that runs, and Stopped after StopJobs. A stop ends a long exec and its process. A stop during a long policy call ends the call, the turn ends Aborted before the grace period, and the REPL stays. The handle gives the summaries of the memory while they run, and memoryUse after the first policy call. The handle gives the draft of the policy while the model writes it, and none after the turn or after a stop, also when the thread of the cut call goes on. Each turn of a work session has one DerivedRead before its first Acted, with the newest build number of the store, and a cell output gets its compress call at the first step of the next turn."
+text = "config and workMode, with no Sessions^ and no Children^, and defaultGuard. A cell runs in the scope, a val stays for the next turn, and rlm does not compile. Each turn gets a new budget. An Ask call does not run, pending holds its rule, and a Grant lets the new turn run it. A catch does not hide it. Under the sandbox a job runs on after its cell, Abort during a cell stops no job, and StopJobs(OfLastTurn) stops it. A report starts a turn. stopJob stops the job, and stopJob of a job that has ended does nothing, so the cell goes on. jobStatus gives Running for a job that runs, and Stopped after StopJobs. A stop ends a long exec and its process. A stop during a long policy call ends the call, the turn ends Aborted before the grace period, and the REPL stays. The handle gives the summaries of the memory while they run, and memoryUse after the first policy call. The handle gives the draft of the policy while the model writes it, and none after the turn or after a stop, also when the thread of the cut call goes on. Each turn of a work session has one DerivedRead before its first Acted, with the newest build number of the store, and a cell output gets its compress call at the first step of the next turn. A policy call does not wait for a summary call, the builder starts no summary call while a policy call waits, makes at most summaryCalls calls for each turn, stops its calls at the close of the session, and a line that it stores during a turn does not change the memory field of a later step."
 
 [[group]]
 id = "crash-laws"
@@ -4242,7 +4243,7 @@ uses = ["context-strategy", "predict", "compress-input", "merge-input", "shorten
         "runtime-context", "dspy-error", "logged", "projection", "strategy-name", "signature", "policy-runner", "budget", "memory-log", "window",
         "memory-progress", "derivation-name"]
 proof_uses = ["budget", "memory", "memory-log", "node-id", "view", "view-limit", "in-batch", "text-prefix"]
-text = "update takes the stand-ins out when the summary budget has a call, appends the new messages, advances the view to the last reply, with at most viewChars characters (100,000 by default) on Memory.planned, and builds with the store or a leaf, through the runner and the summary budget, only the nodes that the newest view of all the messages needs (7.2, choice 9). A failed leaf gives the line of the source, for the store. A stop or a spent budget gives a stand-in, and a node above a stand-in is a stand-in with no leaf call. A stand-in never goes to the store. A reply of compress or merge of more than 512 bytes gets one shorten call through the runner and the budget. A spent budget or a stop of that call gives a stand-in, and a failed call gives the cut of the first reply, for the store. project gives the view its own room on top of the budget, and the whole budget to the open turn as the window gives it, and maxSize is the budget and the room. zoom gives a message or the lines of two halves, and its error names the parts of the view and the messages. project gives the view as the field memory, and the history holds only the steps of the open turn. compress, merge and shorten keep who wrote each part. It reads the store only up to the build number upTo, and reads gives Memory with the newest number of the store, at most upTo."
+text = "update takes the stand-ins out when the summary budget has a call, appends the new messages, advances the view to the last reply, with at most viewChars characters (100,000 by default) on Memory.planned, and builds with the store or a leaf, through the runner and the summary budget, only the nodes that the newest view of all the messages needs (7.2, choice 9). A failed leaf gives the line of the source, for the store. A stop or a spent budget gives a stand-in, and a node above a stand-in is a stand-in with no leaf call. A stand-in never goes to the store. A reply of compress or merge of more than 512 bytes gets one shorten call through the runner and the budget. A spent budget or a stop of that call gives a stand-in, and a failed call gives the cut of the first reply, for the store. project gives the view its own room on top of the budget, and the whole budget to the open turn as the window gives it, and maxSize is the budget and the room. zoom gives a message or the lines of two halves, and its error names the parts of the view and the messages. project gives the view as the field memory, and the history holds only the steps of the open turn. compress, merge and shorten keep who wrote each part. It reads the store only up to the build number upTo, and reads gives Memory with the newest number of the store, at most upTo. A tree with readOnly makes no leaf call: each needed node with no line of the store gets a stand-in, and each update takes the stand-ins out first (7.2, choice 1). An update reads the store up to the newest build number at its start, and reads gives that number."
 
 [[group]]
 id = "file-lines"
@@ -4310,7 +4311,105 @@ kind = "law"
 name = "Memory tree:"
 ref = "7.1"
 uses = ["memory-tree", "line-store", "memory-log", "window"]
-text = "A short message is its own line with no LM call. Two updates give the same state as one. A second tree with the same store makes no LM call, and a line of other messages is not used. A failed leaf gives the line of the source. After a stop or a spent budget, the next update with a budget gives the lines of an update with no stop, and a node above a stand-in makes no leaf call. While the budget is spent, the stand-ins stay with no report. The view takes at most viewChars characters, takes its own room on top of the budget in full, and stays the same during a turn, and the open turn gets the whole budget. With the default limit, a session of the shape of the 50-turn task keeps each message as a part. render gives one line for each part. zoom gives a message or two lines, and its error names the parts of the view and the messages, which zoom. update makes a merge only for the newest view, a summary does not change the view, each message of the open turn gets its line, and the count of the leaf calls has only the needed merges. An update with leaf calls reports 0 of their number, each end in order, and the end, also after a failed, a stopped or a broken call. An update with no leaf call reports nothing. A reply of compress or merge of more than 512 bytes gets one shorten call with the option bag, and the store keeps its line. A long shorten reply is cut, with no second call. The shorten call spends one call of the budget. A failed shorten call gives the cut of the first reply, and a stop or a spent budget gives a stand-in. The store gives each write of new lines the next build number, and an update up to a build number gives the same state after later writes."
+text = "A short message is its own line with no LM call. Two updates give the same state as one. A second tree with the same store makes no LM call, and a line of other messages is not used. A failed leaf gives the line of the source. After a stop or a spent budget, the next update with a budget gives the lines of an update with no stop, and a node above a stand-in makes no leaf call. While the budget is spent, the stand-ins stay with no report. The view takes at most viewChars characters, takes its own room on top of the budget in full, and stays the same during a turn, and the open turn gets the whole budget. With the default limit, a session of the shape of the 50-turn task keeps each message as a part. render gives one line for each part. zoom gives a message or two lines, and its error names the parts of the view and the messages, which zoom. update makes a merge only for the newest view, a summary does not change the view, each message of the open turn gets its line, and the count of the leaf calls has only the needed merges. An update with leaf calls reports 0 of their number, each end in order, and the end, also after a failed, a stopped or a broken call. An update with no leaf call reports nothing. A reply of compress or merge of more than 512 bytes gets one shorten call with the option bag, and the store keeps its line. A long shorten reply is cut, with no second call. The shorten call spends one call of the budget. A failed shorten call gives the cut of the first reply, and a stop or a spent budget gives a stand-in. The store gives each write of new lines the next build number, and an update up to a build number gives the same state after later writes. A read-only tree with a view of 0 characters sees each merge, so the laws of the lines use it."
+
+[[group]]
+id = "builder"
+phase = "p8"
+module = "harness"
+file = "Builder.scala"
+title = "The builder of the derived data: its thread, the gate of the policy calls, and the memory tree as a derivation"
+
+[[node]]
+id = "built-derivation"
+group = "builder"
+kind = "data"
+name = "BuiltDerivation"
+ref = "7.2"
+spec = true
+uses = ["derivation-name", "logged", "runtime-context"]
+text = "A derivation that a builder runs in the background (7.2, choice 5): build makes the derived data of the journal with its leaf calls and writes each round to its store, and newest gives the newest build number."
+
+[[node]]
+id = "memory-builder"
+group = "builder"
+kind = "data"
+name = "MemoryBuilder"
+proof_uses = ["zoom-source"]
+ops = ["build"]
+ref = "7.2"
+spec = true
+uses = ["built-derivation", "memory-tree", "line-store", "zoom-source", "memory-state"]
+text = "The memory tree as a derivation of a builder (7.2, choices 5 to 9): a tree with the leaves makes the summaries that the newest view needs, with the budget of each turn. Each build starts from the state of the last one, and after it zoom reads the new memory (choice 7)."
+
+[[node]]
+id = "policy-gate"
+group = "builder"
+kind = "data"
+name = "PolicyGate"
+ops = ["during", "awaitOpen", "close"]
+ref = "7.2"
+spec = true
+uses = []
+text = "The gate of the policy calls of a session (7.2, choice 4): during marks a policy call, awaitOpen waits until no policy call runs, and after close the gate never waits."
+
+[[node]]
+id = "gated-runner"
+group = "builder"
+kind = "data"
+name = "GatedRunner"
+proof_uses = ["policy-gate"]
+ops = ["run", "close"]
+ref = "7.2"
+spec = true
+uses = ["policy-gate", "policy-runner"]
+text = "The runner of the summary calls of a builder: each call waits at the gate, then runs through the inner runner. After close, a call gives Stopped with no model call."
+
+[[node]]
+id = "builder"
+group = "builder"
+kind = "data"
+name = "Builder"
+ops = ["wake", "close"]
+ref = "7.2"
+spec = true
+uses = ["built-derivation", "logged", "runtime-context"]
+text = "The builder of one activation (7.2, choice 5): one virtual thread that builds at the start and after each wake, so many wakes during a build give one more build. A failed build keeps its rounds. close ends the thread and cuts the calls that run."
+
+[[group]]
+id = "builder-laws"
+phase = "p8"
+module = "harness"
+file = "BuilderLaws.scala"
+where = "tests"
+title = "The laws of the builder"
+
+[[node]]
+id = "law-builder"
+group = "builder-laws"
+kind = "law"
+name = "Builder:"
+ref = "7.2"
+uses = ["builder", "built-derivation"]
+text = "A build runs at the start, many wakes during a build give one more build, and the close stops the calls and the builds."
+
+[[node]]
+id = "law-gate"
+group = "builder-laws"
+kind = "law"
+name = "Gate:"
+ref = "7.2"
+uses = ["policy-gate", "gated-runner"]
+text = "A summary call waits while a policy call runs and starts after its end. After the close, the gate never waits, and a closed runner makes no call."
+
+[[node]]
+id = "law-memory-builder"
+group = "builder-laws"
+kind = "law"
+name = "Memory builder:"
+ref = "7.2"
+uses = ["memory-builder", "memory-tree", "line-store", "zoom-source"]
+text = "A build stores the lines that the view needs, and zoom reads the newest memory. A tree that only reads makes no LM call, and it reads the lines that the builder stored."
 
 [[group]]
 id = "memory-tasks"

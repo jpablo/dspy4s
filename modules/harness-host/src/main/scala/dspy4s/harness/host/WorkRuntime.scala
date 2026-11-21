@@ -166,7 +166,13 @@ final class WorkRuntime(
             lines = Some(opened)
             opened
           }
-        val strategy = WorkRuntime.strategyOf(
+        // The builder of the memory tree (7.2, choice 5). Its summary calls have a runner of their own, so a stop of a
+        // turn does not cut them, and each one waits at the gate while a policy call waits for its reply (choice 4).
+        // With no summary call in the budget of a turn, no builder starts (choice 6).
+        val gate                   = PolicyGate()
+        val background             = StoppablePolicy(inSession, () => false)
+        val leaves                 = GatedRunner(gate, background)
+        val (strategy, derivation) = WorkRuntime.strategyOf(
           config,
           file,
           calls,
@@ -174,8 +180,11 @@ final class WorkRuntime(
           limits.batch,
           env.summaryOptions,
           meter,
-          limits.viewChars
+          limits.viewChars,
+          Option.when(limits.summaryCalls > 0)((leaves, zooms))
         ).fold(error => throw IllegalStateException(error), identity)
+        val gated = new PolicyRunner:
+          def run[A](call: () => Either[String, A]): Either[String, A] = gate.during(calls.run(call))
         val probe = HarnessProbe(env.journals, env.home, env.secrets, limits, policy, subQuery)
         // The files of the cells. The task gets AGENTS.md and the README of the folder through them, once for this
         // activation (`ProjectFiles`). The controller works in the home folder, so its task gets no files.
@@ -239,7 +248,7 @@ final class WorkRuntime(
           limits,
           () => turns.current,
           Some(host),
-          calls,
+          gated,
           zooms,
           meter,
           Some(written),
@@ -248,8 +257,24 @@ final class WorkRuntime(
         val forget = () =>
           meters.remove(session, meter): Unit
           drafts.remove(session, written): Unit
-        val activation =
-          WorkActivation(effects, commands, calls, Vector(turns, summary), lines, made, inSession, forget)
+        // The close of the builder stops its new calls, opens the gate, and cuts the calls that run.
+        val stopCalls = () =>
+          leaves.close()
+          gate.close()
+          background.stop()
+        val builder    = derivation.map(d => Builder(d, () => journal.log, inSession, stopCalls, session.value))
+        val activation = WorkActivation(
+          effects,
+          commands,
+          calls,
+          Vector(turns, summary),
+          lines,
+          made,
+          inSession,
+          forget,
+          builder,
+          background
+        )
         // The last step of the start, so a failed start keeps no meter. A later activation of the session puts its own.
         meters.put(session, meter): Unit
         drafts.put(session, written): Unit
@@ -264,7 +289,8 @@ final class WorkRuntime(
     }
 
 /** The live part of one activation of a work session. Each call of the effects runs in the context of the runtime. The
-  * close removes the meter of the memory of the activation from the runtime (`forget`).
+  * close removes the meter of the memory of the activation from the runtime (`forget`). The builder of the memory tree
+  * wakes after each commit, and it closes first, before the store of the lines (7.2, choice 5).
   */
 private final class WorkActivation(
     inner                  : HarnessEffects,
@@ -274,7 +300,9 @@ private final class WorkActivation(
     lines                  : Option[FileLines],
     layout                 : Layout,
     context                : RuntimeContext,
-    forget                 : () => Unit
+    forget                 : () => Unit,
+    builder                : Option[Builder],
+    background             : StoppablePolicy
 ) extends Activation:
 
   val effects: TurnEffects = new TurnEffects:
@@ -293,7 +321,11 @@ private final class WorkActivation(
 
   def unclean: Boolean = inner.unclean
 
+  override def committed(): Unit = builder.foreach(_.wake())
+
   def close(): Unit =
+    builder.foreach(b => Try(b.close()): Unit)
+    background.close()
     forget()
     turns.foreach(_.close())
     calls.close()
@@ -570,6 +602,10 @@ object WorkRuntime:
     * the activation, the budget of the summaries of the turn, and the progress of the activation for a client. `lines`
     * is the table `memory` of the session file, and the activation opens it only for the memory tree, and closes it in
     * its `close`. `PrefixSummary` has no code, so it gives an error, and the activation fails with it.
+    *
+    * With `background`, the runner of the builder and the source of `zoom`, the memory tree of the turn only reads, and
+    * the second value is its builder (7.2, choice 5): a tree with the leaves, `background._1` as its runner, and the
+    * same store. The turn tree then makes no LM call, and a turn never waits for a summary (choice 1).
     */
   def strategyOf(
       config    : SessionConfig,
@@ -578,14 +614,20 @@ object WorkRuntime:
       summaries : () => Budget,
       width     : Int,
       options   : DynamicValue.Record,
-      progress  : MemoryProgress = MemoryProgress.none,
-      viewChars : Int            = MemoryTree.DefaultViewChars
-  ): Either[String, ContextStrategy] =
+      progress  : MemoryProgress                     = MemoryProgress.none,
+      viewChars : Int                                = MemoryTree.DefaultViewChars,
+      background: Option[(PolicyRunner, ZoomSource)] = None
+  ): Either[String, (ContextStrategy, Option[BuiltDerivation])] =
     config.strategy match
-      case StrategyName.Window     => Right(Window)
-      case StrategyName.MemoryTree => lines().map(store =>
-          MemoryTree.withLeaves(store, viewChars, leafRunner, summaries, width, options, progress)
-        )
+      case StrategyName.Window     => Right((Window, None))
+      case StrategyName.MemoryTree => lines().map { store =>
+          background match
+            case Some((leafCalls, zooms)) =>
+              val tree = MemoryTree.withLeaves(store, viewChars, leafCalls, summaries, width, options, progress)
+              (MemoryTree.withLeaves(store, viewChars, readOnly = true), Some(MemoryBuilder(tree, store, zooms)))
+            case None =>
+              (MemoryTree.withLeaves(store, viewChars, leafRunner, summaries, width, options, progress), None)
+        }
       case StrategyName.PrefixSummary =>
         Left("the strategy PrefixSummary has no code yet, so a session with it cannot start")
 

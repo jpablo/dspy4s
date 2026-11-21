@@ -722,17 +722,20 @@ class WorkLaws extends munit.FunSuite:
           assert(eventually(60)(outcomes(handle).size == 1), entries(handle).toString)
           assertEquals(handle.send(message("m2")), Right(()))
           assert(eventually(60)(outcomes(handle).size == 2), entries(handle).toString)
+          // The builder of the first host makes the lines of the two cells in the background (7.2, choice 5).
+          assert(
+            eventually(60)(Vector("FAKE-OUT-ONE", "FAKE-OUT-TWO").forall(out =>
+              summaryRequests(first).exists(_.contains(out))
+            )),
+            "the builder of the first host made no compress call"
+          )
         }
-        assert(summaryRequests(first).exists(_.contains("FAKE-OUT-ONE")), "the first host made no compress call")
         withHost(root, Models.withModel(again)(WorkRuntime.forWork(env, limits))) { host =>
           val handle = opened(host, id(1), None)
           assertEquals(handle.send(message("m3")), Right(()))
           assert(eventually(60)(outcomes(handle).size == 3), entries(handle).toString)
         }
-        // The strategy updates at the first step of a turn (7.2, choice 2), so the first host made the line of the cell
-        // of turn 1 in turn 2. The cell of turn 2 gets its line in the next turn, in the second host.
-        assert(!summaryRequests(again).exists(_.contains("FAKE-OUT-ONE")), summaryRequests(again).toString)
-        assert(summaryRequests(again).exists(_.contains("FAKE-OUT-TWO")), summaryRequests(again).toString)
+        assert(!summaryRequests(again).exists(r => r.contains("FAKE-OUT-ONE") || r.contains("FAKE-OUT-TWO")))
       }
     finally place.close()
   }
@@ -759,11 +762,16 @@ class WorkLaws extends munit.FunSuite:
   private def checkReads(root: Path, model: RequestLm, handle: SessionHandle): Unit =
     assertEquals(handle.send(message("m1")), Right(()))
     assert(eventually(60)(outcomes(handle).size == 1), entries(handle).toString)
-    // One update for each turn (7.2, choice 2): the second step of turn 1 made no compress call for the cell output.
-    assert(!summaryRequests(model).exists(_.contains("FAKE-OUT-ONE")), summaryRequests(model).toString)
+    // The builder makes the line of the cell output in the background, and stores it (7.2, choice 5).
+    def newest =
+      FileLines.readOnly(SessionFile.pathOf(root, id(1)), id(1)).map { lines =>
+        try lines.newest
+        finally lines.close()
+      }
+    assert(eventually(60)(newest == Right(1L)), s"the builder stored no line: $newest")
+    assert(summaryRequests(model).exists(_.contains("FAKE-OUT-ONE")), summaryRequests(model).toString)
     assertEquals(handle.send(message("m2")), Right(()))
     assert(eventually(60)(outcomes(handle).size == 2), entries(handle).toString)
-    assert(summaryRequests(model).exists(_.contains("FAKE-OUT-ONE")), "the next turn made no compress call")
     val log    = entries(handle)
     val starts = log.indices.filter(i => log(i) == Entry.TurnStarted) :+ log.size
     val builds = starts.zip(starts.drop(1)).map { (start, end) =>
@@ -780,13 +788,167 @@ class WorkLaws extends munit.FunSuite:
       assert(reads.head._3 < acted, s"the DerivedRead comes after the first Acted: $turn")
       reads.head._2
     }
-    // Turn 1 wrote no line, and turn 2 wrote the line of the cell of turn 1. The store has no later write.
+    // Turn 1 read no line. The builder stored the line of the cell before turn 2, so turn 2 read its build number.
     assertEquals(builds, Vector(0L, 1L))
-    val newest = FileLines.readOnly(SessionFile.pathOf(root, id(1)), id(1)).map { lines =>
-      try lines.newest
-      finally lines.close()
-    }
     assertEquals(newest, Right(1L))
+
+  // ── The builder of the memory tree (7.2, choices 4 to 6) ──
+
+  /** A session model whose summary replies wait for `free`, and whose policy gets `steps` in order. Each line of a
+    * summary reply goes to `lines`.
+    */
+  private def heldModel(free: CountDownLatch, lines: ConcurrentLinkedQueue[String], steps: Vector[String])(
+      onPolicy: Int => Unit = _ => ()
+  ): RequestLm =
+    val next = java.util.concurrent.atomic.AtomicInteger(0)
+    RequestLm { text =>
+      if isSummary(text) then
+        free.await(60, TimeUnit.SECONDS): Unit
+        val reply = summaryReply(text)
+        lines.add(reply.linesIterator.drop(1).next()): Unit
+        Right(reply)
+      else
+        val n = next.getAndIncrement()
+        onPolicy(n)
+        steps.lift(n).toRight("the script has no more policy replies")
+    }
+
+  test("Work: a policy call does not wait for a summary call, so a turn ends while its summary waits") {
+    val free  = CountDownLatch(1)
+    val model = heldModel(free, ConcurrentLinkedQueue(), Vector(policy("FAKE-ONE", None), policy("FAKE-TWO", None)))()
+    try work(model) { (_, handle) =>
+        assertEquals(handle.send(message("m1", "FAKE-LONG " + "y" * 700)), Right(()))
+        assert(eventually(60)(outcomes(handle).size == 1), entries(handle).toString)
+        assert(eventually(30)(summaryRequests(model).nonEmpty), "the builder made no summary call")
+        // The summary still waits, and the next turn runs too.
+        assertEquals(handle.send(message("m2")), Right(()))
+        assert(eventually(60)(outcomes(handle).size == 2), entries(handle).toString)
+        assertEquals(free.getCount, 1L)
+      }
+    finally free.countDown()
+  }
+
+  test("Work: the builder starts no summary call while a policy call waits for its reply") {
+    // A long message of the person comes while the first policy call of the turn waits, so its summary becomes needed
+    // during that call. The summary call starts only after the reply (7.2, choice 4).
+    val asked = CountDownLatch(1)
+    val held  = CountDownLatch(1)
+    val next  = java.util.concurrent.atomic.AtomicInteger(0)
+    val steps = Vector(policy("FAKE-ONE", None), policy("FAKE-TWO", None))
+    val model = RequestLm { text =>
+      if isSummary(text) then Right(summaryReply(text))
+      else
+        val n = next.getAndIncrement()
+        if n == 0 then
+          asked.countDown()
+          held.await(60, TimeUnit.SECONDS): Unit
+        steps.lift(n).toRight("the script has no more policy replies")
+    }
+    try work(model) { (_, handle) =>
+        assertEquals(handle.send(message("m1")), Right(()))
+        assert(asked.await(60, TimeUnit.SECONDS), "the policy call did not start")
+        assertEquals(handle.send(message("m2", "FAKE-LATE " + "y" * 700)), Right(()))
+        Thread.sleep(700)
+        assertEquals(summaryRequests(model), Vector.empty, "a summary call started while a policy call waited")
+        held.countDown()
+        assert(eventually(30)(summaryRequests(model).exists(_.contains("FAKE-LATE"))), "the builder made no call")
+        assert(eventually(60)(outcomes(handle).size == 2), entries(handle).toString)
+      }
+    finally held.countDown()
+  }
+
+  test("Work: the builder makes at most summaryCalls summary calls for each turn") {
+    // With one call for each turn, the second long message of a turn gets its line in the next turn (choice 6).
+    val model = sessionModel(
+      policy("look", Some("""println("FAKE-OUT " + "y" * 700)""")),
+      policy("FAKE-ONE", None),
+      policy("FAKE-TWO", None)
+    )
+    work(model, settings = limits.copy(summaryCalls = 1)) { (_, handle) =>
+      assertEquals(handle.send(message("m1", "FAKE-LONG " + "y" * 700)), Right(()))
+      assert(eventually(60)(outcomes(handle).size == 1), entries(handle).toString)
+      assert(eventually(30)(summaryRequests(model).size == 1), summaryRequests(model).toString)
+      Thread.sleep(500)
+      assertEquals(summaryRequests(model).size, 1, "the builder made a second summary call in the same turn")
+      assertEquals(handle.send(message("m2")), Right(()))
+      assert(eventually(60)(summaryRequests(model).size == 2), summaryRequests(model).toString)
+    }
+  }
+
+  test("Work: the close of a session stops the summary calls of its builder, and the store keeps the ended lines") {
+    val free  = CountDownLatch(1)
+    val first = RequestLm { text =>
+      if isSummary(text) then
+        // The summary of the second message waits until the close cuts it.
+        if text.contains("FAKE-SECOND") then free.await(60, TimeUnit.SECONDS): Unit
+        Right(summaryReply(text))
+      else Right(policy("FAKE-DONE", None))
+    }
+    val again              = sessionModel(policy("FAKE-THREE", None))
+    val place              = Place()
+    def newest(root: Path) =
+      FileLines.readOnly(SessionFile.pathOf(root, id(1)), id(1)).map { lines =>
+        try lines.newest
+        finally lines.close()
+      }
+    try
+      withRoot { root =>
+        val env    = WorkEnv(place.home, HostList.empty, Backends.detect(), Secrets.none, root)
+        val config = WorkRuntime.config(place.root, "fake-model", limits)
+        withHost(root, Models.withModel(first)(WorkRuntime.forWork(env, limits))) { host =>
+          val handle = opened(host, id(1), Some(config))
+          assertEquals(handle.send(message("m1", "FAKE-FIRST " + "y" * 700)), Right(()))
+          assert(eventually(60)(outcomes(handle).size == 1), entries(handle).toString)
+          assert(eventually(30)(newest(root) == Right(1L)), s"the first line is not in the store: ${newest(root)}")
+          assertEquals(handle.send(message("m2", "FAKE-SECOND " + "y" * 700)), Right(()))
+          assert(eventually(60)(outcomes(handle).size == 2), entries(handle).toString)
+          assert(eventually(30)(summaryRequests(first).exists(_.contains("FAKE-SECOND"))), "no second summary call")
+        }
+        // The close cut the second summary call, and the store kept the first line only.
+        assertEquals(newest(root), Right(1L))
+        withHost(root, Models.withModel(again)(WorkRuntime.forWork(env, limits))) { host =>
+          val handle = opened(host, id(1), None)
+          assertEquals(handle.send(message("m3")), Right(()))
+          assert(eventually(60)(outcomes(handle).size == 3), entries(handle).toString)
+          assert(eventually(30)(summaryRequests(again).exists(_.contains("FAKE-SECOND"))), "no new second summary")
+        }
+        assert(!summaryRequests(again).exists(_.contains("FAKE-FIRST")), summaryRequests(again).toString)
+      }
+    finally
+      free.countDown()
+      place.close()
+  }
+
+  test("Work: a line that the builder stores during a turn does not change the memory field of a later step") {
+    // The summary of the message of turn 1 waits until the first policy call of turn 2, and its line comes to the store
+    // during the cell of that step. The memory field stays the same for the whole turn (7.2, choice 2).
+    val free  = CountDownLatch(1)
+    val lines = ConcurrentLinkedQueue[String]()
+    val steps = Vector(
+      policy("FAKE-ONE", None),
+      policy("wait", Some("Thread.sleep(1500)")),
+      policy("FAKE-TWO", None),
+      policy("FAKE-THREE", None)
+    )
+    val model = heldModel(free, lines, steps)(n => if n == 1 then free.countDown())
+    try work(model) { (_, handle) =>
+        assertEquals(handle.send(message("m1", "FAKE-LONG " + "y" * 700)), Right(()))
+        assert(eventually(60)(outcomes(handle).size == 1), entries(handle).toString)
+        assertEquals(handle.send(message("m2")), Right(()))
+        assert(eventually(60)(outcomes(handle).size == 2), entries(handle).toString)
+        assert(eventually(30)(!lines.isEmpty), "no summary line")
+        assertEquals(handle.send(message("m3")), Right(()))
+        assert(eventually(60)(outcomes(handle).size == 3), entries(handle).toString)
+        val line = lines.peek()
+        // The two steps of turn 2 show the stand-in, and turn 3 shows the line.
+        Vector(1, 2).foreach { n =>
+          val prompt = promptOf(model, n)
+          assert(prompt.contains("FAKE-LONG") && !prompt.contains(line), s"policy call $n:\n$prompt")
+        }
+        assert(promptOf(model, 3).contains(line), promptOf(model, 3))
+      }
+    finally free.countDown()
+  }
 
   test("Work: with summaryCalls 0, a session makes no compress or merge call, and the memory shows each message cut") {
     // The CLI flag --no-memory-calls gives these limits, so a person can compare a session with no memory calls.

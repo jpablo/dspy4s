@@ -365,3 +365,26 @@ name = "Mutant: each write of the file gets the build number 1"
 file = "FileLines.scala"
 old = "val fresh = newest + 1"
 new = "val fresh = newest * 0 + 1"
+
+# ── The builder of the memory tree (CODE_HARNESS_DESIGN.md, 7.2, choices 4 to 6) ──
+
+[[mutant]]
+name = "Mutant: the policy calls of a work session pass no gate"
+[[mutant.edit]]
+file = "WorkRuntime.scala"
+old = "          gated,\n"
+new = "          Option(gated).filter(_ => false).getOrElse(calls),\n"
+
+[[mutant]]
+name = "Mutant: a work session starts no builder"
+[[mutant.edit]]
+file = "WorkRuntime.scala"
+old = "Option.when(limits.summaryCalls > 0)((leaves, zooms))"
+new = "Option.when(limits.summaryCalls < 0)((leaves, zooms))"
+
+[[mutant]]
+name = "Mutant: the writer does not wake the builder"
+[[mutant.edit]]
+file = "SessionHost.scala"
+old = "        activation.foreach((_, live) => Try(live.committed()): Unit)\n"
+new = ""

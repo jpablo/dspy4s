@@ -218,6 +218,11 @@ trait Activation extends AutoCloseable:
     */
   def unclean: Boolean
 
+  /** After each commit of the writer, on its thread (CODE_HARNESS_DESIGN.md, 7.2, choice 5): the builder of the
+    * activation wakes. It must return at once. The default does nothing.
+    */
+  def committed(): Unit = ()
+
   /** Closes the REPL. */
   def close(): Unit
 
@@ -918,6 +923,8 @@ private final class OpenSession private (
     val ended = guard.synchronized {
       if !endedFlag then
         Try(jobs.sync(s)): Unit
+        // The builder of the activation builds the derived data of the new journal (7.2, choice 5).
+        activation.foreach((_, live) => Try(live.committed()): Unit)
         if s.stopping && s.position != Position.NoTurn && s.lastTurn != stopTurn then
           stopTurn = s.lastTurn
           activation.foreach((_, live) => Try(live.stop()): Unit)

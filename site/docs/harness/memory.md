@@ -121,23 +121,30 @@ In the terminal client, each `zoom` call of a cell has a line such as `zoom 0.0`
 
 ## When the summary calls run
 
-- At the first step of each turn, the memory tree adds the new messages of the journal to its log, and it builds each
-  part that the view needs. Then the policy call of the step starts. The later steps of the turn use the same memory,
-  so a long cell output gets its line at the first step of the next turn.
+- A builder makes the summary calls in the background, on a thread of the session. It starts with the first turn of
+  an open, and it builds after each new entry of the journal. A turn never waits for it.
+- At the first step of each turn, the memory tree adds the new messages of the journal to its log, and it reads the
+  lines that the builder stored. A part with no stored line yet gets the start of its text as a stand-in line. The
+  later steps of the turn use the same memory, so a line that the builder stores during a turn comes to the view in
+  the next turn.
 - The journal records the build number of the lines that the first step read, in a `DerivedRead` entry. The inspector
   shows it as a part of the step.
+- A summary call starts only when no policy call of the session waits for its reply, because both go to the same
+  endpoint. A summary call that runs goes on to its end.
 - The summary calls of one round do not need each other, so they run at the same time, at most 4
   (`HarnessLimits.batch`). The rounds run one after the other.
-- While the summary calls run, the status line of the turn shows a label, for example
-  `the memory: 2 of 5 summaries`.
+- While the summary calls run, the footer and the status line show a label, for example
+  `the memory: 2 of 5 summaries`, also between turns.
 - Each turn has a budget of 64 summary calls (`HarnessLimits.summaryCalls`), apart from the 60 model calls of the
-  turn (`HarnessLimits.modelCalls`). After the budget, a part gets the start of its text as a stand-in line. The store
-  does not keep a stand-in, so a later turn builds the part again.
+  turn (`HarnessLimits.modelCalls`). After the budget, the builder waits for the next turn. The store does not keep a
+  stand-in, so the builder makes the part again in a later turn.
 - A failed summary call gives the start of its text as the line, and the store keeps that line. So one bad message
   does not stop the session.
-- A stop of the turn also stops the summary calls.
+- A stop of a turn does not stop the builder. The close of the session stops it and cuts its calls, and the store
+  keeps the lines that ended.
+- A cell that calls `zoom` reads the newest lines of the builder.
 
-Each summary call is a model call, and the step waits for it. The time depends on the endpoint, the model, and the
+Each summary call is a model call, but no step waits for it. The time depends on the endpoint, the model, and the
 options of the summary requests. To measure the cost, run the same task with and without `--no-memory-calls`.
 
 ## Turn off the summary calls
@@ -200,8 +207,8 @@ export DSPY_SUMMARY_OPTIONS='{"chat_template_kwargs": {"enable_thinking": false}
     ```
 
     The memory message has 698 bytes, and the port starts at byte 673. Then type
-    `What is the staging port of the cart API?`. You must see a reply with `9917`. Before a step, the status line
-    can show `the memory: 0 of 1 summaries`.
+    `What is the staging port of the cart API?`. You must see a reply with `9917`. After the first reply, the footer
+    can show `the memory: 0 of 1 summaries` while the builder makes the line of the long message.
 
 2. Type `/quit`. Start a new session with `dspy4s-harness --no-memory-calls`, and send the same two messages. Now the
    line `[0.0]` of the view stops before the port. You must see a cell with the call line `zoom 0.0`, and then a
