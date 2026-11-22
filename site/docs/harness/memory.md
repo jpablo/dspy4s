@@ -145,7 +145,9 @@ In the terminal client, each `zoom` call of a cell has a line such as `zoom 0.0`
 - A cell that calls `zoom` reads the newest lines of the builder.
 
 Each summary call is a model call, but no step waits for it. The time depends on the endpoint, the model, and the
-options of the summary requests. To measure the cost, run the same task with and without `--no-memory-calls`.
+options of the summary requests. To measure the cost, run the same task with and without `--no-memory-calls`. In a
+script (`--script`), put a line `/wait 5` between the messages. It waits for the end of the turn, then 5 s, as a person
+does. Without it, the next turn starts at once, and its view can show stand-ins.
 
 ## Turn off the summary calls
 

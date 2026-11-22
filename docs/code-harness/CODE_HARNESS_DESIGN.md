@@ -1661,7 +1661,41 @@ the builder of step 5: the summary calls run in the background, and a turn never
 - The policy calls took 11 s more. A summary call that runs goes on when a policy call starts, and both share the
   endpoint. The gate stops only the start of a new summary call.
 - The script sends the next message right after a turn, so the builder runs during the next turn. With the time of
-  a person between the messages, the builder has the time between the turns (open points).
+  a person between the messages, the builder has the time between the turns (the next paragraph).
+
+**The 50-turn task after step 6 (2026-11-21).** 3 more live sessions ran the same task with the same model, with the
+summary calls, the builder of step 5 and the stop fix of 10.3. The script had the line `/wait 5` of the CLI between the
+messages. In the script mode, this line waits for the end of the turn, then 5 s. A person needs more time to write a
+message, so 5 s is a low value. The other columns come from the paragraphs above.
+
+| | Summary calls, after step 5, no wait | Summary calls, a wait of 5 s | No summary calls, 200 parts |
+|---|---|---|---|
+| Points | 42 of 42 | 42 of 42 (14, 14 and 14) | 42 of 42 |
+| Time in the turns | 127.3 s | 105.5 s | 97.6 s |
+| Mean time of a turn, turns 1 to 10 and turns 41 to 50 | 2.4 s and 2.4 s | 2.3 s and 2.2 s | 2.1 s and 2.1 s |
+| Time of the policy calls | 119.2 s | 97.2 s | 89.5 s |
+| Summary calls of a session, and their time | about 60 `compress` and `shorten` calls, 43.0 s | about 42 `compress`, 22.9 s | none |
+| Summary calls that ran during a policy call | 59 of 60 | 11 of 42 | none |
+| Stand-ins in the memory field at the start of a turn | 44.7 parts in 36 of 50 turns | none | no summary lines |
+| The last turn | 2.5 s, 1.3 steps, 0.3 `zoom` calls | 2.5 s, 1.0 steps, no `zoom` call | 3.5 s, 2.0 steps, 1.3 `zoom` calls |
+| Prompt tokens of the policy calls of a session | 1,014,014, 89% from the cache | 1,035,293, 94% from the cache | 1,174,755, 91% from the cache |
+
+- A stand-in is a part of the memory field whose stored line has a build number above the `DerivedRead` of the turn.
+  With the wait, no turn read a stand-in.
+- After the end of a turn, the builder ended its calls in 0.30 s on average, and in at most 1.24 s. So the wait of 5 s
+  was more than enough with this model.
+- The turns took 17% less time than with no wait, and 8% more than with no summary calls. 11 summary calls of each
+  session still ran during a policy call: they started during a cell, and they went on into the next policy call. The
+  gate stops only the start of a call.
+- The number of `compress` calls changes with the cells that the model writes: 35 to 64 in one session. Each call
+  gave one stored line, apart from the last call of each session. That call started at the end of the last turn, and
+  the close of the session cut it 0.2 s later, because the script ends after the last turn.
+- A session sent about 64,000 prompt tokens that were not in the cache, against about 110,000 with no wait. The likely
+  cause: a stand-in changes when its line comes in a later turn, so the cache cannot hold the part of the prompt after
+  it. With no stand-in, the view only gets new parts at its end.
+- So with the time of a person between the messages, the builder gives the lines of the summaries to each turn, and
+  the turns are nearly as fast as with no summary calls.
+- The longest turns had 5 steps, so these runs do not show a turn with many short steps (open points).
 
 **The words.** The user calls these folds projections, as the read models of event sourcing
 ([CODE_HARNESS.md](CODE_HARNESS.md), 8.2). In this code, `Projection` is the input of one step, and `project` makes it.
@@ -1864,13 +1898,12 @@ large-view test. Before, the builder came first, and the merges that a view need
    `update` makes no LM call. `MemoryBuilder` keeps the rule of step 3. Done on 2026-11-21, with 11 new mutants
    killed in the harness and the host. The 3 live sessions got 42 of 42 points in 127.3 s ("The 50-turn task after
    step 5").
-6. The live comparison of this section again, with the same tasks, so that the numbers can be compared.
+6. The live comparison of this section again, with the same tasks, so that the numbers can be compared. Done on
+   2026-11-21 with the 50-turn task and a wait of 5 s between the messages: the 3 live sessions got 42 of 42 points in
+   105.5 s, and no turn read a stand-in ("The 50-turn task after step 6").
 
 **Open points.**
 
-- In the script mode of the CLI, the next message comes right after a turn, so the builder has little time between
-  turns, and more lines are stand-ins. A person needs more time to write a message. So the script of step 6 must wait
-  between the messages. Without the wait, it measures only the stand-ins.
 - The comparisons of 15 and 50 turns did not show that the summaries give better answers. The large-view test of
   2026-11-20 showed that the size of the view is the change that helps.
 - These ideas come from UniiChat. Choice 10 takes the first one, with a limit in characters. Choices 9 and 10 together
@@ -1886,8 +1919,11 @@ large-view test. Before, the builder came first, and the merges that a view need
   also before the builder. The cause was in the stop path, apart from choice 20: a second interrupt of the cell thread
   cut the stop of the wrapper of the `exec` (10.3). The builds after each commit add load, so the failure came more
   often after step 5.
-- The gate can hold the builder for a long time in a turn with many short steps. The live comparison of step 6 checks
-  it.
+- The gate can hold the builder for a long time in a turn with many short steps. In the live comparison of step 6,
+  the longest turns had 5 steps, and the builder ended at most 1.24 s after the end of a turn. A task with long turns
+  of many steps can still show it.
+- A summary call that runs goes on when a policy call starts. In step 6, 11 of about 42 summary calls of a session ran
+  during a policy call, and the policy calls took 8% more time than with no summary calls.
 - The controller has the memory tree too, so it gets the builder too.
 - The graph of phase 10 is the second derivation. Its extraction runs at the end of each turn on the same builder, and
   phase 10 gives its read functions for a cell.
