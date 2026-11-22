@@ -163,14 +163,28 @@ class ExchangeFileLaws extends ScalaCheckSuite:
     work(endpoint) { (root, handle) =>
       assertEquals(handle.send(message("m1")), Right(()))
       ended(handle, 1)
-      assertEquals(handle.send(message("m2", "a second fake message")), Right(()))
+      // A message of more than 512 bytes gets a compress call. A short message needs no summary, and the large view
+      // needs no merge (7.2, choices 9 and 10).
+      assertEquals(handle.send(message("m2", "a second fake message " + "y" * 700)), Right(()))
       ended(handle, 2)
       val lines    = linesOf(ExchangeFile.pathOf(root, id(1)))
       val requests = lines.filter(text(_, "kind").contains("request"))
       assertEquals(lines.filter(text(_, "kind").contains("reply")).map(text(_, "id")), requests.map(text(_, "id")))
       assertEquals(requests.size, endpoint.calls.get)
       assert(requests.forall(text(_, "session").contains(id(1).value)), requests.map(_.print).toString)
-      val steps   = handle.read(-1).collect { case Logged(seq, _, Entry.StepStarted(_)) => seq }
+      // The first step of a turn commits a DerivedRead after its StepStarted (7.2, choice 3), so the policy call of
+      // that step starts after the DerivedRead.
+      val log   = handle.read(-1)
+      val steps = log.zip(log.drop(1).map(Some(_)) :+ None).collect {
+        case (Logged(seq, _, Entry.StepStarted(_)), next) =>
+          next.collect { case Logged(read, _, Entry.DerivedRead(_, _)) => read }.getOrElse(seq)
+      }
+      assert(
+        log.exists(_.entry match
+          case Entry.DerivedRead(_, _) => true
+          case _                       => false),
+        "the session has no DerivedRead"
+      )
       val asked   = requests.filter(text(_, "predictor").contains("policy"))
       val summary = requests.filter(r => isSummary(promptOf(text(r, "body").getOrElse(""))))
       assertEquals(asked.flatMap(number(_, "after")), steps)

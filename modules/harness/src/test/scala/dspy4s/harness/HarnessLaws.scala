@@ -2,7 +2,7 @@ package dspy4s.harness
 
 import dspy4s.core.contracts.DynamicValues
 import dspy4s.core.runtime.RuntimeEnvironment
-import dspy4s.harness.guest.{Access, Mode}
+import dspy4s.harness.guest.{Access, Mode, StrategyName}
 import dspy4s.harness.kernel.*
 import dspy4s.harness.repl.{Bindings, HeapGuard, ScalaRepl}
 import dspy4s.harness.sandbox.{Backends, HostList}
@@ -615,6 +615,72 @@ class HarnessLaws extends FunSuite:
         val size = Window.project(journal.log, (), limits.budget).size
         assert(size > 0)
         assertEquals(seen.asScala.toVector, Vector((size, 12_345)))
+      finally effects.close()
+    }
+  }
+
+  test("Harness: the strategy updates at the first step of a turn only, and that step records each read") {
+    // The derived data stays the same for the whole turn, and the turn records the build number that it read (7.2,
+    // choices 2 and 3).
+    val updates  = java.util.concurrent.atomic.AtomicInteger(0)
+    val build    = java.util.concurrent.atomic.AtomicLong(3L)
+    val counting = new ContextStrategy:
+      type D = Unit
+      val name: StrategyName                                                                   = StrategyName.MemoryTree
+      def empty: Unit                                                                          = ()
+      def update(journal: Vector[Logged], d: Unit)(using dspy4s.core.contracts.RuntimeContext) =
+        updates.incrementAndGet(): Unit
+        Right(())
+      def project(journal: Vector[Logged], d: Unit, budget: Int): Projection = Window.project(journal, (), budget)
+      override def reads: Vector[(DerivationName, Long)]                     = Vector(DerivationName.Memory -> build.get)
+    val journal = Support.journal()
+    Support.open(journal, Support.config(TurnKind.Chat))
+    val zooms = ZoomSource()
+    val none  = Mode(Access.None, Access.None, Access.None, Access.None, Access.None, Access.None, Access.None)
+    val leaf  = Signature.derived[PolicyInput, PolicyStep]("policy", Harness.policyInstructions)
+    def reads = journal.log.collect { case Logged(_, _, read @ Entry.DerivedRead(_, _)) => read }
+    withModel(ScriptLm(policy("look", Some("println(1)")), policy("FAKE-ONE", None), policy("FAKE-TWO", None))) {
+      val effects = HarnessEffects(
+        _ => "FAKE-TASK",
+        Harness.apiReference(none),
+        Predict(leaf, name = Some("policy")),
+        counting,
+        journal,
+        () => ScalaRepl(none, Bindings(JournalTurn(journal, () => 0L, zooms))),
+        Recorder(journal),
+        SnapshotStore(),
+        HarnessLimits(),
+        () => Budget(5),
+        None,
+        PolicyRunner.Direct,
+        zooms
+      )
+      try
+        journal.commit(Entry.StepStarted(0)): Unit
+        assert(effects.callPolicy(mustAnswer = false).isRight)
+        assertEquals((updates.get, reads), (1, Vector(Entry.DerivedRead(DerivationName.Memory, 3L))))
+        // The second step of the turn uses the derived data of the first step.
+        build.set(5L)
+        journal.commit(
+          Entry.Acted("", "look", Some("println(1)")),
+          Entry.Observed("1", CellOutcome.Ok, Map.empty),
+          Entry.StepStarted(1)
+        ): Unit
+        assert(effects.callPolicy(mustAnswer = false).isRight)
+        assertEquals((updates.get, reads.size), (1, 1))
+        // The next turn updates again, and reads the new build number.
+        journal.commit(Entry.Acted("", "FAKE-ONE", None), Entry.TurnEnded(TurnOutcome.Replied("FAKE-ONE"))): Unit
+        journal.run(Command.Send(RequestId("m2"), "more", Map.empty), Source.User): Unit
+        journal.commit(Entry.StepStarted(0)): Unit
+        assert(effects.callPolicy(mustAnswer = false).isRight)
+        assertEquals((updates.get, reads.map(_.build)), (2, Vector(3L, 5L)))
+        // Each read comes right after the StepStarted of the first step of its turn.
+        val after = journal.log.zip(journal.log.drop(1)).collect {
+          case (Logged(_, _, Entry.StepStarted(step)), Logged(_, _, Entry.DerivedRead(_, _))) => step
+        }
+        assertEquals(after, Vector(0, 0))
+        // The window reads no derivation, so its turns have no DerivedRead.
+        assertEquals(Window.reads, Vector.empty)
       finally effects.close()
     }
   }

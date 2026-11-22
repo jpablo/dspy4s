@@ -2,13 +2,14 @@ package dspy4s.harness
 
 import dspy4s.core.contracts.{DspyError, RuntimeContext}
 import dspy4s.harness.guest.StrategyName
-import dspy4s.harness.kernel.Logged
+import dspy4s.harness.kernel.{DerivationName, Logged}
 import dspy4s.programs.strategies.Predict
 import dspy4s.signatures.Signature
 import zio.blocks.schema.{DynamicValue, Schema}
 
 import java.nio.charset.StandardCharsets.UTF_8
 import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.atomic.AtomicLong
 import scala.annotation.tailrec
 
 /** The input of the leaf `compress` (CODE_HARNESS.md, 6.1): one message, longer than a line. The strategy cuts it to
@@ -36,22 +37,45 @@ final case class Summary(line: String) derives Schema
   *
   * A key holds the digest of the texts under the node, so a line of other messages is never used. A line never changes
   * (the law Immutability): `putAll` keeps the line of a key that has one.
+  *
+  * Each line has the build number of the write that added it (7.2, choice 3). The numbers of a store only go up, so a
+  * read up to a number gives the same lines after later writes, and a turn records the number that it read
+  * (`Entry.DerivedRead`).
   */
 trait LineStore:
-  def get(key: LineKey): Option[MemoryLine]
 
-  /** Adds the lines of one update, in one transaction when the store has a file. */
-  def putAll(lines: Vector[(LineKey, MemoryLine)]): Unit
+  /** The line of `key`, when a write with the build number `upTo` or an earlier one added it. */
+  def get(key: LineKey, upTo: Long): Option[MemoryLine]
+
+  /** The newest build number: the number of the last write that added a line, or 0 when no write added one. */
+  def newest: Long
+
+  /** Adds the lines of one update, in one transaction when the store has a file. The new lines get the next build
+    * number. A key that has a line keeps it, so a write with no new line adds no number. It gives `newest` after the
+    * write.
+    */
+  def putAll(lines: Vector[(LineKey, MemoryLine)]): Long
 
 object LineStore:
 
   /** A store in memory, for a program call and for the laws. */
   def inMemory(): LineStore =
     new LineStore:
-      private val lines                                      = ConcurrentHashMap[LineKey, MemoryLine]()
-      def get(key: LineKey): Option[MemoryLine]              = Option(lines.get(key))
-      def putAll(added: Vector[(LineKey, MemoryLine)]): Unit =
-        added.foreach((key, line) => lines.putIfAbsent(key, line): Unit)
+      private val lines = ConcurrentHashMap[LineKey, (MemoryLine, Long)]()
+      private val last  = AtomicLong(0L)
+
+      def get(key: LineKey, upTo: Long): Option[MemoryLine] =
+        Option(lines.get(key)).collect { case (line, build) if build <= upTo => line }
+
+      def newest: Long = last.get
+
+      def putAll(added: Vector[(LineKey, MemoryLine)]): Long =
+        synchronized {
+          val fresh = last.get + 1
+          val kept  = added.count((key, line) => Option(lines.putIfAbsent(key, (line, fresh))).isEmpty)
+          if kept > 0 then last.set(fresh)
+          last.get
+        }
 
 /** The derived data of the memory tree (7.1): the memory, and the view of the messages before the open turn. */
 final case class MemoryState(memory: Memory, view: View) derives CanEqual
@@ -105,14 +129,16 @@ object MemoryProgress:
 /** The memory tree (CODE_HARNESS.md, 6; CODE_HARNESS_DESIGN.md, 7.1): the strategy of a long work session.
   *
   *   - `update` takes the stand-ins out of the memory (`Memory.withoutStandIns`) when the budget of the summaries has a
-  *     call, appends the new messages of the journal (`MemoryLog`), builds each ready node, and advances the view to
-  *     `MemoryLog.beforeOpenTurn` with `View.advance` and `high`. So two updates give the same state as one update on
-  *     the full journal. The rounds build each stand-in again, so each part of the last view is built again. A node
-  *     gets the line of the store for its key, or a new line: a message of 512 bytes or less is its own line,
-  *     `compress` makes the line of a longer message, and `merge` makes the line of a node from the lines of its
-  *     halves. The nodes of one round do not need each other, so their leaf calls run at the same time, at most `width`
-  *     at a time. The new lines of each round go to the store with one `putAll`, so a long update keeps the rounds that
-  *     it ended.
+  *     call, appends the new messages of the journal (`MemoryLog`), and advances the view to `MemoryLog.beforeOpenTurn`
+  *     with `View.advance` and at most `viewChars` characters (7.2, choice 10). The size of a part reads only the
+  *     messages (`ViewLimit.lineChars`), and the view joins on `Memory.planned`, so a summary never changes the view.
+  *     Then `update` builds only the nodes that the newest view of all the messages needs (`View.needed`, 7.2, choice
+  *     9). These include each part of the view of the last reply, so each part has a line. Two updates give the same
+  *     state as one update on the full journal. The rounds build each needed stand-in again. A node gets the line of
+  *     the store for its key, or a new line: a message of 512 bytes or less is its own line, `compress` makes the line
+  *     of a longer message, and `merge` makes the line of a node from the lines of its halves. The nodes of one round
+  *     do not need each other, so their leaf calls run at the same time, at most `width` at a time. The new lines of
+  *     each round go to the store with one `putAll`, so a long update keeps the rounds that it ended.
   *   - A leaf runs through `leafRunner`, so a hard stop cuts it, and each call spends one call of `summaries`, the
   *     budget of the summaries of the turn, apart from the model calls of the policy. A reply of `compress` or `merge`
   *     with more than `MemoryLine.MaxBytes` bytes gets exactly one call of the third leaf, `shorten`, with the reply as
@@ -128,9 +154,10 @@ object MemoryProgress:
   *   - Before its first round, `update` counts the leaf calls of its rounds. Then `progress` gets 0 of that total, each
   *     end of a leaf call, and the end of the update, also after a failed or a stopped call (10.6). A node with a
   *     `shorten` call is one summary in this count. An update with no leaf call reports nothing.
-  *   - `project` reserves `MemoryTree.room(high)` characters of the budget for the view first, and never cuts or drops
-  *     it, so the prompt cache keeps it. The view is the first message of the history, with `render`. The rest of the
-  *     budget goes to the open turn, as the window strategy gives it. The view stays the same during a turn.
+  *   - `project` gives the view its own room of at most `MemoryTree.room(viewChars)` characters, on top of the budget
+  *     (7.2, choice 10), and never cuts or drops it, so the prompt cache keeps it. The view is the field memory, with
+  *     `render`. The whole budget goes to the open turn, as the window strategy gives it. The view stays the same
+  *     during a turn.
   *   - `zoom` gives the message of a node of level 0, or the lines of the two halves of a built node, each with its
   *     reference.
   */
@@ -139,11 +166,13 @@ final class MemoryTree(
     merge     : Predict[MergeInput, Summary],
     shorten   : Predict[ShortenInput, Summary],
     lines     : LineStore,
-    high      : Int,
+    viewChars : Int,
     leafRunner: PolicyRunner,
     summaries : () => Budget,
     width     : Int,
-    progress  : MemoryProgress = MemoryProgress.none
+    progress  : MemoryProgress = MemoryProgress.none,
+    upTo      : Long           = Long.MaxValue,
+    readOnly  : Boolean        = false
 ) extends ContextStrategy:
   type D = MemoryState
 
@@ -151,93 +180,123 @@ final class MemoryTree(
 
   def empty: MemoryState = MemoryState(Memory.empty, View.empty)
 
+  /** The build number that the last update read (7.2, choice 3): the newest number of the store at its start, or the
+    * number of its own last write. A `DerivedRead` records it.
+    */
+  @volatile private var pinned: Long = 0L
+
+  /** The newest build number of the writes of this tree. */
+  private val written = AtomicLong(0L)
+
   def update(journal: Vector[Logged], d: MemoryState)(using RuntimeContext): Either[DspyError, MemoryState] =
-    val budget = summaries()
+    // A tree that only reads makes no leaf call (7.2, choice 1). Each needed node with no line of the store gets a
+    // stand-in, and each update takes the stand-ins out first, so a line that the builder stored since comes in.
+    val budget = if readOnly then Budget(0) else summaries()
     // With a spent budget, a stand-in can only build as a stand-in again, so the stand-ins stay until the next turn.
-    val kept   = if budget.check().isRight then Memory.withoutStandIns(d.memory) else d.memory
+    val kept = if readOnly || budget.check().isRight then Memory.withoutStandIns(d.memory) else d.memory
+    // The update reads only the lines up to the newest build number at its start, so a line that the builder stores
+    // during the update does not come into it (7.2, choice 3).
+    val bound  = lines.newest.min(upTo)
     val added  = MemoryLog.messages(journal).drop(d.memory.log.size)
     val start  = added.foldLeft(kept)(Memory.append)
-    val memory = counted(start)(count => settle(start, budget, count))
-    Right(MemoryState(memory, View.advance(d.view, memory, high, MemoryLog.beforeOpenTurn(journal))))
+    val shape  = Memory.planned(start)
+    val limit  = ViewLimit.chars(viewChars)
+    val view   = View.advance(d.view, shape, limit, MemoryLog.beforeOpenTurn(journal))
+    val needed = View.needed(View.advance(view, shape, limit, start.log.size.toLong))
+    val memory = counted(start, needed, bound)(count => settle(start, needed, budget, count, bound))
+    pinned = bound.max(written.get).min(upTo)
+    Right(MemoryState(memory, view))
 
   def project(journal: Vector[Logged], d: MemoryState, budget: Int): Projection =
-    val open = Window.openTurn(journal, (budget - MemoryTree.room(high)).max(0))
+    val open = Window.openTurn(journal, budget)
     val view = MemoryTree.render(d.memory, d.view)
     // The view is the field memory, and the history holds only the steps of the open turn (CODE_HARNESS_DESIGN.md,
     // 10.6). A view as a first step of the history had an empty reply and the code None.
     if view.isEmpty then open else open.copy(memory = s"${MemoryTree.Header}\n$view")
 
+  /** The budget of the open turn and the room of the view (7.2, choice 10). */
+  override def maxSize(budget: Int): Int = budget + MemoryTree.room(viewChars)
+
+  /** The store of the lines, with the build number that the last update read (7.2, choice 3). */
+  override def reads: Vector[(DerivationName, Long)] = Vector(DerivationName.Memory -> pinned)
+
   /** The text of the part `ref` of the memory: the message of a part of level 0, or the lines of its two halves with
     * their references. A part that the memory does not have, or a text that is not a reference, gives an error with the
-    * top parts (`Memory.roots`), so the model can zoom one of them and go down, and does not guess a reference.
+    * parts that zoom (the parts of the view and of level 0), so the model can zoom one of them and go down, and does
+    * not guess a reference.
     */
   override def zoom(d: MemoryState, ref: String): Either[String, String] =
     NodeId.parse(ref) match
-      case None     => Left(MemoryTree.notReference(d.memory, ref))
+      case None     => Left(MemoryTree.notReference(d.memory, d.view, ref))
       case Some(id) => (Memory.zoom(d.memory, id), id.halves) match
           case (Some(Left(message)), _)                    => Right(message.text)
           case (Some(Right((older, newer))), Some((a, b))) =>
             Right(s"[${a.ref}] ${older.text}\n[${b.ref}] ${newer.text}")
-          case _ => Left(MemoryTree.noPart(d.memory, ref))
+          case _ => Left(MemoryTree.noPart(d.memory, d.view, ref))
 
-  /** Builds the ready nodes in rounds until no node is ready. The nodes of one round need only the nodes of the rounds
-    * before, so their lines come at the same time, at most `width` at a time, and they build in the order of `ready`.
-    * The new lines of each round go to the store with one `putAll`. A stand-in builds as a stand-in.
+  /** Builds the ready nodes of `needed` in rounds until no node of `needed` is ready. The nodes of one round need only
+    * the nodes of the rounds before, so their lines come at the same time, at most `width` at a time, and they build in
+    * the order of `ready`. The new lines of each round go to the store with one `putAll`. A stand-in builds as a
+    * stand-in.
     */
   @tailrec
-  private def settle(m: Memory, budget: Budget, count: SummaryCount)(using RuntimeContext): Memory =
-    val ready = Memory.ready(m)
+  private def settle(m: Memory, needed: Set[NodeId], budget: Budget, count: SummaryCount, bound: Long)(using
+      RuntimeContext
+  ): Memory =
+    val ready = Memory.ready(m).filter(needed)
     if ready.isEmpty then m
     else
-      val made = inBatch(ready, width)(id => lineOf(m, id, budget, count)).fold((_, error) => throw error, identity)
+      val made =
+        inBatch(ready, width)(id => lineOf(m, id, budget, count, bound)).fold((_, error) => throw error, identity)
       val kept = made.flatMap(_.stored)
-      if kept.nonEmpty then lines.putAll(kept)
+      if kept.nonEmpty then written.accumulateAndGet(lines.putAll(kept), math.max): Unit
       val grown = ready.zip(made).foldLeft(m) { case (acc, (id, MemoryTree.Made(line, _, standIn))) =>
         Memory.buildNode(acc, id, line, standIn)
       }
-      settle(grown, budget, count)
+      settle(grown, needed, budget, count, bound)
 
-  /** Runs `build` with the count of the leaf calls that `settle` makes from `m` (`pending`), for `progress`. The count
-    * closes after `build`, also after a throw, so a failed or a stopped call also ends the summaries.
+  /** Runs `build` with the count of the leaf calls that `settle` makes from `m` for `needed` (`pending`), for
+    * `progress`. The count closes after `build`, also after a throw, so a failed or a stopped call also ends the
+    * summaries. A tree that only reads makes no leaf call, so it reports nothing.
     */
-  private def counted(m: Memory)(build: SummaryCount => Memory): Memory =
-    val count = SummaryCount(pending(m), progress)
+  private def counted(m: Memory, needed: Set[NodeId], bound: Long)(build: SummaryCount => Memory): Memory =
+    val count = SummaryCount(if readOnly then 0 else pending(m, needed, bound), progress)
     try build(count)
     finally count.close()
 
-  /** The number of leaf calls that `settle` makes from `m`: each node of its rounds with no line of the store and no
-    * short message. Each round builds each ready node, so these rounds build the same nodes as `settle`. They give each
-    * node a line of no text, so the count makes no leaf call. A node of a spent budget counts, and it ends at once. A
-    * node with a half that is a stand-in also counts, and it ends at once.
+  /** The number of leaf calls that `settle` makes from `m` for `needed`: each node of its rounds with no line of the
+    * store and no short message. Each round builds each ready node of `needed`, so these rounds build the same nodes as
+    * `settle`. They give each node a line of no text, so the count makes no leaf call. A node of a spent budget counts,
+    * and it ends at once. A node with a half that is a stand-in also counts, and it ends at once.
     */
-  private def pending(m: Memory): Int =
+  private def pending(m: Memory, needed: Set[NodeId], bound: Long): Int =
     @tailrec
     def rounds(at: Memory, total: Int): Int =
-      val ready = Memory.ready(at)
+      val ready = Memory.ready(at).filter(needed)
       if ready.isEmpty then total
       else
-        val leaves = ready.count(id => known(at, id, Memory.key(at, id)).isEmpty)
+        val leaves = ready.count(id => known(at, id, Memory.key(at, id), bound).isEmpty)
         rounds(ready.foldLeft(at)((acc, id) => Memory.buildNode(acc, id, MemoryTree.NoLine)), total + leaves)
     rounds(m, 0)
 
   /** The line of the ready node `id`. The store comes first. A short message is its own line. Else the line comes from
     * a leaf call (`leafLine`), and `count` gets its end, also after a throw.
     */
-  private def lineOf(m: Memory, id: NodeId, budget: Budget, count: SummaryCount)(using
+  private def lineOf(m: Memory, id: NodeId, budget: Budget, count: SummaryCount, bound: Long)(using
       RuntimeContext
   ): MemoryTree.Made =
     val key = Memory.key(m, id)
-    known(m, id, key) match
+    known(m, id, key, bound) match
       case Some(line) => MemoryTree.Made(line, None, standIn = false)
       case None       =>
         try leafLine(m, id, key, budget)
         finally count.ended()
 
-  /** The line of `id` with no leaf call: the line of the store for `key`, or a message of `MemoryLine.MaxBytes` bytes
-    * or less as its own line. None for a node that needs a leaf call.
+  /** The line of `id` with no leaf call: the line of the store for `key` up to the build number `bound`, or a message
+    * of `MemoryLine.MaxBytes` bytes or less as its own line. None for a node that needs a leaf call.
     */
-  private def known(m: Memory, id: NodeId, key: Option[LineKey]): Option[MemoryLine] =
-    key.flatMap(lines.get).orElse(
+  private def known(m: Memory, id: NodeId, key: Option[LineKey], bound: Long): Option[MemoryLine] =
+    key.flatMap(lines.get(_, bound)).orElse(
       Option.when(id.level == 0)(sourceText(m, id)).filter(_.getBytes(UTF_8).length <= MemoryLine.MaxBytes)
         .map(MemoryLine.of)
     )
@@ -325,8 +384,10 @@ private final class SummaryCount(total: Int, progress: MemoryProgress):
 
 object MemoryTree:
 
-  /** The default size of a view, in parts: about 12,600 characters of the budget of 40,000 (7.1). */
-  val DefaultHigh = 24
+  /** The default limit of a view, in characters (7.2, choice 10). The view of 200 parts of the large-view test took
+    * 46,000 to 52,000 characters, and UniiChat uses 64 to 128 KB.
+    */
+  val DefaultViewChars = 100_000
 
   /** The most characters of a message that `compress` gets. */
   val MaxSource = 16_000
@@ -351,20 +412,24 @@ object MemoryTree:
     "Write the same content as the summary in one line of at most 400 characters. Keep who wrote each part, and " +
       "each name, number, path, decision and error."
 
-  /** A memory tree with the three leaves of these instructions, the store `lines`, a view of at most `high` parts, the
-    * runner of the activation, the budget of the summaries of the turn, and at most `width` leaf calls at a time. A
-    * program call has `PolicyRunner.Direct`. Each leaf request has the option bag `options` of the provider, for
-    * example `{"chat_template_kwargs": {"enable_thinking": false}}` for a model of vLLM that reasons: a summary needs
-    * no reasoning, and the reasoning made a merge 50 times slower in the live run.
+  /** A memory tree with the three leaves of these instructions, the store `lines`, a view of at most `viewChars`
+    * characters, the runner of the activation, the budget of the summaries of the turn, and at most `width` leaf calls
+    * at a time. A program call has `PolicyRunner.Direct`. Each leaf request has the option bag `options` of the
+    * provider, for example `{"chat_template_kwargs": {"enable_thinking": false}}` for a model of vLLM that reasons: a
+    * summary needs no reasoning, and the reasoning made a merge 50 times slower in the live run. The tree reads only
+    * the lines of the store up to the build number `upTo` (7.2, choice 3), so a replay of a `DerivedRead` reads the
+    * same lines.
     */
   def withLeaves(
       lines     : LineStore,
-      high      : Int                 = DefaultHigh,
+      viewChars : Int                 = DefaultViewChars,
       leafRunner: PolicyRunner        = PolicyRunner.Direct,
       summaries : () => Budget        = () => Budget(Int.MaxValue),
       width     : Int                 = 4,
       options   : DynamicValue.Record = DynamicValue.Record.empty,
-      progress  : MemoryProgress      = MemoryProgress.none
+      progress  : MemoryProgress      = MemoryProgress.none,
+      upTo      : Long                = Long.MaxValue,
+      readOnly  : Boolean             = false
   ): MemoryTree =
     val compress = Signature.derived[CompressInput, Summary]("compress", compressInstructions)
     val merge    = Signature.derived[MergeInput, Summary]("merge", mergeInstructions)
@@ -374,11 +439,13 @@ object MemoryTree:
       Predict(merge, name = Some("merge"), config = options),
       Predict(shorten, name = Some("shorten"), config = options),
       lines,
-      high,
+      viewChars,
       leafRunner,
       summaries,
       width.max(1),
-      progress
+      progress,
+      upTo,
+      readOnly
     )
 
   /** The line that `pending` gives each node of its rounds. Only the set of the built nodes counts there. */
@@ -390,45 +457,55 @@ object MemoryTree:
     */
   private final case class Made(line: MemoryLine, stored: Option[(LineKey, MemoryLine)], standIn: Boolean)
 
-  /** The error of a zoom into the part `ref`, which the memory `m` does not have. It names the top parts of the memory,
-    * so the model can zoom one of them and go down. A memory with no message gives an error that says so.
+  /** The error of a zoom into the part `ref`, which the memory `m` does not have. It names the parts that zoom
+    * (`parts`), so the model can zoom one of them and go down. A memory with no message gives an error that says so.
     */
-  private[harness] def noPart(m: Memory, ref: String): String =
-    topParts(m).fold(s"the memory has no part $ref, because the memory is empty")(tops =>
-      s"the memory has no part $ref yet. $tops"
+  private[harness] def noPart(m: Memory, v: View, ref: String): String =
+    parts(m, v).fold(s"the memory has no part $ref, because the memory is empty")(named =>
+      s"the memory has no part $ref yet. $named"
     )
 
   /** The error of a zoom with `ref`, a text that is not a reference, for example a seq of the journal. It gives the
-    * form of a reference and the top parts of the memory `m`, so the model can zoom a part that exists.
+    * form of a reference and the parts that zoom (`parts`), so the model can zoom a part that exists.
     */
-  private[harness] def notReference(m: Memory, ref: String): String =
+  private[harness] def notReference(m: Memory, v: View, ref: String): String =
     val form = s"$ref is not a reference of the memory. A reference is level.index, for example 3.5."
-    topParts(m).fold(s"$form The memory is empty.")(tops => s"$form $tops")
+    parts(m, v).fold(s"$form The memory is empty.")(named => s"$form $named")
 
-  /** The text that names the top parts of the memory `m` (`Memory.roots`) and tells how to go down from them, or none
-    * for a memory with no message.
+  /** The most parts of the view that an error names one by one. */
+  private val NamedParts = 12
+
+  /** The text that names the parts of `m` that zoom, and tells how to go down from them, or none for a memory with no
+    * message. Each part of the view `v` has a line, and so do the nodes under it (`View.needed`), but a node above them
+    * can have none (7.2, choice 9). So the text names the parts of the view, and the parts of level 0, which give the
+    * messages.
     */
-  private def topParts(m: Memory): Option[String] =
-    val tops = Memory.roots(m.log.size.toLong).map(_.ref)
-    Option.when(tops.nonEmpty) {
+  private def parts(m: Memory, v: View): Option[String] =
+    Option.when(m.log.nonEmpty) {
+      val shown = v.parts.map(_.ref)
       val named =
-        if tops.size == 1 then s"The top part of the memory is ${tops.head}"
-        else s"The top parts of the memory are ${tops.mkString(", ")}"
-      s"$named. A zoom of a part shows its two halves with their references, or the message of a part of level 0. So " +
-        "zoom a top part, and then zoom a half of it."
+        if shown.isEmpty then ""
+        else if shown.size == 1 then s"The part of the view is ${shown.head}. "
+        else if shown.size <= NamedParts then s"The parts of the view are ${shown.mkString(", ")}. "
+        else
+          s"The view has ${shown.size} parts, from ${shown.head} to ${shown.last}, and each line of the field memory " +
+            "starts with its part. "
+      val messages =
+        if m.log.size == 1 then "0.0 gives the message" else s"0.0 to 0.${m.log.size - 1} give the messages"
+      s"${named}A zoom of a part of level 1 or more shows its two halves with their references, and $messages. So " +
+        "zoom a part of the view, and then zoom a half of it."
     }
 
-  /** The characters that a view of `high` parts can take: each line of 512 bytes, and its reference. */
-  def room(high: Int): Int = high * (MemoryLine.MaxBytes + 32) + Header.length
+  /** The characters of the field memory with a view of at most `viewChars` characters: the header, its newline and the
+    * view.
+    */
+  def room(viewChars: Int): Int = Header.length + 1 + viewChars
 
   /** The first line of the view in the history. */
   val Header: String =
     "The memory of this session before this turn, oldest first. Each line is [ref] summary. Read a part with zoom(ref)."
 
-  /** The text of a view: one line for each part, `[ref] line`, oldest first. A newline of a line becomes a space, so
-    * each part is one line of the text. A part with no built line gives none.
+  /** The text of a view: one line for each part, `[ref] line`, oldest first (`View.line`). A newline of a line becomes
+    * a space, so each part is one line of the text. A part with no built line gives none.
     */
-  def render(m: Memory, v: View): String =
-    v.parts
-      .flatMap(id => m.built.get(id).map(line => s"[${id.ref}] ${line.text.replace('\n', ' ').replace('\r', ' ')}"))
-      .mkString("\n")
+  def render(m: Memory, v: View): String = v.parts.flatMap(View.line(m, _)).mkString("\n")

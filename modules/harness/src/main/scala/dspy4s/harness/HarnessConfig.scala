@@ -38,9 +38,15 @@ object HarnessEnv:
     */
   val taskMode: Mode = Mode(Access.Full, Access.Full, Access.None, Access.Full, Access.None, Access.Full, Access.Full)
 
-/** The limits of a call, which an optimizer must not change (9). `budget` counts the characters of a projection. After
-  * `cellLimit` cells, the REPL is full, and the harness starts a new REPL (6).
+/** The limits of a call, which an optimizer must not change (9). `budget` counts the characters of a projection, apart
+  * from the view of the memory tree. After `cellLimit` cells, the REPL is full, and the harness starts a new REPL (6).
   *
+  * @param budget
+  *   the characters of a projection, apart from the field memory of the memory tree: the window, or the open turn of
+  *   the memory tree (7.2, choice 10)
+  * @param viewChars
+  *   the most characters of the view of the memory tree (7.2, choice 10). A larger view joins its oldest parts. The
+  *   field memory takes at most `MemoryTree.room(viewChars)` characters, on top of `budget`.
   * @param modelCalls
   *   the model calls of one program call, for the whole tree (8.2): each policy call of the call and of each child, and
   *   each query. The finisher does not count.
@@ -64,6 +70,7 @@ object HarnessEnv:
 final case class HarnessLimits(
     steps          : Int                    = 10,
     budget         : Int                    = 40_000,
+    viewChars      : Int                    = MemoryTree.DefaultViewChars,
     cellTimeout    : FiniteDuration         = 30.seconds,
     execTimeout    : Int                    = 600,
     maxObservation : Int                    = 4_000,

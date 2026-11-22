@@ -636,18 +636,124 @@ new = ""
 # ── The memory tree (7.1) ──
 
 [[mutant]]
-name = "Mutant: fit stops at high parts, not at high / 2"
+name = "Mutant: fit stops at the limit, not at half of it"
 [[mutant.edit]]
 file = "Memory.scala"
-old = "if size <= high / 2 then (stack.reverse ++ rest).toVector"
-new = "if size <= high then (stack.reverse ++ rest).toVector"
+old = "if total <= limit.units / 2 then (stack.reverse ++ rest).toVector"
+new = "if total <= limit.units then (stack.reverse ++ rest).toVector"
+
+# ── The large view (7.2, choice 10) ──
+
+[[mutant]]
+name = "Mutant: a limit in characters counts parts"
+[[mutant.edit]]
+file = "Memory.scala"
+old = "def chars(n: Int): ViewLimit = ViewLimit(n, lineChars)"
+new = "def chars(n: Int): ViewLimit = ViewLimit(n, (_, _) => 1)"
+
+[[mutant]]
+name = "Mutant: fit joins a view under its limit"
+[[mutant.edit]]
+file = "Memory.scala"
+old = "if total <= limit.units then v else View(go(Nil, v.parts.toList, total))"
+new = "View(go(Nil, v.parts.toList, total))"
+
+[[mutant]]
+name = "Mutant: lineChars counts the line with no reference"
+[[mutant.edit]]
+file = "Memory.scala"
+old = "digits(id.level.toLong) + 1 + digits(id.index) + 4 + line"
+new = "digits(id.level.toLong) * 0 + 1 + line"
+
+# ── The merges that a view needs (7.2, choice 9) ──
+
+[[mutant]]
+name = "Mutant: update makes each ready merge"
+[[mutant.edit]]
+file = "MemoryTree.scala"
+old = "val ready = Memory.ready(m).filter(needed)"
+new = "val ready = Memory.ready(m).filter(needed ++ Memory.ready(m))"
+[[mutant.edit]]
+file = "MemoryTree.scala"
+old = "val ready = Memory.ready(at).filter(needed)"
+new = "val ready = Memory.ready(at).filter(needed ++ Memory.ready(at))"
+
+[[mutant]]
+name = "Mutant: the count of the leaf calls counts each ready merge"
+[[mutant.edit]]
+file = "MemoryTree.scala"
+old = "val ready = Memory.ready(at).filter(needed)"
+new = "val ready = Memory.ready(at).filter(needed ++ Memory.ready(at))"
+
+[[mutant]]
+name = "Mutant: needed has the parts of the view, but not the nodes under them"
+[[mutant.edit]]
+file = "Memory.scala"
+old = "case id :: more => under(id.halves.fold(more)((a, b) => a :: b :: more), found + id)"
+new = "case id :: more => under(id.halves.fold(more)((_, _) => more), found + id)"
+
+[[mutant]]
+name = "Mutant: lineChars reads the built line"
+[[mutant.edit]]
+file = "Memory.scala"
+old = "val line    = message.filter(MemoryLine.fits).fold(MemoryLine.MaxBytes)(_.length)"
+new = "val line    = m.built.get(id).fold(message.filter(MemoryLine.fits).fold(MemoryLine.MaxBytes)(_.length))(_.text.length)"
+
+[[mutant]]
+name = "Mutant: the view joins only the nodes that have a line"
+[[mutant.edit]]
+file = "MemoryTree.scala"
+old = "val view   = View.advance(d.view, shape, limit, MemoryLog.beforeOpenTurn(journal))"
+new = "val view   = View.advance(d.view, start, limit, MemoryLog.beforeOpenTurn(journal))"
+
+[[mutant]]
+name = "Mutant: needed comes from the view of the last reply, not from the newest view"
+[[mutant.edit]]
+file = "MemoryTree.scala"
+old = "val needed = View.needed(View.advance(view, shape, limit, start.log.size.toLong))"
+new = "val needed = View.needed(View.advance(view, shape, limit, view.upTo))"
+
+[[mutant]]
+name = "Mutant: planned gives no line to a node above level 0"
+[[mutant.edit]]
+file = "Memory.scala"
+old = "if acc.contains(id) then acc else acc.updated(id, Planned)"
+new = "if acc.contains(id) || id.level > 0 then acc else acc.updated(id, Planned)"
+
+[[mutant]]
+name = "Mutant: the error of a zoom names the roots, not the parts of the view"
+[[mutant.edit]]
+file = "MemoryTree.scala"
+old = "val shown = v.parts.map(_.ref)"
+new = "val shown = (Memory.roots(m.log.size.toLong) ++ v.parts.take(0)).map(_.ref)"
+
+[[mutant]]
+name = "Mutant: the room of the view has no limit"
+[[mutant.edit]]
+file = "MemoryTree.scala"
+old = "def room(viewChars: Int): Int = Header.length + 1 + viewChars"
+new = "def room(viewChars: Int): Int = Header.length + 1 + viewChars * 0"
+
+[[mutant]]
+name = "Mutant: the default view is the view of 24 parts"
+[[mutant.edit]]
+file = "MemoryTree.scala"
+old = "val DefaultViewChars = 100_000"
+new = "val DefaultViewChars = 13_056"
+
+[[mutant]]
+name = "Mutant: the largest projection of the memory tree has no room for the view"
+[[mutant.edit]]
+file = "MemoryTree.scala"
+old = "override def maxSize(budget: Int): Int = budget + MemoryTree.room(viewChars)"
+new = "override def maxSize(budget: Int): Int = budget"
 
 [[mutant]]
 name = "Mutant: advance extends the view to the end in one step"
 [[mutant.edit]]
 file = "Memory.scala"
-old = "(v.upTo + 1 to until).foldLeft(v)((view, count) =>"
-new = "(until to until).foldLeft(v)((view, count) =>"
+old = "(v.upTo + 1 to until).foldLeft(v)("
+new = "(until to until).foldLeft(v)("
 
 [[mutant]]
 name = "Mutant: the key of a line does not read the texts"
@@ -673,9 +779,9 @@ new = "def beforeOpenTurn(journal: Vector[Logged]): Long = walk(journal).message
 [[mutant]]
 name = "Mutant: render keeps the newlines of a line"
 [[mutant.edit]]
-file = "MemoryTree.scala"
-old = "line.text.replace('\\n', ' ').replace('\\r', ' ')"
-new = "line.text"
+file = "Memory.scala"
+old = "l.text.replace('\\n', ' ').replace('\\r', ' ')"
+new = "l.text"
 
 [[mutant]]
 name = "Mutant: a spent summary budget does not stop the leaf calls"
@@ -695,14 +801,14 @@ new = "case Left(PolicyRunner.Stopped) => MemoryTree.Made(fallback, key.map(_ ->
 name = "Mutant: the next update keeps the stand-ins of a stop"
 [[mutant.edit]]
 file = "MemoryTree.scala"
-old = "if budget.check().isRight then Memory.withoutStandIns(d.memory) else d.memory"
+old = "if readOnly || budget.check().isRight then Memory.withoutStandIns(d.memory) else d.memory"
 new = "d.memory"
 
 [[mutant]]
 name = "Mutant: an update with a spent summary budget takes the stand-ins out"
 [[mutant.edit]]
 file = "MemoryTree.scala"
-old = "if budget.check().isRight then Memory.withoutStandIns(d.memory) else d.memory"
+old = "if readOnly || budget.check().isRight then Memory.withoutStandIns(d.memory) else d.memory"
 new = "Memory.withoutStandIns(d.memory)"
 
 [[mutant]]
@@ -720,11 +826,11 @@ old = "if standIn || onStandIn(m, id) then m.standIns + id else m.standIns"
 new = "if standIn then m.standIns + id else m.standIns"
 
 [[mutant]]
-name = "Mutant: project gives the open turn the whole budget"
+name = "Mutant: project takes the room of the view from the budget of the open turn"
 [[mutant.edit]]
 file = "MemoryTree.scala"
-old = "Window.openTurn(journal, (budget - MemoryTree.room(high)).max(0))"
-new = "Window.openTurn(journal, budget)"
+old = "Window.openTurn(journal, budget)"
+new = "Window.openTurn(journal, (budget - MemoryTree.room(viewChars)).max(0))"
 
 [[mutant]]
 name = "Mutant: project leaves out the view"
@@ -737,15 +843,15 @@ new = "if true then open"
 name = "Mutant: a round of the memory tree makes one leaf call at a time"
 [[mutant.edit]]
 file = "MemoryTree.scala"
-old = "inBatch(ready, width)(id => lineOf(m, id, budget, count))"
-new = "inBatch(ready, width.min(1))(id => lineOf(m, id, budget, count))"
+old = "inBatch(ready, width)(id => lineOf(m, id, budget, count, bound))"
+new = "inBatch(ready, width.min(1))(id => lineOf(m, id, budget, count, bound))"
 
 [[mutant]]
 name = "Mutant: the store gets no line of a round"
 [[mutant.edit]]
 file = "MemoryTree.scala"
-old = "if kept.nonEmpty then lines.putAll(kept)"
-new = "if kept.nonEmpty && ready.isEmpty then lines.putAll(kept)"
+old = "if kept.nonEmpty then written.accumulateAndGet(lines.putAll(kept), math.max)"
+new = "if kept.nonEmpty && ready.isEmpty then written.accumulateAndGet(lines.putAll(kept), math.max)"
 
 [[mutant]]
 name = "Mutant: the leaf requests have no summary options"
@@ -1005,3 +1111,105 @@ name = "Mutant: the mask does not reach the check of a goal"
 file = "Secrets.scala"
 old = "Entry.GoalChecked(c.copy(reason = maskText(c.reason), blocker = maskText(c.blocker)))"
 new = "Entry.GoalChecked(c)"
+
+# ── The build numbers and the read of a turn (7.2, choices 2 and 3) ──
+
+[[mutant]]
+name = "Mutant: the effects update the derived data at each step"
+[[mutant.edit]]
+file = "HarnessEffects.scala"
+old = "if turn.isDefined && updatedFor == turn then Right(derived)"
+new = "if turn.isDefined && updatedFor == turn && updatedFor.isEmpty then Right(derived)"
+
+[[mutant]]
+name = "Mutant: the first step of a turn records no read"
+[[mutant.edit]]
+file = "HarnessEffects.scala"
+old = "if reads.nonEmpty then journal.commit(reads*): Unit"
+new = "if reads.isEmpty then journal.commit(reads*): Unit"
+
+[[mutant]]
+name = "Mutant: a read records the build number 0"
+[[mutant.edit]]
+file = "HarnessEffects.scala"
+old = "Entry.DerivedRead(derivation, build))"
+new = "Entry.DerivedRead(derivation, build * 0))"
+
+[[mutant]]
+name = "Mutant: the store in memory reads the lines of later builds"
+[[mutant.edit]]
+file = "MemoryTree.scala"
+old = "case (line, build) if build <= upTo => line"
+new = "case (line, build) if build >= 0 || build <= upTo => line"
+
+[[mutant]]
+name = "Mutant: the store in memory gives a new number to a write with no new line"
+[[mutant.edit]]
+file = "MemoryTree.scala"
+old = "if kept > 0 then last.set(fresh)"
+new = "if kept >= 0 then last.set(fresh)"
+
+[[mutant]]
+name = "Mutant: the memory tree reads with no limit of build number"
+[[mutant.edit]]
+file = "MemoryTree.scala"
+old = "key.flatMap(lines.get(_, bound)).orElse("
+new = "key.flatMap(lines.get(_, bound.max(Long.MaxValue))).orElse("
+
+[[mutant]]
+name = "Mutant: the reads of the memory tree give the newest number, not the number that the update read"
+[[mutant.edit]]
+file = "MemoryTree.scala"
+old = "Vector(DerivationName.Memory -> pinned)"
+new = "Vector(DerivationName.Memory -> lines.newest.max(pinned))"
+
+# ── The builder (7.2, choices 1, 4, 5 and 7) ──
+
+[[mutant]]
+name = "Mutant: the tree of a turn makes the summary calls"
+[[mutant.edit]]
+file = "MemoryTree.scala"
+old = "val budget = if readOnly then Budget(0) else summaries()"
+new = "val budget = summaries()"
+
+[[mutant]]
+name = "Mutant: the tree of a turn keeps its stand-ins"
+[[mutant.edit]]
+file = "MemoryTree.scala"
+old = "val kept = if readOnly || budget.check().isRight then"
+new = "val kept = if budget.check().isRight then"
+
+[[mutant]]
+name = "Mutant: a summary call of the builder does not wait at the gate"
+[[mutant.edit]]
+file = "Builder.scala"
+old = "    gate.awaitOpen()\n"
+new = "    if closed then gate.awaitOpen()\n"
+
+[[mutant]]
+name = "Mutant: the gate does not count a policy call"
+[[mutant.edit]]
+file = "Builder.scala"
+old = "    locked(busy += 1)"
+new = "    locked(busy += 0)"
+
+[[mutant]]
+name = "Mutant: the zoom of a cell does not read the memory of the builder"
+[[mutant.edit]]
+file = "Builder.scala"
+old = "zooms.setReader(ref => tree.zoom(fresh, ref))"
+new = "zooms.setReader(ref => tree.zoom(tree.empty, ref))"
+
+[[mutant]]
+name = "Mutant: a build does not clear the wake"
+[[mutant.edit]]
+file = "Builder.scala"
+old = "      dirty = false\n"
+new = "      dirty = !closed\n"
+
+[[mutant]]
+name = "Mutant: the close of the builder does not stop its calls"
+[[mutant.edit]]
+file = "Builder.scala"
+old = "    stopCalls()\n"
+new = "    if label.isEmpty then stopCalls()\n"

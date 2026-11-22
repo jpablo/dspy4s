@@ -1,7 +1,7 @@
 package dspy4s.harness.inspect
 
 import dspy4s.harness.host.{SessionFile, jobName, jobStatusOf, jobStatusWords}
-import dspy4s.harness.kernel.{EffectResult, Entry, Logged, SessionId, Source, Taint}
+import dspy4s.harness.kernel.{DerivationName, EffectResult, Entry, Logged, SessionId, Source, Taint}
 import dspy4s.harness.kernel.{limitLines, modeWords, sandboxLines}
 import zio.blocks.schema.json.Json
 
@@ -43,7 +43,8 @@ object EntryViews:
       case Entry.StepStarted(_) | Entry.StopRequested(_) | Entry.JobsStopRequested(_, _) | Entry.Granted(_, _, _) |
           Entry.ScopeRecorded(_, _) | Entry.ModelChanged(_) | Entry.JobEnded(_, _) | Entry.GoalChanged(_) |
           Entry.GoalLoopStarted(_) | Entry.GoalChecked(_) | Entry.GoalLoopEnded(_) => 1
-      case Entry.Acted(_, _, _) | Entry.EffectStarted(_, _, _) | Entry.EffectDone(_, _) | Entry.Observed(_, _, _) => 2
+      case Entry.Acted(_, _, _) | Entry.EffectStarted(_, _, _) | Entry.EffectDone(_, _) | Entry.Observed(_, _, _) |
+          Entry.DerivedRead(_, _) => 2
 
   /** The card of an entry. The `match` covers each case of `Entry`, so a new case does not compile until it has a card.
     */
@@ -111,7 +112,9 @@ object EntryViews:
         val blocker = if check.blocker.isEmpty then "" else s" The blocker: ${check.blocker}"
         paragraph(s"The goal check: ${if check.met then "met" else "not met"}. ${check.reason}$blocker") +
           note(if check.same then "the same blocker as the last check" else "")
-      case Entry.GoalLoopEnded(why) => paragraph(why.report)
+      case Entry.GoalLoopEnded(why)             => paragraph(why.report)
+      case Entry.DerivedRead(derivation, build) =>
+        paragraph(s"The step reads ${readWords(derivation)} up to the build number $build.")
 
   /** The HTML of a row: its meta line, the buttons of its views, and its three views. A row that does not decode has
     * the kind `Undecoded`, and its card holds the error.
@@ -154,6 +157,11 @@ object EntryViews:
       case _ => ""
 
   private def paragraph(text: String): String = s"<p>${escape(text)}</p>"
+
+  /** The words of the derived data of a `DerivedRead` (7.2, choice 3). */
+  private def readWords(derivation: DerivationName): String =
+    derivation match
+      case DerivationName.Memory => "the lines of the memory"
 
   private def note(text: String): String = s"""<p class="note">${escape(text)}</p>"""
 

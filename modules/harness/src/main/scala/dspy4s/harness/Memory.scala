@@ -76,6 +76,9 @@ object MemoryLine:
     if text.getBytes(UTF_8).length <= MaxBytes then MemoryLine(text)
     else MemoryLine(text.substring(0, cut(text, 0, 0)))
 
+  /** True when `text` has at most `MaxBytes` bytes of UTF-8, so it is its own line. The test makes no new string. */
+  def fits(text: String): Boolean = text.length <= MaxBytes && cut(text, 0, 0) == text.length
+
   /** The end of the longest start of `text` from `at` with at most `MaxBytes` bytes, after `bytes` bytes. */
   @tailrec
   private def cut(text: String, at: Int, bytes: Int): Int =
@@ -144,6 +147,20 @@ object Memory:
     }
     ._1
 
+  /** `m` with a line of no text for each node of its messages that has no line. Its view joins each pair that the size
+    * of the limit asks for, and the size reads only the messages (`ViewLimit.lineChars`). So the view of `planned` does
+    * not depend on the lines that `m` has (7.2, choice 9): it is the newest view, with a stand-in for each node that
+    * has no line. Only the shape of a view comes from it, never a line.
+    */
+  def planned(m: Memory): Memory =
+    val n     = m.log.size.toLong
+    val nodes = (0 to NodeId.MaxLevel).iterator.takeWhile(level => (1L << level) <= n)
+      .flatMap(level => (0L until (n >> level)).iterator.map(NodeId(level, _)))
+    m.copy(built = nodes.foldLeft(m.built)((acc, id) => if acc.contains(id) then acc else acc.updated(id, Planned)))
+
+  /** The line of a node of `planned` that has no line. */
+  private val Planned: MemoryLine = MemoryLine.of("")
+
   /** What the node `id` holds: its message at level 0, or the lines of its two halves. None for a node outside the log
     * or a node whose halves are not built.
     */
@@ -195,6 +212,17 @@ final case class View(parts: Vector[NodeId]) derives CanEqual:
 object View:
   val empty: View = View(Vector.empty)
 
+  /** The nodes that the view `v` needs (7.2, choice 9): its parts and each node under them. A part of level 1 or more
+    * shows the line of its node, and a zoom into it reads the lines of its halves, so they need lines too.
+    */
+  def needed(v: View): Set[NodeId] =
+    @tailrec
+    def under(open: List[NodeId], found: Set[NodeId]): Set[NodeId] =
+      open match
+        case Nil        => found
+        case id :: more => under(id.halves.fold(more)((a, b) => a :: b :: more), found + id)
+    under(v.parts.toList, Set.empty)
+
   /** The view with one node of level 0 for each message from `v.upTo` to `until`, at its end. A view that already
     * covers `until` stays the same.
     */
@@ -219,23 +247,32 @@ object View:
         if at >= 0 && v.parts.lift(at + 1).contains(b) then View(v.parts.patch(at, Vector(id), 2)) else v
       case _ => v
 
-  /** The view with at most `high` parts, when the parents that it needs are built. A view of `high` parts or fewer
-    * stays the same. A longer view joins two adjacent halves of a built node, the oldest pair first, until it has at
-    * most `high / 2` parts or no pair can join.
+  /** The line of the part `id` in the text of a view: `[ref] line`, with each newline of the line as a space, so each
+    * part is one line of the text. A part with no built line gives none.
     */
-  def fit(v: View, m: Memory, high: Int): View =
+  def line(m: Memory, id: NodeId): Option[String] =
+    m.built.get(id).map(l => s"[${id.ref}] ${l.text.replace('\n', ' ').replace('\r', ' ')}")
+
+  /** The view whose parts take at most `limit.units`, when the parents that it needs are built (7.2, choice 10). A view
+    * of `limit.units` or less stays the same. A larger view joins two adjacent halves of a built node, the oldest pair
+    * first, until its parts take at most `limit.units / 2` or no pair can join.
+    */
+  def fit(v: View, m: Memory, limit: ViewLimit): View =
+    val size = (id: NodeId) => limit.size(m, id)
     // One pass with a stack, the newest part on top. The parts under the top have no pair that can join, so the
     // pair of the top two is always the oldest pair that can join.
     @tailrec
-    def go(stack: List[NodeId], rest: List[NodeId], size: Int): Vector[NodeId] =
-      if size <= high / 2 then (stack.reverse ++ rest).toVector
+    def go(stack: List[NodeId], rest: List[NodeId], total: Long): Vector[NodeId] =
+      if total <= limit.units / 2 then (stack.reverse ++ rest).toVector
       else
         stack match
-          case newer :: older :: below if joins(older, newer, m) => go(older.parent :: below, rest, size - 1)
-          case _                                                 => rest match
-              case part :: more => go(part :: stack, more, size)
+          case newer :: older :: below if joins(older, newer, m) =>
+            go(older.parent :: below, rest, total - size(older) - size(newer) + size(older.parent))
+          case _ => rest match
+              case part :: more => go(part :: stack, more, total)
               case Nil          => stack.reverse.toVector
-    if v.parts.size <= high then v else View(go(Nil, v.parts.toList, v.parts.size))
+    val total = v.parts.foldLeft(0L)(_ + size(_))
+    if total <= limit.units then v else View(go(Nil, v.parts.toList, total))
 
   /** True when `older` and `newer` are the two halves of a node that `m` has built. */
   private def joins(older: NodeId, newer: NodeId, m: Memory): Boolean =
@@ -243,13 +280,37 @@ object View:
       m.built.contains(older.parent)
 
   /** The view after one `extend` and one `fit` for each message from `v.upTo + 1` to `until`. The result of `fit`
-    * depends on the earlier view, so the view of a session is `advance(View.empty, m, high, n)`, and it depends only on
-    * `n`: `advance(advance(v, m, high, k), m, high, n) == advance(v, m, high, n)`. The strategy keeps the view of the
-    * last update, and it advances that view to the new messages.
+    * depends on the earlier view, so the view of a session is `advance(View.empty, m, limit, n)`:
+    * `advance(advance(v, m, limit, k), m, limit, n) == advance(v, m, limit, n)`. With the characters of the lines as
+    * the size, the view also depends on the lines of `m`, so the strategy advances `View.empty` at each update.
     */
-  def advance(v: View, m: Memory, high: Int, until: Long): View = (v.upTo + 1 to until).foldLeft(v)((view, count) =>
-    fit(extend(view, count), m, high)
+  def advance(v: View, m: Memory, limit: ViewLimit, until: Long): View = (v.upTo + 1 to until).foldLeft(v)(
+    (view, count) => fit(extend(view, count), m, limit)
   )
+
+/** The limit of a view (7.2, choice 10): at most `units`, where `size` gives the units of one part of a memory. The
+  * memory tree counts the characters of the lines of the parts (`ViewLimit.chars`).
+  */
+final case class ViewLimit(units: Int, size: (Memory, NodeId) => Int)
+
+object ViewLimit:
+
+  /** At most `n` characters of the lines of the parts and their newlines (`lineChars`). */
+  def chars(n: Int): ViewLimit = ViewLimit(n, lineChars)
+
+  /** The most characters of the part `id` in the text of a view: its line `[ref] line` and one newline. A message of
+    * `MemoryLine.MaxBytes` bytes or less is its own line, so its count is exact. Each other line has at most
+    * `MemoryLine.MaxBytes` bytes, so it has at most as many characters. A newline of a line becomes a space, so the
+    * count is the same. The count reads only the messages, never a line, so a summary never changes the shape of a view
+    * (7.2, choice 9), and the text of a view never takes more than its limit.
+    */
+  def lineChars(m: Memory, id: NodeId): Int =
+    val message = Option.when(id.level == 0)(m.log.lift(id.index.toInt)).flatten.map(_.text)
+    val line    = message.filter(MemoryLine.fits).fold(MemoryLine.MaxBytes)(_.length)
+    digits(id.level.toLong) + 1 + digits(id.index) + 4 + line
+
+  /** The number of decimal digits of `n`, which is 0 or more. */
+  private def digits(n: Long): Int = if n < 10 then 1 else 1 + digits(n / 10)
 
 /** The memory log from a journal (7.1): one message for each step. */
 object MemoryLog:

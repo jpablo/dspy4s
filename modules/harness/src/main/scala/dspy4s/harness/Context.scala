@@ -2,7 +2,7 @@ package dspy4s.harness
 
 import dspy4s.core.contracts.{DspyError, DynamicValues, History, Reasoning, RuntimeContext}
 import dspy4s.harness.guest.StrategyName
-import dspy4s.harness.kernel.{Entry, GuardRule, Logged, Position, SessionState, TurnKind, state}
+import dspy4s.harness.kernel.{DerivationName, Entry, GuardRule, Logged, Position, SessionState, TurnKind, state}
 import dspy4s.harness.repl.lostNames
 import zio.blocks.schema.{DynamicValue, PrimitiveValue, Schema}
 
@@ -67,6 +67,16 @@ trait Derivation:
 trait ContextStrategy extends Derivation:
   def name: StrategyName
   def project(journal: Vector[Logged], d: D, budget: Int): Projection
+
+  /** The most characters of a projection with `budget`: the budget, and the field memory of a strategy that puts it on
+    * top of the budget (7.2, choice 10).
+    */
+  def maxSize(budget: Int): Int = budget
+
+  /** The derivations that the strategy reads, each with the newest build number of its store now (7.2, choice 3). The
+    * effects record them in a `DerivedRead` after the update of a turn. A strategy with no derivation reads none.
+    */
+  def reads: Vector[(DerivationName, Long)] = Vector.empty
 
   /** The text of the part `ref` of the derived data, for `zoom` of a cell (7.1). A strategy with no memory gives an
     * error with a plain message.

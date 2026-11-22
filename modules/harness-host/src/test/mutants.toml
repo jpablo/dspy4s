@@ -342,3 +342,49 @@ name = "Mutant: the task of a work session whose guard cannot ask tells that the
 file = "WorkRuntime.scala"
 old = "asks = config.guard.rules.exists(_.verdict == Verdict.Ask)"
 new = "asks = true"
+
+# ── The build numbers of the lines of the memory (CODE_HARNESS_DESIGN.md, 7.2, choice 3) ──
+
+[[mutant]]
+name = "Mutant: the file reads the lines of later builds"
+[[mutant.edit]]
+file = "FileLines.scala"
+old = "digest = ? and build <= ?\""
+new = "digest = ? and build >= ? * 0\""
+
+[[mutant]]
+name = "Mutant: a file from before the column build gets no column"
+[[mutant.edit]]
+file = "FileLines.scala"
+old = "if !hasBuild(connection) then statement.execute(AddBuild): Unit"
+new = "if !hasBuild(connection) && hasBuild(connection) then statement.execute(AddBuild): Unit"
+
+[[mutant]]
+name = "Mutant: each write of the file gets the build number 1"
+[[mutant.edit]]
+file = "FileLines.scala"
+old = "val fresh = newest + 1"
+new = "val fresh = newest * 0 + 1"
+
+# ── The builder of the memory tree (CODE_HARNESS_DESIGN.md, 7.2, choices 4 to 6) ──
+
+[[mutant]]
+name = "Mutant: the policy calls of a work session pass no gate"
+[[mutant.edit]]
+file = "WorkRuntime.scala"
+old = "          gated,\n"
+new = "          Option(gated).filter(_ => false).getOrElse(calls),\n"
+
+[[mutant]]
+name = "Mutant: a work session starts no builder"
+[[mutant.edit]]
+file = "WorkRuntime.scala"
+old = "Option.when(limits.summaryCalls > 0)((leaves, zooms))"
+new = "Option.when(limits.summaryCalls < 0)((leaves, zooms))"
+
+[[mutant]]
+name = "Mutant: the writer does not wake the builder"
+[[mutant.edit]]
+file = "SessionHost.scala"
+old = "        activation.foreach((_, live) => Try(live.committed()): Unit)\n"
+new = ""

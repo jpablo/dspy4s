@@ -106,7 +106,8 @@ final class SandboxedShell(
     * (`ProcessWrapper`), and the `exec` calls give their output with a note of the stop.
     *
     * Since phase 7, `exec` runs under `ProcessWrapper` as a job does, so a crash of the host also stops it. An
-    * interrupt of the thread of an `exec` stops its process tree before the interrupt goes on.
+    * interrupt of the thread of an `exec` stops its process tree before the interrupt goes on. A second interrupt
+    * during that stop does not cut it.
     */
   def stopAll(): Unit =
     running.forEach { process =>
@@ -138,7 +139,9 @@ final class SandboxedShell(
     }
 
   /** Waits for the command, with the time limit. A child that the command leaves behind stops at the end. After an
-    * interrupt of the thread, the process tree stops first, and then the interrupt goes on.
+    * interrupt of the thread, the process tree stops first, and then the interrupt goes on. The hard stop of a turn
+    * interrupts the thread of a cell two times (10.3). An interrupt during the stop does not cut the stop: the stop
+    * keeps a record of the interrupt and sets it again at its end.
     */
   private def run(process: Process): String =
     running.add(process): Unit
@@ -156,11 +159,12 @@ final class SandboxedShell(
       // The end of the pipe makes the wrapper stop the command, and the wrapper ends after its stop. A signal from the
       // handler before that end can stop the watcher of the wrapper, so the handler stops only what is left after it.
       Try(process.getOutputStream.close()): Unit
-      // The stop of the wrapper takes at most the grace period and one second more.
+      // The stop of the wrapper takes at most the grace period and one second more. An interrupt does not end this
+      // wait, so the handler sends no signal to the wrapper before the end of its stop.
       val again = SandboxedShell.awaitEnd(process, SandboxedShell.GraceMillis + 2_000L)
       running.remove(process): Unit
-      SandboxedShell.stop(seen :+ process.toHandle)
-      if again then Thread.currentThread().interrupt()
+      val late = SandboxedShell.stop(seen :+ process.toHandle)
+      if again || late then Thread.currentThread().interrupt()
     // A child that holds the output open and that the handler did not see can block the reader.
     val (kept, cut) = Try(output.get(SandboxedShell.GraceMillis, TimeUnit.MILLISECONDS)).getOrElse {
       Try(process.getInputStream.close()): Unit
@@ -215,21 +219,32 @@ object SandboxedShell:
       case Scope.Scratch(path)           => path
       case Scope.Fork(path, _)           => path
 
-  /** Waits at most `millis` for the end of `process`. True when an interrupt came during the wait: the wait then ends,
-    * and the caller sets the interrupt again after its stop.
+  /** Waits at most `millis` for the end of `process`. An interrupt does not end the wait (`waitUntil`). True when an
+    * interrupt came during the wait: the caller then sets the interrupt again after its stop.
     */
   private def awaitEnd(process: Process, millis: Long): Boolean =
-    try
-      process.waitFor(millis, TimeUnit.MILLISECONDS): Unit
-      false
-    catch case _: InterruptedException => true
+    waitUntil(millis)(!process.isAlive)(nanos => process.waitFor(nanos, TimeUnit.NANOSECONDS): Unit)
 
   /** TERM to each process that runs, a grace period, then KILL. A zombie does not run, so the grace period does not
-    * wait for it.
+    * wait for it. An interrupt does not end the grace period (`waitUntil`), so the KILL always comes. True when an
+    * interrupt came during the grace period: the caller then sets the interrupt again.
     */
-  private def stop(processes: Vector[ProcessHandle]): Unit =
+  private def stop(processes: Vector[ProcessHandle]): Boolean =
     val alive = processes.filter(Host.running)
     alive.foreach(_.destroy(): Unit)
-    val deadline = System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(GraceMillis)
-    while alive.exists(Host.running) && System.nanoTime() < deadline do Thread.sleep(PollMillis)
+    val interrupted = waitUntil(GraceMillis)(!alive.exists(Host.running))(_ => Thread.sleep(PollMillis))
     alive.filter(Host.running).foreach(_.destroyForcibly(): Unit)
+    interrupted
+
+  /** Calls `pause` with the nanoseconds that are left, until `done` is true or until the end of `millis`. An interrupt
+    * does not end the wait: the wait keeps a record of the interrupt and continues. True when an interrupt came.
+    */
+  private def waitUntil(millis: Long)(done: => Boolean)(pause: Long => Unit): Boolean =
+    val deadline    = System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(millis)
+    var interrupted = false
+    var left        = deadline - System.nanoTime()
+    while !done && left > 0 do
+      try pause(left)
+      catch case _: InterruptedException => interrupted = true
+      left = deadline - System.nanoTime()
+    interrupted

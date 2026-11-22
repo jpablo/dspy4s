@@ -2,7 +2,7 @@ package dspy4s.harness
 
 import dspy4s.core.contracts.{DspyError, DynamicValues, LmUsage, ParseError, RuntimeContext}
 import dspy4s.core.runtime.{UsageScope, UsageTracker}
-import dspy4s.harness.kernel.{CellOutcome, Command, GoalCheck, Logged, Position, Source}
+import dspy4s.harness.kernel.{CellOutcome, Command, Entry, GoalCheck, Logged, Position, Source}
 import dspy4s.harness.repl.{CellRun, ScalaRepl, lostNames, topLevelNames}
 import dspy4s.programs.strategies.Predict
 import zio.blocks.schema.DynamicValue
@@ -10,24 +10,25 @@ import zio.blocks.schema.json.Json
 
 /** The effects of a turn of a harness (CODE_HARNESS_DESIGN.md, 4.6 and 9).
   *
-  *   - `callPolicy` updates the derived data of `strategy`, projects the log of `journal` into the budget of `limits`,
-  *     spends one call of the budget that `budget` gives (the budget of the program call, or of the turn of a work
-  *     session), and calls `policy` with the task and the API reference. The task is `task` of the same log, so the
-  *     task of a work session can change with the debt of a report (8.6). A spent budget fails the call with a plain
-  *     error, so the turn ends `Failed` (8.2). The status says when a step is the last one, and the code of a step that
-  *     must answer does not run. The call has the adapter of the context in a `PolicyAdapter`, so a reply with no text
-  *     field gets a step from the rules of `PolicyAdapter.values`, with no second model call. A code in one outer ```
-  *     fence is the code in the fence (`unfenced`), so `Acted` and the history hold no fence. A code that is empty,
-  *     `null` or `None` is no code, because the chat adapter keeps the text of an empty field (9). The error of a reply
-  *     that did not parse has the start of the reply (`failure`). The trace of the call goes to the `RuntimeContext`,
-  *     so an optimizer sees it. The call of `policy` runs through `runner`, so a work session can cut it (10.3). After
-  *     the update, `zooms` gets the reader `strategy.zoom` of the new derived data, so `zoom` of a cell reads it (7.1).
-  *     After the projection, `progress` gets its size and the budget, so a client shows them (10.6). With `drafts`, the
-  *     call streams: each model call of the policy writes its draft there while it runs, and the draft goes away at the
-  *     end of the call (CLI_SCREEN.md, 13). The stream is a preview, so the step is the same as with no `drafts`. Each
-  *     call has the options of the model of the session in the state of the journal, so a `ModelChanged` of this
-  *     activation applies to the next call (CLI_SCREEN.md, 14.4). At the end of the call, `progress` gets the prompt
-  *     and completion tokens of its last model call, when the reply had a usage.
+  *   - `callPolicy` updates the derived data of `strategy` at the first call of each turn (`derivedFor`, 7.2, choices 2
+  *     and 3), projects the log of `journal` into the budget of `limits`, spends one call of the budget that `budget`
+  *     gives (the budget of the program call, or of the turn of a work session), and calls `policy` with the task and
+  *     the API reference. The task is `task` of the same log, so the task of a work session can change with the debt of
+  *     a report (8.6). A spent budget fails the call with a plain error, so the turn ends `Failed` (8.2). The status
+  *     says when a step is the last one, and the code of a step that must answer does not run. The call has the adapter
+  *     of the context in a `PolicyAdapter`, so a reply with no text field gets a step from the rules of
+  *     `PolicyAdapter.values`, with no second model call. A code in one outer ``` fence is the code in the fence
+  *     (`unfenced`), so `Acted` and the history hold no fence. A code that is empty, `null` or `None` is no code,
+  *     because the chat adapter keeps the text of an empty field (9). The error of a reply that did not parse has the
+  *     start of the reply (`failure`). The trace of the call goes to the `RuntimeContext`, so an optimizer sees it. The
+  *     call of `policy` runs through `runner`, so a work session can cut it (10.3). After the update, `zooms` gets the
+  *     reader `strategy.zoom` of the new derived data, so `zoom` of a cell reads it (7.1). After the projection,
+  *     `progress` gets its size and the budget, so a client shows them (10.6). With `drafts`, the call streams: each
+  *     model call of the policy writes its draft there while it runs, and the draft goes away at the end of the call
+  *     (CLI_SCREEN.md, 13). The stream is a preview, so the step is the same as with no `drafts`. Each call has the
+  *     options of the model of the session in the state of the journal, so a `ModelChanged` of this activation applies
+  *     to the next call (CLI_SCREEN.md, 14.4). At the end of the call, `progress` gets the prompt and completion tokens
+  *     of its last model call, when the reply had a usage.
   *   - `runCell` starts the calls of the cell in `recorder`, takes the snapshot of the store, and runs the code in the
   *     current REPL. The writes of the store go into the result only when the cell completes. The output in the journal
   *     is `CellRun.text`, the text that the MCP server also shows (6): the hints of a compile error, and a note of a
@@ -73,13 +74,33 @@ final class HarnessEffects(
   /** The context of a policy call: the context of the effects, with the adapter in a `PolicyAdapter` (9). */
   private val policyContext: RuntimeContext = PolicyAdapter.around(summon[RuntimeContext])
 
+  /** The seq of the `TurnStarted` of the turn of the last update, so the derived data stays the same for the whole turn
+    * (7.2, choice 2).
+    */
+  private var updatedFor: Option[Long] = None
+
+  /** The derived data of the turn of `log`. The first call of a turn runs `update`, sets the reader of `zoom`, and
+    * commits one `DerivedRead` for each derivation that the strategy reads, with its newest build number after the
+    * update (7.2, choice 3). Each later call of the turn gives the same derived data, with no update.
+    */
+  private def derivedFor(log: Vector[Logged]): Either[String, strategy.D] =
+    val turn = HarnessEffects.turnStart(log)
+    if turn.isDefined && updatedFor == turn then Right(derived)
+    else
+      strategy.update(log, derived).left.map(_.message).map { data =>
+        derived = data
+        updatedFor = turn
+        zooms.setReader(ref => strategy.zoom(data, ref))
+        val reads = strategy.reads.map((derivation, build) => Entry.DerivedRead(derivation, build))
+        if reads.nonEmpty then journal.commit(reads*): Unit
+        data
+      }
+
   def callPolicy(mustAnswer: Boolean): Either[String, PolicyReply] =
     val log = journal.log
-    strategy.update(log, derived).left.map(_.message).flatMap { data =>
-      derived = data
-      zooms.setReader(ref => strategy.zoom(data, ref))
+    derivedFor(log).flatMap { data =>
       val view = strategy.project(log, data, limits.budget)
-      progress.projected(view.size, limits.budget)
+      progress.projected(view.size, strategy.maxSize(limits.budget))
       val input   = PolicyInput(task(log), reference, view.memory, view.status, view.observation, view.history)
       val number  = drafts.map(d => d -> d.begin())
       val context = number.fold(policyContext)((d, n) => PolicyStream.around(policyContext, d, n))
@@ -217,6 +238,10 @@ object HarnessEffects:
     journal.state.position match
       case Position.InCell(step, _, _) => step + 1 >= journal.state.config.steps
       case _                           => false
+
+  /** The seq of the last `TurnStarted` of `log`: the start of the open turn. None for a log with no turn. */
+  private def turnStart(log: Vector[Logged]): Option[Long] =
+    log.reverseIterator.collectFirst { case Logged(seq, _, Entry.TurnStarted) => seq }
 
   /** True for a cell that ended by `submit`, which ends the turn (5.1). */
   private def submitted(outcome: CellOutcome): Boolean =

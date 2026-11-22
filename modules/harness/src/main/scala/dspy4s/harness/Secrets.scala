@@ -65,6 +65,8 @@ final case class Secrets(values: Map[String, String]) derives CanEqual:
         case Entry.GoalChecked(c)                     =>
           Entry.GoalChecked(c.copy(reason = maskText(c.reason), blocker = maskText(c.blocker)))
         case Entry.GoalLoopEnded(why) => Entry.GoalLoopEnded(loopEnd(why))
+        // A derivation and a build number hold no text.
+        case Entry.DerivedRead(_, _) => entry
 
   /** A step of a release with each text masked: the paths, the names, the commit and the error (8.7). */
   private def released(step: ReleaseStep): ReleaseStep =

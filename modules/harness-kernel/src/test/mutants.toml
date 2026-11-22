@@ -485,3 +485,19 @@ name = "Mutant: a grant with no pending call leaves a freed message with no turn
 file = "Decide.scala"
 old = "        Right(if starts then Vector(granted, Entry.TurnStarted) else Vector(granted))"
 new = "        Right(if starts && false then Vector(granted, Entry.TurnStarted) else Vector(granted))"
+
+# ── The read of the derived data of a turn (CODE_HARNESS_DESIGN.md, 7.2, choice 3) ──
+
+[[mutant]]
+name = "Mutant: a DerivedRead is valid with no open policy call"
+[[mutant.edit]]
+file = "Decide.scala"
+old = "    case Entry.DerivedRead(_, _) => !s.stopping &&"
+new = "    case Entry.DerivedRead(_, _) => !s.closed ||"
+
+[[mutant]]
+name = "Mutant: the fold of a DerivedRead changes the state"
+[[mutant.edit]]
+file = "SessionState.scala"
+old = "    case Entry.DerivedRead(_, _) => base"
+new = "    case Entry.DerivedRead(_, _) => base.copy(stopping = true)"

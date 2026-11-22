@@ -421,6 +421,20 @@ old = "SandboxedShell.stop(seen :+ process.toHandle)"
 new = "SandboxedShell.stop(Vector(process.toHandle))"
 
 [[mutant]]
+name = "Mutant: a second interrupt ends the wait for the end of the wrapper"
+[[mutant.edit]]
+file = "SandboxedShell.scala"
+old = "waitUntil(millis)(!process.isAlive)(nanos => process.waitFor(nanos, TimeUnit.NANOSECONDS): Unit)"
+new = "try { process.waitFor(millis, TimeUnit.MILLISECONDS): Unit; false } catch { case _: InterruptedException => true }"
+
+[[mutant]]
+name = "Mutant: an interrupt during the grace period of the handler skips its KILL"
+[[mutant.edit]]
+file = "SandboxedShell.scala"
+old = "val interrupted = waitUntil(GraceMillis)(!alive.exists(Host.running))(_ => Thread.sleep(PollMillis))"
+new = "val interrupted = { val end = System.nanoTime() + GraceMillis * 1_000_000L; while alive.exists(Host.running) && System.nanoTime() < end do Thread.sleep(PollMillis); false }"
+
+[[mutant]]
 name = "Mutant: the shell of a backend that cannot close a name takes the profile of the mode, with no walk"
 [[mutant.edit]]
 file = "SandboxedShell.scala"

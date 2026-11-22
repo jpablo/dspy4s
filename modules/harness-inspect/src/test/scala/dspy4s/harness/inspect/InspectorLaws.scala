@@ -679,6 +679,7 @@ object InspectorLaws:
         text.map(LoopEnd.Blocked(_)),
         Gen.oneOf(LoopEnd.Limit, LoopEnd.Off, LoopEnd.Stopped, LoopEnd.Restarted)
       ).map(Entry.GoalLoopEnded(_)),
+      Gen.choose(0L, 1_000_000L).map(Entry.DerivedRead(DerivationName.Memory, _)),
       text.map(t => Entry.Releasing(Vector(ReleaseItem.Keep(t, "fake")))),
       text.map(t => Entry.Released(ReleaseStep(ReleaseItem.Keep(t, "fake"), ReleaseResult.Failed(t)))),
       Gen.oneOf(
