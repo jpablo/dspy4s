@@ -96,15 +96,38 @@ The inspector of <root> runs at http://127.0.0.1:7411/ . Ctrl-C ends it.
 catalog does not have. The first message links to the page of the session. The probes of a session show under its
 first message, with a link to the journal of each probe.
 
-**One session, at `/s/<id>`.** The entries of the journal in the order of their `seq`. A session with more than 2,000
-entries shows only its last 2,000, with a note in the bar. The raw `journal.jsonl` has all of them. A step has an indent, and the
-parts of a step (`Acted`, the calls, `Observed`) have two indents. The bar at the top has these parts:
+**One session, at `/s/<id>`.** The page has three views. A session with more than 2,000 entries shows only its last
+2,000, with a note in the bar. The raw `journal.jsonl` has all of them. The bar at the top has these parts:
 
 - the facts: the id, the folder, the status, and the counts of the entries and of the exchanges;
-- `View:` with the buttons `Card`, `Scala` and `JSON`, for all the rows;
-- `Follow`, on by default: each second, the page asks for the new entries and adds them at the end;
-- `Filters`: a box for each kind of entry, and a box for each predictor of the exchanges;
+- `View:` with the buttons `Chat`, `Trajectory` and `Entries`;
+- `Follow`, on by default: each second, the page asks for the new entries and adds them;
+- in the `Entries` view only: `Entry:` with the buttons `Card`, `Scala` and `JSON` for all the rows, and `Filters`,
+  with a box for each kind of entry and a box for each predictor of the exchanges;
 - `Raw:` and `Download:`, with the links `journal.jsonl` and `http.jsonl`.
+
+**The `Chat` view** opens first. It shows the session as you saw it in the client: each message, one line of the work
+of its turn, and the reply. The line of the work gives the time, the steps, the cells, the API calls, the tokens of
+the model calls and the errors, for example `Worked 6.2 s · 4 steps · 3 cells · 2 calls · 20,324 → 806 tokens ·
+1 error`. A turn that runs shows `Working`. A click on the line opens the trajectory of the turn.
+
+**The `Trajectory` view** opens each turn. Each step has its time and one row for each part:
+
+| Row | What it shows |
+|---|---|
+| `MODEL` | a model call of the policy: the text, the reasoning (folded), and a link to the page of the exchange |
+| `CELL` | the first line of the code, the count of its lines, and the outcome; the whole code is folded |
+| `CALL` | an API call of the cell: the operation, the arguments and the result in short |
+| `OUTPUT` | the first line of the output of the cell; the rest is folded |
+| `MEMORY` | the summary calls of the memory, in gray, with a link to each exchange |
+| `LLM` | another model call, for example of `llmQuery` |
+| `NOTE` | each other entry, for example `Activated` or `StopRequested`, on one line |
+
+A row has four columns of numbers: the time, the tokens in and out, the part of the prompt from the cache of the
+endpoint, and the tokens per second of the reply. A row with an error has a red kind.
+
+**The `Entries` view** shows the entries of the journal in the order of their `seq`. A step has an indent, and the
+parts of a step (`Acted`, the calls, `Observed`) have two indents.
 
 Each entry row has its `seq`, its kind, its time and its source, and the buttons `card`, `scala` and `json`:
 

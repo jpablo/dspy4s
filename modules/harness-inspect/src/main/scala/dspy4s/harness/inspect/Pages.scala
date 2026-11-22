@@ -40,9 +40,9 @@ object Pages:
     */
   val LastEntries: Int = 2_000
 
-  /** The page of a session: its last `LastEntries` rows in a tree, with each exchange after its entry. The page follows
-    * the session. When the page does not show all the entries, a note in the bar gives the two counts and links to the
-    * raw journal.
+  /** The page of a session: the chat and the trajectory of its last `LastEntries` rows (5.7), and the same rows in a
+    * tree, with each exchange after its entry. The page opens on the chat, and it follows the session. When the page
+    * does not show all the entries, a note in the bar gives the two counts and links to the raw journal.
     */
   def session(store: Store, session: SessionId, nonce: String): Either[String, String] =
     store.last(session, LastEntries).map { (skipped, rows) =>
@@ -67,11 +67,24 @@ object Pages:
           s"""<span class="cut">The page shows the last <span id="count-shown">${rows.size}</span> of """ +
             s"""<span id="count-all">$whole</span> entries. <a href="$base/journal.jsonl">journal.jsonl</a> has all """ +
             "of them.</span>"
-      val raw  = Html.rawLinks(base, Vector("journal.jsonl", "http.jsonl"))
-      val bar  = header(title, facts, controls(withPredictors = true) + note + raw)
-      val main = s"""<main id="rows" data-session="${session.value}" data-last="${lastOf(rows)}" data-size="$size" """ +
+      val raw   = Html.rawLinks(base, Vector("journal.jsonl", "http.jsonl"))
+      val bar   = header(title, facts, modes + controls(withPredictors = true) + note + raw)
+      val story = Story.html(session, Story.of(rows, exchanges), System.currentTimeMillis())
+      val cols  = """<div class="r cols"><span>Kind</span><span>Summary</span><span class="n">Time</span>""" +
+        """<span class="n">In → out</span><span class="n">Cached</span><span class="n">Speed</span></div>"""
+      val main = s"""<main id="story" data-session="${session.value}">$cols$story</main>""" +
+        s"""<main id="rows" data-session="${session.value}" data-last="${lastOf(rows)}" data-size="$size" """ +
         s"""data-skipped="$skipped">""" + tree(session, rows, exchanges) + "</main>"
-      Html.page(s"Session ${session.value.take(8)}", nonce, bar + main)
+      Html.page(s"Session ${session.value.take(8)}", nonce, bar + main, "mode-chat view-card")
+    }
+
+  /** The items of the chat and the trajectory from the entry `from` (5.7): the rows from `from`, and the exchanges
+    * whose `after` is not below `from`. The follow of the page puts them in place of its items from that `seq`.
+    */
+  def story(store: Store, session: SessionId, from: Long): Either[String, String] =
+    store.rows(session, from).map { rows =>
+      val (all, _) = store.exchanges(session)
+      Story.html(session, Story.of(rows, all.filter(_.after >= from)), System.currentTimeMillis())
     }
 
   /** The page of a probe: its journal, with no exchanges. The exchanges of a probe are in the file of its caller. */
@@ -119,8 +132,12 @@ object Pages:
     s"""<header class="bar"><div class="facts"><a href="/">Sessions</a></div><h1>${escape(title)}</h1>""" +
       s"""<div class="facts">$facts</div><div class="controls">$controls</div></header>"""
 
+  /** The buttons of the three views of a session page (5.7): the chat, the trajectory and the entries. */
+  private val modes: String = """<span class="group">View: <button data-mode="chat" class="on">Chat</button>""" +
+    """<button data-mode="trajectory">Trajectory</button><button data-mode="entries">Entries</button></span>"""
+
   private def controls(withPredictors: Boolean): String =
-    val views = """<span class="group">View: <button data-view="card" class="on">Card</button>""" +
+    val views = """<span class="group entries-only">Entry: <button data-view="card" class="on">Card</button>""" +
       """<button data-view="scala">Scala</button><button data-view="json">JSON</button></span>"""
     val kinds = Html.kinds.map(k => s"""<label><input type="checkbox" data-hide="kind-$k" checked> $k</label>""")
       .mkString("""<div class="group">Kinds: """, "", "</div>")
@@ -130,4 +147,4 @@ object Pages:
         Html.predictors.map(p => s"""<label><input type="checkbox" data-hide="pred-$p" checked> $p</label>""")
           .mkString("""<div class="group">Exchanges: """, "", "</div>")
     val follow = if withPredictors then """<label><input type="checkbox" id="follow" checked> Follow</label>""" else ""
-    views + follow + s"""<details class="filters"><summary>Filters</summary>$kinds$predictors</details>"""
+    views + follow + s"""<details class="filters entries-only"><summary>Filters</summary>$kinds$predictors</details>"""

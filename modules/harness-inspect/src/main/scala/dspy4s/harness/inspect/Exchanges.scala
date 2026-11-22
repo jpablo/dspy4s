@@ -49,8 +49,18 @@ final case class Exchange(index: Int, request: Json, reply: Option[Json]):
 
   /** The tokens of the usage of the reply: the prompt and the completion. A stream has its usage in a late line. */
   def usage: Option[(Long, Long)] =
-    def of(json: Json): Option[(Long, Long)] =
-      Exchanges.field(json, "usage").flatMap(u => number(u, "prompt_tokens").zip(number(u, "completion_tokens")))
+    usageJson.flatMap(u => number(u, "prompt_tokens").zip(number(u, "completion_tokens")))
+
+  /** The tokens of the prompt that came from the cache of the endpoint: `prompt_tokens_details.cached_tokens`. */
+  def cached: Option[Long] =
+    usageJson.flatMap(Exchanges.field(_, "prompt_tokens_details")).flatMap(number(_, "cached_tokens"))
+
+  /** The object `usage` of the reply. A stream has it in a late line, and a plain reply in its body. A chunk can have
+    * `"usage": null`, so only a usage with its prompt tokens counts.
+    */
+  private def usageJson: Option[Json] =
+    def of(json: Json): Option[Json] =
+      Exchanges.field(json, "usage").filter(u => number(u, "prompt_tokens").nonEmpty)
     if stream then
       replied.reverseIterator.map(_.trim).filter(_.startsWith("data:")).map(_.stripPrefix("data:").trim)
         .flatMap(line => Json.parse(line).toOption.flatMap(of)).nextOption()

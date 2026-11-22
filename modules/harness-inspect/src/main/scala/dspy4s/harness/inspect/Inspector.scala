@@ -203,6 +203,11 @@ private[inspect] final class Routes(store: Store, port: Int):
             ExchangePage.html(store, s, xid, asked.get("against"), asked.get("tab"), nonce)
               .fold(missing)(html => page(Right(html)))
           }
+        case "s" :: id :: "story" :: Nil => withSession(id) { s =>
+            query(uri).get("from").flatMap(_.toLongOption).fold(missing) { from =>
+              Pages.story(store, s, from).fold(failed, html => Reply(200, "text/html", Body.Text(html)))
+            }
+          }
         case "s" :: id :: "after" :: seq :: Nil => withSession(id) { s =>
             seq.toLongOption.fold(missing) { from =>
               val size = query(uri).get("size").flatMap(_.toLongOption).getOrElse(-1L)

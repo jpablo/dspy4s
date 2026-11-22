@@ -1,0 +1,523 @@
+package dspy4s.harness.inspect
+
+import dspy4s.harness.host.SessionFile.Row
+import dspy4s.harness.kernel.*
+
+import zio.blocks.schema.json.Json
+
+import java.util.Locale
+import scala.collection.mutable.ArrayBuffer
+
+import Html.escape
+
+/** A part of a step or of the start of a turn (docs/code-harness/OBSERVABILITY.md, 5.7), in the order of the journal.
+  */
+enum Part:
+
+  /** The policy calls of a step, and the `Acted` of the last one. */
+  case Model(calls: Vector[Exchange], acted: Option[Row])
+
+  /** The code of an `Acted`. */
+  case Cell(acted: Row)
+
+  /** An API call: its `EffectStarted`, and its `EffectDone` when it came. */
+  case Call(started: Row, done: Option[Row])
+
+  /** The `Observed` of a cell. */
+  case Output(row: Row)
+
+  /** Summary calls of the memory that come one after another. */
+  case Memory(calls: Vector[Exchange])
+
+  /** Another model call, for example of `llmQuery` or of the finisher. */
+  case Llm(call: Exchange)
+
+  /** Each other entry, for example `StopRequested`. A `DerivedRead` has no row in the views. */
+  case Note(row: Row)
+
+  /** The rows of the journal in this part. An `Acted` with code is in its `Model` and in its `Cell`. */
+  def rows: Vector[Row] =
+    this match
+      case Model(_, acted)     => acted.toVector
+      case Cell(acted)         => Vector(acted)
+      case Call(started, done) => started +: done.toVector
+      case Output(row)         => Vector(row)
+      case Memory(_) | Llm(_)  => Vector.empty
+      case Note(row)           => Vector(row)
+
+  def exchanges: Vector[Exchange] =
+    this match
+      case Model(calls, _) => calls
+      case Memory(calls)   => calls
+      case Llm(call)       => Vector(call)
+      case _               => Vector.empty
+
+/** A step: from its `StepStarted` to the next `StepStarted` or to the end of its turn. */
+final case class Step(start: Row, parts: Vector[Part]):
+  def rows: Vector[Row]           = start +: parts.flatMap(_.rows)
+  def exchanges: Vector[Exchange] = parts.flatMap(_.exchanges)
+
+/** A turn: the `Input` right before its `TurnStarted`, the parts before its first step, its steps, and its `TurnEnded`.
+  * A turn that runs has no end.
+  */
+final case class Turn(message: Option[Row], start: Row, lead: Vector[Part], steps: Vector[Step], end: Option[Row]):
+  def rows: Vector[Row]           = message.toVector ++ (start +: lead.flatMap(_.rows)) ++ steps.flatMap(_.rows) ++ end
+  def exchanges: Vector[Exchange] = lead.flatMap(_.exchanges) ++ steps.flatMap(_.exchanges)
+  def parts: Vector[Part]         = lead ++ steps.flatMap(_.parts)
+
+/** An item of the chat and the trajectory of a session (5.7). */
+enum Item:
+  case OfTurn(turn: Turn)
+
+  /** An `Input` that starts no turn, for example a message of another session. */
+  case Message(row: Row)
+
+  /** Each other entry outside a turn, for example `Activated` or `JobEnded`. */
+  case Note(row: Row)
+
+  /** Summary calls of the memory outside a turn, after the entry `at`. */
+  case Memory(calls: Vector[Exchange], at: Long)
+
+  /** Another model call outside a turn, after the entry `at`. */
+  case Llm(call: Exchange, at: Long)
+
+  /** The place of the item in the journal: the `seq` of its first entry, or of the entry that its calls come after. The
+    * keys of the items of a journal never go down, so the follow replaces the items from a `seq` (5.7).
+    */
+  def key: Long =
+    this match
+      case OfTurn(turn)  => turn.message.getOrElse(turn.start).seq
+      case Message(row)  => row.seq
+      case Note(row)     => row.seq
+      case Memory(_, at) => at
+      case Llm(_, at)    => at
+
+  /** The `seq` of each entry of the item, once each, in order. */
+  def seqs: Vector[Long] =
+    val rows = this match
+      case OfTurn(turn)             => turn.rows
+      case Message(row)             => Vector(row)
+      case Note(row)                => Vector(row)
+      case Memory(_, _) | Llm(_, _) => Vector.empty
+    rows.map(_.seq).distinct.sorted
+
+  /** The id of each exchange of the item. */
+  def exchangeIds: Vector[String] =
+    this match
+      case OfTurn(turn)     => turn.exchanges.map(_.id)
+      case Memory(calls, _) => calls.map(_.id)
+      case Llm(call, _)     => Vector(call.id)
+      case _                => Vector.empty
+
+/** The numbers of a turn (5.7): its time, its steps, its cells, its API calls, the tokens of its policy calls, and its
+  * errors. A turn that runs has no time.
+  */
+final case class Summary(
+    millis    : Option[Long],
+    steps     : Int,
+    cells     : Int,
+    calls     : Int,
+    prompt    : Long,
+    completion: Long,
+    errors    : Int
+)
+
+/** The chat and the trajectory of a session (5.7): the items of its journal and of its exchanges, and their HTML. */
+object Story:
+
+  private val Summaries = Set("compress", "merge", "shorten")
+
+  /** The items of `rows` and `exchanges`. Each exchange comes after the last entry whose `seq` is not above its
+    * `after`, as in the tree of the entries (5.2). The exchanges go in the order of their `after`, and two exchanges
+    * with the same `after` keep the order of the file. Each entry and each exchange is in exactly one item.
+    */
+  def of(rows: Vector[Row], exchanges: Vector[Exchange]): Vector[Item] =
+    val seqs                                          = rows.map(_.seq)
+    def anchor(x: Exchange): Option[Int]              = Option(seqs.lastIndexWhere(_ <= x.after)).filter(_ >= 0)
+    val sorted                                        = exchanges.sortBy(_.after)
+    val (loose, placed)                               = sorted.partition(anchor(_).isEmpty)
+    val after: Map[Int, Vector[Exchange]]             = placed.groupBy(x => anchor(x).getOrElse(-1))
+    val events: Vector[Either[Row, (Exchange, Long)]] = loose.map(x => Right((x, x.after))) ++ rows.indices.flatMap {
+      i =>
+        Left(rows(i)) +: after.getOrElse(i, Vector.empty).map(x => Right((x, rows(i).seq)))
+    }
+    Walk(events).items
+
+  /** The walk of the events of `of`: the entries and the exchanges in their order. */
+  private final class Walk(events: Vector[Either[Row, (Exchange, Long)]]):
+    private val out                         = Vector.newBuilder[Item]
+    private var turn: Option[OpenTurn]      = None
+    private var pending: Option[Row]        = None
+    private val pendingCalls                = ArrayBuffer[Exchange]()
+    private var memory: Option[Item.Memory] = None
+
+    private final class OpenTurn(val message: Option[Row], val start: Row):
+      val lead                          = ArrayBuffer[Part]()
+      val steps                         = ArrayBuffer[(Row, ArrayBuffer[Part])]()
+      def parts: ArrayBuffer[Part]      = steps.lastOption.fold(lead)(_._2)
+      def close(end: Option[Row]): Turn =
+        Turn(message, start, lead.toVector, steps.toVector.map((s, ps) => Step(s, ps.toVector)), end)
+
+    def items: Vector[Item] =
+      events.indices.foreach(i => events(i).fold(entry(i, _), (x, at) => exchange(x, at)))
+      flushMemory()
+      turn.foreach(t => out += Item.OfTurn(t.close(None)))
+      out.result()
+
+    private def entryOf(row: Row): Option[Entry] = row.logged.toOption.map(_.entry)
+
+    /** True when the next entry after the event `i` is a `TurnStarted`. */
+    private def startsTurn(i: Int): Boolean =
+      events.iterator.drop(i + 1).collectFirst { case Left(row) => row }.flatMap(entryOf).contains(Entry.TurnStarted)
+
+    private def flushMemory(): Unit =
+      memory.foreach(m => out += m)
+      memory = None
+
+    private def entry(i: Int, row: Row): Unit =
+      flushMemory()
+      (turn, entryOf(row)) match
+        case (_, Some(Entry.TurnStarted)) =>
+          turn.foreach(t => out += Item.OfTurn(t.close(None)))
+          val opened = OpenTurn(pending, row)
+          opened.lead ++= pendingCalls.map(callPart): Unit
+          pendingCalls.clear()
+          pending = None
+          turn = Some(opened)
+        case (None, Some(Entry.Input(_, _, _))) if startsTurn(i) => pending = Some(row)
+        case (None, Some(Entry.Input(_, _, _)))                  => out += Item.Message(row): Unit
+        case (None, _)                                           => out += Item.Note(row): Unit
+        case (Some(t), Some(Entry.TurnEnded(_)))                 =>
+          out += Item.OfTurn(t.close(Some(row))): Unit
+          turn = None
+        case (Some(t), Some(Entry.StepStarted(_)))                        => t.steps += ((row, ArrayBuffer[Part]())): Unit
+        case (Some(t), Some(Entry.Acted(_, _, code))) if t.steps.nonEmpty =>
+          val parts = t.parts
+          parts.lastOption match
+            case Some(Part.Model(calls, None)) => parts(parts.size - 1) = Part.Model(calls, Some(row))
+            case _                             => parts += Part.Model(Vector.empty, Some(row)): Unit
+          if code.exists(_.trim.nonEmpty) then parts += Part.Cell(row): Unit
+        case (Some(t), Some(Entry.EffectStarted(_, _, _))) if t.steps.nonEmpty => t.parts += Part.Call(row, None): Unit
+        case (Some(t), Some(Entry.EffectDone(id, _))) if t.steps.nonEmpty      =>
+          val parts = t.parts
+          val open  = parts.lastIndexWhere {
+            case Part.Call(started, None) => entryOf(started).exists {
+                case Entry.EffectStarted(effect, _, _) => effect == id
+                case _                                 => false
+              }
+            case _ => false
+          }
+          if open >= 0 then
+            parts(open) match
+              case Part.Call(started, _) => parts(open) = Part.Call(started, Some(row))
+              case _                     => parts += Part.Note(row): Unit
+          else parts += Part.Note(row): Unit
+        case (Some(t), Some(Entry.Observed(_, _, _))) if t.steps.nonEmpty => t.parts += Part.Output(row): Unit
+        case (Some(t), _)                                                 => t.parts += Part.Note(row): Unit
+
+    private def callPart(x: Exchange): Part =
+      if x.predictor.contains("policy") then Part.Model(Vector(x), None)
+      else if x.predictor.exists(Summaries) then Part.Memory(Vector(x))
+      else Part.Llm(x)
+
+    private def exchange(x: Exchange, at: Long): Unit =
+      (turn, pending) match
+        case (Some(t), _) =>
+          val parts = t.parts
+          (parts.lastOption, callPart(x)) match
+            case (Some(Part.Model(calls, None)), Part.Model(_, _)) =>
+              parts(parts.size - 1) = Part.Model(calls :+ x, None)
+            case (Some(Part.Memory(calls)), Part.Memory(_)) => parts(parts.size - 1) = Part.Memory(calls :+ x)
+            case (_, part)                                  => parts += part: Unit
+        case (None, Some(_)) => pendingCalls += x: Unit
+        case (None, None)    =>
+          if x.predictor.exists(Summaries) then
+            memory = Some(memory.fold(new Item.Memory(Vector(x), at))(m => m.copy(calls = m.calls :+ x)))
+          else
+            flushMemory()
+            out += Item.Llm(x, at): Unit
+
+  // ── The numbers ──
+
+  private def outcomeOf(row: Row): Option[CellOutcome] =
+    row.logged.toOption.map(_.entry).collect { case Entry.Observed(_, outcome, _) => outcome }
+
+  private def failedCall(row: Row): Boolean =
+    row.logged.toOption.map(_.entry).exists {
+      case Entry.EffectDone(_, EffectResult.Error(_)) => true
+      case _                                          => false
+    }
+
+  private def failedExchange(x: Exchange): Boolean = x.error.nonEmpty || x.status.exists(_ != 200L)
+
+  /** True for the outcome of a cell that did not end well: each outcome but `Ok` and `Submitted`. */
+  private def failedOutcome(outcome: CellOutcome): Boolean =
+    outcome match
+      case CellOutcome.Ok | CellOutcome.Submitted(_) => false
+      case _                                         => true
+
+  /** The numbers of `turn` (5.7). */
+  def summary(turn: Turn): Summary =
+    val parts  = turn.parts
+    val policy = parts.collect { case Part.Model(calls, _) => calls }.flatten
+    val usage  = policy.flatMap(_.usage)
+    val errors = parts.count {
+      case Part.Output(row)         => outcomeOf(row).exists(failedOutcome)
+      case Part.Call(_, Some(done)) => failedCall(done)
+      case _                        => false
+    } + turn.exchanges.count(failedExchange)
+    Summary(
+      turn.end.flatMap(at).zip(at(turn.start)).map((end, start) => end - start),
+      turn.steps.size,
+      parts.count { case Part.Cell(_) => true; case _ => false },
+      parts.count { case Part.Call(_, _) => true; case _ => false },
+      usage.map(_._1).sum,
+      usage.map(_._2).sum,
+      errors
+    )
+
+  private def at(row: Row): Option[Long] = row.logged.toOption.map(_.meta.atMillis)
+
+  /** The end of `turn` in words: the reply, or what ended the turn. A turn that runs is `Working`. */
+  def endText(turn: Turn): String =
+    turn.end.flatMap(_.logged.toOption).map(_.entry) match
+      case Some(Entry.TurnEnded(outcome)) => outcome match
+          case TurnOutcome.Replied(text)    => text
+          case TurnOutcome.Submitted(value) => s"The turn submitted ${value.print}."
+          case TurnOutcome.Exhausted        => "The turn used all of its steps, and it ended with no reply."
+          case TurnOutcome.Aborted          => "The turn stopped, because a stop came."
+          case TurnOutcome.Crashed          => "The turn crashed: its host ended during the turn."
+          case TurnOutcome.Failed(error)    => s"The turn failed: $error"
+      case _ => "Working"
+
+  // ── The HTML ──
+
+  private def thousands(n: Long): String = String.format(Locale.ROOT, "%,d", java.lang.Long.valueOf(n))
+
+  /** A time in words: milliseconds under a second, then seconds with one decimal, then minutes and seconds. */
+  private def duration(millis: Long): String =
+    if millis < 1_000L then s"$millis ms"
+    else if millis < 60_000L then String.format(Locale.ROOT, "%.1f s", java.lang.Double.valueOf(millis / 1000.0))
+    else s"${millis / 60_000L} min ${millis % 60_000L / 1000L} s"
+
+  private def plural(n: Long, word: String): String = s"${thousands(n)} $word${if n == 1L then "" else "s"}"
+
+  /** The cells of the numbers of a row: the time, the tokens in and out, the cached part, and the tokens per second. */
+  private def numbers(time: Option[Long], x: Option[Exchange]): String =
+    val usage  = x.flatMap(_.usage)
+    val cached =
+      for
+        call   <- x
+        (p, _) <- usage
+        hit    <- call.cached
+        if p > 0L
+      yield s"${Math.round(100.0 * hit / p)}%"
+    val speed =
+      for
+        call   <- x
+        (_, c) <- usage
+        end    <- call.ended
+        from   <- call.first.orElse(call.at)
+        if c > 0L && end > from
+      yield s"${Math.round(c * 1000.0 / (end - from))} tok/s"
+    Vector(
+      time.map(duration),
+      usage.map((p, c) => s"${thousands(p)} → ${thousands(c)}"),
+      cached,
+      speed
+    ).map(cell => s"""<span class="n">${escape(cell.getOrElse(""))}</span>""").mkString
+
+  private def timeOf(x: Exchange): Option[Long] = x.at.zip(x.ended).map((a, b) => b - a)
+
+  private def row(kind: String, summary: String, more: String, cells: String, bad: Boolean = false): String =
+    s"""<div class="r k-${kind.toLowerCase(Locale.ROOT)}${if bad then " bad" else ""}">""" +
+      s"""<span class="kind">$kind</span><div class="sum">$summary$more</div>$cells</div>"""
+
+  /** A text in short: its first line, cut at `limit` characters, and a click for the whole text. */
+  private def short(text: String, limit: Int = 160): (String, String) =
+    val first = text.linesIterator.nextOption().getOrElse("")
+    val cut   = if first.length > limit then first.take(limit) + "…" else first
+    val more  =
+      if cut == text then ""
+      else s"""<details><summary>all</summary><pre>${escape(text)}</pre></details>"""
+    (escape(cut), more)
+
+  private def link(session: SessionId, x: Exchange): String =
+    s"""<a href="/s/${escape(session.value)}/x/${escape(x.id)}">${escape(x.predictor.getOrElse("call"))}</a>"""
+
+  private def who(row: Row): String =
+    row.logged.toOption.map(_.meta.source).fold("") {
+      case Source.User               => "You"
+      case Source.Controller         => "The controller"
+      case Source.Harness            => "The harness"
+      case Source.Policy             => "The model"
+      case Source.Child(session)     => s"Session ${session.value.take(8)}"
+      case Source.Parent(session, _) => s"Session ${session.value.take(8)}"
+    }
+
+  private def clock(row: Row): String = at(row).fold("")(Html.time)
+
+  private def say(kind: String, by: String, text: String): String =
+    s"""<div class="say $kind"><div class="who">${escape(by)}</div><div class="text">${escape(text)}</div></div>"""
+
+  /** The words of the outcome of a cell. */
+  private def outcomeWords(outcome: CellOutcome): String =
+    outcome match
+      case CellOutcome.Ok                  => "ok"
+      case CellOutcome.CompileError(lines) => s"compile error: ${lines.mkString(" ")}"
+      case CellOutcome.Failed(exception)   => s"failed: $exception"
+      case CellOutcome.TimedOut(millis)    => s"timed out after ${duration(millis)}"
+      case CellOutcome.Submitted(value)    => s"submitted ${value.print}"
+
+  /** The words of the result of an API call. */
+  private def resultWords(done: Option[Row]): String =
+    done.flatMap(_.logged.toOption).map(_.entry) match
+      case Some(Entry.EffectDone(_, result)) => result match
+          case EffectResult.Value(_, rendered)  => rendered
+          case EffectResult.Error(message)      => s"error: $message"
+          case EffectResult.NeedsApproval(rule) => s"waits for an approval: ${rule.op}"
+          case EffectResult.Unknown             => "unknown: the call did not end"
+      case _ => "running"
+
+  /** The HTML of the parts of a step, or of the start of a turn. */
+  private def parts(session: SessionId, all: Vector[Part]): String =
+    all.zipWithIndex.map { (part, i) =>
+      part match
+        case Part.Model(calls, acted) =>
+          val act         = acted.flatMap(_.logged.toOption).map(_.entry).collect { case a: Entry.Acted => a }
+          val text        = act.map(_.text).getOrElse("")
+          val (sum, more) = short(text)
+          val reasoning   = act.map(_.reasoning).filter(_.trim.nonEmpty).fold("")(r =>
+            s"""<details class="reasoning"><summary>Reasoning</summary><pre>${escape(r)}</pre></details>"""
+          )
+          if calls.isEmpty then row("MODEL", sum, more + reasoning, numbers(None, None))
+          else
+            calls.zipWithIndex.map { (x, k) =>
+              val last = k == calls.size - 1
+              row(
+                "MODEL",
+                (if last then sum else "") + s""" <span class="link">${link(session, x)}</span>""",
+                if last then more + reasoning else "",
+                numbers(timeOf(x), Some(x)),
+                failedExchange(x)
+              )
+            }.mkString
+        case Part.Cell(acted) =>
+          val code     = acted.logged.toOption.map(_.entry).collect { case Entry.Acted(_, _, Some(c)) => c }.getOrElse("")
+          val output   = all.drop(i + 1).collectFirst { case Part.Output(o) => o }
+          val outcome  = output.flatMap(outcomeOf)
+          val time     = output.flatMap(at).zip(at(acted)).map((end, start) => end - start)
+          val lines    = code.linesIterator.size
+          val (sum, _) = short(code, 120)
+          val words    = outcome.fold("running")(outcomeWords)
+          // A compile error can have many lines, so the row shows its start, and the click shows all of it.
+          val (said, _) = short(words.replaceAll("\\s+", " "), 80)
+          val body      = s"""<code>$sum</code> <span class="note">${escape(plural(lines, "line"))} · $said</span>"""
+          val full      = if outcome.exists(failedOutcome) then s"<pre>${escape(words)}</pre>" else ""
+          row(
+            "CELL",
+            body,
+            s"""<details><summary>code</summary><pre>${escape(code)}</pre>$full</details>""",
+            numbers(time, None),
+            outcome.exists(failedOutcome)
+          )
+        case Part.Call(started, done) =>
+          val (op, args) = started.logged.toOption.map(_.entry).collect {
+            case Entry.EffectStarted(_, name, _: Json.Null.type) => (name, "")
+            case Entry.EffectStarted(_, name, a)                 => (name, a.print)
+          }.getOrElse(("call", ""))
+          val time           = done.flatMap(at).zip(at(started)).map((end, start) => end - start)
+          val (argText, _)   = short(args, 120)
+          val (result, more) = short(resultWords(done), 160)
+          row(
+            "CALL",
+            s"""<b>${escape(op)}</b> <code>$argText</code> → $result""",
+            more,
+            numbers(time, None),
+            done.exists(failedCall)
+          )
+        case Part.Output(o) =>
+          val text        = o.logged.toOption.map(_.entry).collect { case Entry.Observed(out, _, _) => out }.getOrElse("")
+          val (sum, more) = if text.isEmpty then ("(no output)", "") else short(text)
+          row("OUTPUT", s"<code>$sum</code>", more, numbers(None, None))
+        case Part.Memory(calls) => memoryRow(session, calls)
+        case Part.Llm(x)        => row("LLM", link(session, x), "", numbers(timeOf(x), Some(x)), failedExchange(x))
+        case Part.Note(note)    => noteRow(note)
+    }.mkString
+
+  private def memoryRow(session: SessionId, calls: Vector[Exchange]): String =
+    val counts = calls.groupBy(_.predictor.getOrElse("call")).toVector.sortBy(_._1)
+      .map((p, xs) => s"${xs.size} $p").mkString(", ")
+    val time  = calls.flatMap(timeOf).sum
+    val links = calls.zipWithIndex.map((x, k) =>
+      s"""<a href="/s/${escape(session.value)}/x/${escape(x.id)}">${k + 1}</a>"""
+    ).mkString(" ")
+    val usage = calls.flatMap(_.usage)
+    val sum   = if usage.isEmpty then "" else s"${thousands(usage.map(_._1).sum)} → ${thousands(usage.map(_._2).sum)}"
+    s"""<div class="r k-memory"><span class="kind">MEMORY</span><div class="sum">${escape(counts)} """ +
+      s"""<span class="link">$links</span></div><span class="n">${escape(duration(time))}</span>""" +
+      s"""<span class="n">${escape(sum)}</span><span class="n"></span><span class="n"></span></div>"""
+
+  private def noteRow(note: Row): String =
+    note.logged.toOption.map(_.entry) match
+      case Some(Entry.DerivedRead(_, _)) => ""
+      case Some(entry)                   =>
+        val kind  = entry.productPrefix
+        val whole = ScalaText.of(entry)
+        // The Scala text has a line for each field, so the row shows it on one line, and the click shows its lines.
+        val (sum, _) = short(whole.replaceAll("\\s+", " "), 160)
+        val more     = s"""<details><summary>all</summary><pre>${escape(whole)}</pre></details>"""
+        row("NOTE", s"""<b>${escape(kind)}</b> $sum""", more, numbers(None, None))
+      case None => row("NOTE", s"The row ${note.seq} does not decode.", "", numbers(None, None), bad = true)
+
+  /** The HTML of `items` (5.7): each item with its key. A turn has the message, the line of its work with its
+    * trajectory behind a click, and its end. `now` gives the time so far of a turn that runs.
+    */
+  def html(session: SessionId, items: Vector[Item], now: Long): String =
+    items.map { item =>
+      val body = item match
+        case Item.OfTurn(turn)     => turnHtml(session, turn, now)
+        case Item.Message(row)     => say("other", s"${who(row)} · ${clock(row)}", messageText(row))
+        case Item.Note(row)        => noteRow(row)
+        case Item.Memory(calls, _) => memoryRow(session, calls)
+        case Item.Llm(x, _)        => row("LLM", link(session, x), "", numbers(timeOf(x), Some(x)), failedExchange(x))
+      val kind = item match
+        case Item.OfTurn(_)  => "turn"
+        case Item.Message(_) => "message"
+        case _               => "other"
+      if body.isEmpty then "" else s"""<section class="item $kind" data-key="${item.key}">$body</section>"""
+    }.mkString
+
+  private def messageText(row: Row): String =
+    row.logged.toOption.map(_.entry).collect { case Entry.Input(_, text, _) => text }.getOrElse("")
+
+  private def turnHtml(session: SessionId, turn: Turn, now: Long): String =
+    val s     = summary(turn)
+    val time  = s.millis.orElse(at(turn.start).map(now - _)).fold("")(duration)
+    val verb  = if turn.end.isEmpty then "Working" else "Worked"
+    val facts = Vector(
+      Some(s"$verb $time"),
+      Some(plural(s.steps, "step")),
+      Some(plural(s.cells, "cell")),
+      Some(plural(s.calls, "call")),
+      Option.when(s.prompt + s.completion > 0L)(s"${thousands(s.prompt)} → ${thousands(s.completion)} tokens"),
+      Option.when(s.errors > 0)(plural(s.errors, "error"))
+    ).flatten.mkString(" · ")
+    val message = turn.message.fold("")(m => say("person", s"${who(m)} · ${clock(m)}", messageText(m)))
+    val lead    = if turn.lead.isEmpty then "" else s"""<div class="step">${parts(session, turn.lead)}</div>"""
+    val steps   = turn.steps.zipWithIndex.map { (step, k) =>
+      val end  = turn.steps.lift(k + 1).map(_.start).orElse(turn.end).flatMap(at)
+      val took = end.zip(at(step.start)).map((b, a) => b - a).fold("")(t => s" · ${duration(t)}")
+      val n    = step.start.logged.toOption.map(_.entry).collect { case Entry.StepStarted(i) => i }.getOrElse(k)
+      s"""<div class="step"><div class="step-head">Step $n · ${escape(clock(step.start))}${escape(took)}</div>""" +
+        parts(session, step.parts) + "</div>"
+    }.mkString
+    val bad = turn.end.flatMap(_.logged.toOption).map(_.entry).exists {
+      case Entry.TurnEnded(TurnOutcome.Replied(_)) => false
+      case _                                       => true
+    }
+    val end = turn.end.fold(s"""<div class="say working"><div class="text">Working</div></div>""")(e =>
+      say(if bad then "reply bad" else "reply", s"The reply · ${clock(e)}", endText(turn))
+    )
+    s"""$message<details class="work"><summary>${escape(facts)}</summary><div class="traj">$lead$steps</div>""" +
+      s"</details>$end"

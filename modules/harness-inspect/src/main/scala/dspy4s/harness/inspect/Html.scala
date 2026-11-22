@@ -156,12 +156,44 @@ td.first{overflow-wrap:anywhere}
 .probes{font-size:12px;color:var(--muted)}
 @media (max-width:640px){.depth-1{margin-left:8px}.depth-2{margin-left:16px}main{padding:8px 16px 40px}
 .meta .views{margin-left:0}}
+body.mode-chat #rows,body.mode-trajectory #rows,body.mode-entries #story{display:none}
+body.mode-chat .entries-only,body.mode-trajectory .entries-only{display:none}
+body:not(.mode-trajectory) #story .cols{display:none}
+#story .item{margin:10px 0}
+.say{max-width:780px;padding:8px 12px;border-radius:10px;margin:6px 0}
+.say .who{font-size:11.5px;color:var(--muted);margin-bottom:2px}
+.say .text{white-space:pre-wrap;overflow-wrap:anywhere}
+.say.person{margin-left:auto;background:var(--x);border:1px solid var(--line)}
+.say.other{background:var(--card);border:1px dashed var(--line)}
+.say.reply{background:var(--card);border:1px solid var(--line)}
+.say.reply.bad{border-color:var(--bad)}
+.say.working .text{color:var(--warn)}
+details.work>summary{cursor:pointer;color:var(--muted);font-size:12.5px;margin:4px 0}
+.traj{margin:4px 0 8px;border-left:2px solid var(--line);padding-left:10px}
+.step{margin:6px 0}.step-head{font-size:12px;color:var(--muted);margin:8px 0 2px}
+.r{display:grid;grid-template-columns:64px minmax(0,1fr) 64px 112px 52px 72px;gap:8px;align-items:baseline;
+padding:3px 6px;border-radius:5px;font-size:13px}
+.r:hover{background:var(--card)}
+.r .kind{font:600 10.5px ui-monospace,SFMono-Regular,Menlo,monospace;padding:1px 4px;border-radius:4px;
+text-align:center;background:var(--code)}
+.r .sum{min-width:0;overflow-wrap:anywhere}
+.r .sum details summary{cursor:pointer;color:var(--muted);font-size:12px}
+.r .sum pre{max-height:24em;overflow:auto}
+.r .n{text-align:right;color:var(--muted);font-variant-numeric:tabular-nums;font-size:12px;white-space:nowrap}
+.r .note,.r .link{color:var(--muted);font-size:12px}
+.r.cols{color:var(--muted);font-size:11.5px}.r.cols:hover{background:none}
+.k-model .kind{color:var(--policy)}.k-cell .kind,.k-call .kind{color:var(--warn)}.k-output .kind{color:var(--good)}
+.k-memory{color:var(--muted)}.k-memory .kind{color:var(--memory)}.k-llm .kind{color:var(--leaf)}
+.k-note .kind{color:var(--muted)}.r.bad .kind{color:var(--bad)}
+body.mode-trajectory .say{max-width:none;margin-left:0;border-radius:6px}
+@media (max-width:640px){.r{grid-template-columns:56px minmax(0,1fr)}.r .n{display:none}}
 """ + hides
 
   /** The script of a page: the views, the filters, and the follow of a session that runs (5.2). The page of a session
     * asks for the rows after its last `seq` each second, adds the new entries at the end, and places each exchange
     * after its entry again when the exchange file changed. A page that does not show the first entries (`skipped`)
-    * keeps out each exchange before its first entry, and its counts add the entries that it does not show.
+    * keeps out each exchange before its first entry, and its counts add the entries that it does not show. When the
+    * follow brings new entries or exchanges, the chat and the trajectory get their last items again (5.7).
     */
   private val Script: String = """(() => {
 const body = document.body, rows = document.getElementById('rows');
@@ -169,6 +201,14 @@ document.querySelectorAll('button[data-view]').forEach(b => b.addEventListener('
   body.classList.remove('view-card', 'view-scala', 'view-json');
   body.classList.add('view-' + b.dataset.view);
   document.querySelectorAll('button[data-view]').forEach(x => x.classList.toggle('on', x === b));
+}));
+const story = document.getElementById('story');
+document.querySelectorAll('button[data-mode]').forEach(b => b.addEventListener('click', () => {
+  body.classList.remove('mode-chat', 'mode-trajectory', 'mode-entries');
+  body.classList.add('mode-' + b.dataset.mode);
+  document.querySelectorAll('button[data-mode]').forEach(x => x.classList.toggle('on', x === b));
+  if (story && b.dataset.mode !== 'entries')
+    story.querySelectorAll('details.work').forEach(d => { d.open = b.dataset.mode === 'trajectory'; });
 }));
 document.querySelectorAll('button[data-tab]').forEach(b => b.addEventListener('click', () => {
   body.classList.remove('tab-chat', 'tab-request', 'tab-reply', 'tab-diff');
@@ -227,6 +267,24 @@ const place = x => {
   while (at.nextElementSibling && at.nextElementSibling.classList.contains('exchange')) at = at.nextElementSibling;
   at.after(x);
 };
+// The items of the chat from the key of the last item, in place of the items from that key (5.7). A turn that the
+// person opened stays open.
+const refreshStory = async () => {
+  const items = [...story.querySelectorAll('.item')];
+  const from = items.length ? Number(items[items.length - 1].dataset.key) : 0;
+  const r = await fetch('/s/' + story.dataset.session + '/story?from=' + from, {cache: 'no-store'});
+  if (!r.ok) return;
+  const t = document.createElement('template');
+  t.innerHTML = await r.text();
+  const gone = items.filter(e => Number(e.dataset.key) >= from);
+  const open = new Set(gone.filter(e => e.querySelector('details.work[open]')).map(e => e.dataset.key));
+  gone.forEach(e => e.remove());
+  const all = body.classList.contains('mode-trajectory');
+  for (const e of [...t.content.children]) {
+    if (all || open.has(e.dataset.key)) e.querySelectorAll('details.work').forEach(d => { d.open = true; });
+    story.appendChild(e);
+  }
+};
 const tick = async () => {
   if (busy || !follow || !follow.checked) return;
   busy = true;
@@ -256,6 +314,7 @@ const tick = async () => {
     count('count-entries', skipped + shown);
     count('count-shown', shown);
     count('count-all', skipped + shown);
+    if (grew && story) await refreshStory();
     if (grew && end) window.scrollTo(0, document.body.scrollHeight);
   } finally { busy = false; }
 };

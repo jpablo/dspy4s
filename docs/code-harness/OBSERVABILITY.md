@@ -393,6 +393,58 @@ client, a later `/inspect` asks again, because that client can end first. The en
 that it started, and never the inspector of another client. `--port` of a session sets the first port, and `--port 0`
 always starts a new inspector on a free port.
 
+### 5.7 The chat and the trajectory of a session
+
+The user asked for this on 2026-11-22. The page of a session showed each entry as a card, but a person thinks in
+turns: the message, the work, and the reply. The trajectory view of Genesis gave the model: the items that a person
+knows from the chat, with the details that a chat hides, such as the times and the tokens. The user chose:
+
+- Two new views on the page of a session: **Chat**, the default, and **Trajectory**, with a toggle. The old view is
+  **Entries**, with its Card, Scala and JSON views.
+- The list first. A strip on top, with the context of each model call and a timeline, and a panel of totals, come in
+  a later step.
+- The summary calls of the memory are small gray rows.
+
+**The items.** `Story.of(rows, exchanges)` makes the items of the page from the rows of the journal and the exchanges:
+
+- **A turn** goes from the `Input` right before its `TurnStarted` to its `TurnEnded`. It has the message, its steps,
+  and its end.
+- **A step** goes from its `StepStarted` to the next `StepStarted` or to the `TurnEnded`. It has its policy calls
+  (the exchanges with the predictor `policy` whose `after` is in the step), its `Acted` (the reasoning, the text and
+  the code), each API call (an `EffectStarted` with its `EffectDone`), its `Observed`, and each other entry in it.
+- **A memory row** holds the summary calls (`compress`, `merge` and `shorten`) that come one after another, at their
+  place.
+- **A message** is an `Input` that starts no turn, for example a message of another session.
+- **A note** is each other entry outside a turn, for example `Activated`, `JobEnded`, `ModelChanged` or `Ended`.
+
+Each entry and each exchange is in exactly one item. A `DerivedRead` is in its step, with no row of its own.
+
+**The chat view.** For each turn, the page shows the message of the person, one line of the work, and the reply. The
+line of the work gives the time, the steps, the cells, the API calls, the tokens of the policy calls, and the errors.
+A click on the line opens the trajectory of the turn. A turn that runs shows `Working` and the time so far. An end
+that is not a reply is in words: stopped, crashed, failed with its error, no steps left, or submitted with its value.
+
+**The trajectory view.** Each turn is open, with one row for each part of each step:
+
+- `MODEL`: a policy call, with the text of its `Acted`, and the reasoning behind a click. It links to the page of
+  its exchange.
+- `CELL`: the code and its outcome. `CALL`: an API call, with its operation, its arguments and its result in short.
+  `OUTPUT`: the output of the cell, with its first lines and the rest behind a click.
+- `MEMORY`: a memory row. `NOTE`: each other entry in a step, for example `StopRequested` or `Granted`.
+
+A row has the time, the tokens in and out, the cached part of the prompt, and the tokens per second of the reply:
+
+- The time of a model call goes from its request to the end of its reply. The tokens per second are the completion
+  tokens over the time from the first line to the end of a stream, or over the whole time of a plain reply.
+- The cached part is `prompt_tokens_details.cached_tokens` over `prompt_tokens`.
+- The time of a cell goes from its `Acted` to its `Observed`, and of an API call from `EffectStarted` to `EffectDone`.
+- An error is a cell whose outcome is not `Ok` or `Submitted`, an API call whose result is `Error`, or an exchange
+  with an error or with a status that is not 200.
+
+**The follow.** When the follow of 5.2 brings new entries, the page asks for `/s/{id}/story?from={seq}`, with the first
+`seq` of its last item. It puts the items of the reply in place of its items from that `seq`. The views show the same
+last 2000 entries as the Entries view.
+
 ## 6. The laws
 
 As in the other parts of the harness, each law is a property or a test, and each law must fail first.
@@ -483,6 +535,11 @@ The inspector:
   program, or of the inspector of another root, starts the inspector on a free port. In the client, `/inspect` prints
   the link to the page of the session, a second `/inspect` prints the same link, the text names a port that was
   taken, and the end of the client frees the port of its inspector.
+- **L23. The chat and the trajectory.** For any journal and any exchanges, each entry and each exchange is in exactly
+  one item, and the items keep the order of the journal. A turn holds its message, and a step holds its policy calls,
+  its `Acted`, its API calls with their ends, and its `Observed`. The numbers of a turn are the counts and the sums of
+  its parts. An end that is not a reply has its words, and each text of the views is escaped. The page of a session
+  opens on the chat view, and it still holds the entries. `/story?from=` gives the items from that `seq`.
 - **The links to the views.** The `request` and `reply` links of a row open the page of the exchange with
   `?tab=request` and `?tab=reply`, and no row links to a raw path. `?tab=` opens the page on that view, an unknown
   tab opens the chat, and `?against=` with no tab opens the diff. The links to the exchange before and after keep

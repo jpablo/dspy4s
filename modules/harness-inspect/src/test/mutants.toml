@@ -1,5 +1,5 @@
 # The mutants of the inspector. Each mutant breaks one rule of section 5 of docs/code-harness/OBSERVABILITY.md, and
-# laws L10 to L22 of its section 6 must kill it.
+# laws L10 to L23 of its section 6 must kill it.
 #
 # `python3 scripts/mutants/mutants.py modules/harness-inspect/src/test/mutants.toml` applies each mutant alone, runs the
 # tests of the module, and restores the code. At least one test must fail for each mutant.
@@ -511,3 +511,68 @@ name = "Mutant: the close of an inspector that the client started leaves it"
 file = "Inspector.scala"
 old = "case Own(inspector) => inspector.close()"
 new = "case Own(inspector) => inspector.port: Unit"
+
+# ── The chat and the trajectory of a session (5.7, L23) ──
+
+[[mutant]]
+name = "Mutant: the Input before a TurnStarted is not the message of its turn"
+[[mutant.edit]]
+file = "Story.scala"
+old = "case (None, Some(Entry.Input(_, _, _))) if startsTurn(i) => pending = Some(row)"
+new = "case (None, Some(Entry.Input(_, _, _))) if startsTurn(i) && i < 0 => pending = Some(row)"
+
+[[mutant]]
+name = "Mutant: a policy call is not a model part of its step"
+[[mutant.edit]]
+file = "Story.scala"
+old = 'if x.predictor.contains("policy") then Part.Model(Vector(x), None)'
+new = 'if x.predictor.contains("fake-policy") then Part.Model(Vector(x), None)'
+
+[[mutant]]
+name = "Mutant: an EffectDone does not close its call"
+[[mutant.edit]]
+file = "Story.scala"
+old = "          if open >= 0 then"
+new = "          if open < -1 then"
+
+[[mutant]]
+name = "Mutant: the tokens of a turn count the summary calls too"
+[[mutant.edit]]
+file = "Story.scala"
+old = "val policy = parts.collect { case Part.Model(calls, _) => calls }.flatten"
+new = "val policy = turn.exchanges"
+
+[[mutant]]
+name = "Mutant: a cell that failed is not an error"
+[[mutant.edit]]
+file = "Story.scala"
+old = "case CellOutcome.Ok | CellOutcome.Submitted(_) => false"
+new = "case CellOutcome.Ok | CellOutcome.Submitted(_) | CellOutcome.Failed(_) => false"
+
+[[mutant]]
+name = "Mutant: the cached part is not over the prompt tokens"
+[[mutant.edit]]
+file = "Story.scala"
+old = 'yield s"${Math.round(100.0 * hit / p)}%"'
+new = 'yield s"${Math.round(100.0 * hit / (p + 100L))}%"'
+
+[[mutant]]
+name = "Mutant: the page of a session opens on the entries"
+[[mutant.edit]]
+file = "Pages.scala"
+old = 'Html.page(s"Session ${session.value.take(8)}", nonce, bar + main, "mode-chat view-card")'
+new = 'Html.page(s"Session ${session.value.take(8)}", nonce, bar + main, "mode-entries view-card")'
+
+[[mutant]]
+name = "Mutant: the follow of the story reads the rows from the start"
+[[mutant.edit]]
+file = "Pages.scala"
+old = "store.rows(session, from).map { rows =>"
+new = "store.rows(session, 0L).map { rows =>"
+
+[[mutant]]
+name = "Mutant: a message of the chat is not escaped"
+[[mutant.edit]]
+file = "Story.scala"
+old = '''s"""<div class="say $kind"><div class="who">${escape(by)}</div><div class="text">${escape(text)}</div></div>"""'''
+new = '''s"""<div class="say $kind"><div class="who">${escape(by)}</div><div class="text">$text</div></div>"""'''
