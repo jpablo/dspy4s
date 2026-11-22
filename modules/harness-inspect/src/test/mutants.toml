@@ -1,5 +1,5 @@
 # The mutants of the inspector. Each mutant breaks one rule of section 5 of docs/code-harness/OBSERVABILITY.md, and
-# laws L10 to L19 of its section 6 must kill it.
+# laws L10 to L22 of its section 6 must kill it.
 #
 # `python3 scripts/mutants/mutants.py modules/harness-inspect/src/test/mutants.toml` applies each mutant alone, runs the
 # tests of the module, and restores the code. At least one test must fail for each mutant.
@@ -474,3 +474,40 @@ name = "Mutant: the Copy button of a stream copies the exact stream first"
 file = "ExchangePage.scala"
 old = 'tools(session, x, "reply", "reply-merged", toggle)'
 new = 'tools(session, x, "reply", "reply-exact", toggle)'
+
+# ── The inspector of a client (5.6, L22) ──
+
+[[mutant]]
+name = "Mutant: serve never takes the inspector of another client of the same root"
+[[mutant.edit]]
+file = "Inspector.scala"
+old = "if rootAt(port).contains(rootText(root)) then Right(Served.Shared(port))"
+new = "if rootAt(port).contains(rootText(root)) && port < 0 then Right(Served.Shared(port))"
+
+[[mutant]]
+name = "Mutant: serve takes the inspector on the port also for another root"
+[[mutant.edit]]
+file = "Inspector.scala"
+old = "if rootAt(port).contains(rootText(root)) then Right(Served.Shared(port))"
+new = "if rootAt(port).nonEmpty && rootText(root).nonEmpty then Right(Served.Shared(port))"
+
+[[mutant]]
+name = "Mutant: serve gives up when another program has the port"
+[[mutant.edit]]
+file = "Inspector.scala"
+old = 'else start(root, 0).map(Served.Own(_)).left.map(again => s"$error; $again")'
+new = "else Left(error)"
+
+[[mutant]]
+name = "Mutant: /root gives the path of the root as the server got it"
+[[mutant.edit]]
+file = "Inspector.scala"
+old = 'Reply(200, "text/plain", Body.Text(Inspector.rootText(store.root)))'
+new = 'Reply(200, "text/plain", Body.Text(store.root.toString))'
+
+[[mutant]]
+name = "Mutant: the close of an inspector that the client started leaves it"
+[[mutant.edit]]
+file = "Inspector.scala"
+old = "case Own(inspector) => inspector.close()"
+new = "case Own(inspector) => inspector.port: Unit"

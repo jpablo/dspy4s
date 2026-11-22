@@ -506,7 +506,84 @@ class InspectorLaws extends ScalaCheckSuite:
     }
   }
 
+  // ── The inspector of a client (5.6) ──
+
+  /** The status of a GET of `url`. */
+  private def statusOf(url: String): Int =
+    client.send(HttpRequest.newBuilder(URI.create(url)).GET().build(), BodyHandlers.discarding()).statusCode()
+
+  /** True when no process listens on `port` of 127.0.0.1. */
+  private def refused(port: Int): Boolean =
+    scala.util.Try(Socket("127.0.0.1", port).close()).isFailure
+
+  test("Inspect: /root gives the real path of the root, so a client can find the inspector of its root") {
+    withRoot { root =>
+      fixture(root): Unit
+      // Another path of the same folder gives the same text.
+      serving(root.resolve("."))(inspector => assertEquals(get(inspector, "/root"), (200, root.toRealPath().toString)))
+    }
+  }
+
+  test("Inspect: serve starts the inspector on the port that it gets, its link opens a session, and close frees it") {
+    withRoot { root =>
+      val (session, _) = fixture(root)
+      val port         = freePort()
+      val served       = Inspector.serve(root, port).fold(e => fail(e), identity)
+      try
+        assert(served.owned, "serve did not start an inspector on a free port")
+        assertEquals(served.port, port)
+        assertEquals(served.link(session), s"http://127.0.0.1:$port/s/${session.value}")
+        assertEquals(statusOf(served.link(session)), 200)
+      finally served.close()
+      assert(refused(port), "the port stays open after the close")
+    }
+  }
+
+  test("Inspect: serve gives the inspector of another client of the same root, and its close leaves that inspector") {
+    withRoot { root =>
+      val (session, _) = fixture(root)
+      serving(root) { other =>
+        val served = Inspector.serve(root, other.port).fold(e => fail(e), identity)
+        assert(!served.owned, "serve started a second inspector for the same root")
+        assertEquals(served.port, other.port)
+        assertEquals(statusOf(served.link(session)), 200)
+        served.close()
+        assertEquals(get(other, "/")._1, 200)
+      }
+    }
+  }
+
+  test("Inspect: serve takes a free port when another program or the inspector of another root has the port") {
+    withRoot { root =>
+      val (session, _) = fixture(root)
+      // A program that accepts connections and never answers.
+      val socket = java.net.ServerSocket(0, 50, java.net.InetAddress.getByName("127.0.0.1"))
+      try
+        val served = Inspector.serve(root, socket.getLocalPort).fold(e => fail(e), identity)
+        try
+          assert(served.owned && served.port != socket.getLocalPort, s"port ${served.port}")
+          assertEquals(statusOf(served.link(session)), 200)
+        finally served.close()
+      finally socket.close()
+      withRoot { otherRoot =>
+        serving(otherRoot) { other =>
+          val served = Inspector.serve(root, other.port).fold(e => fail(e), identity)
+          try
+            assert(served.owned && served.port != other.port, s"port ${served.port}")
+            assertEquals(statusOf(served.link(session)), 200)
+          finally served.close()
+        }
+      }
+    }
+  }
+
 object InspectorLaws:
+
+  /** A port of 127.0.0.1 that no process holds now. */
+  def freePort(): Int =
+    val socket = java.net.ServerSocket(0, 50, java.net.InetAddress.getByName("127.0.0.1"))
+    try socket.getLocalPort
+    finally socket.close()
 
   val Start: Long = 1_762_950_000_000L
 

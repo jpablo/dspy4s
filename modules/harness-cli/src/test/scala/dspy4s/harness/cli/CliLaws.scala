@@ -48,9 +48,16 @@ class CliLaws extends munit.FunSuite:
     )
   }
 
-  test("CLI: --port needs --inspect and a port from 0 to 65535, and --inspect takes no session, list or folder") {
+  test("CLI: --port gives the port of /inspect in a session too, and --port with --list is an error") {
+    assertEquals(CliArgs.parse(Vector("--port", "7412"), home, cwd).map(_.port), Right(7412))
+    assertEquals(CliArgs.parse(Vector("--controller", "--port", "0"), home, cwd).map(_.port), Right(0))
+    assertEquals(CliArgs.parse(Vector.empty, home, cwd).map(_.port), Right(7411))
+    assert(CliArgs.parse(Vector("--list", "--port", "7412"), home, cwd).isLeft)
+    assert(CliArgs.usage.contains("/inspect"), CliArgs.usage)
+  }
+
+  test("CLI: --port takes a port from 0 to 65535, and --inspect takes no session, list or folder") {
     Vector(
-      Vector("--port", "7412"),
       Vector("--inspect", "--port", "65536"),
       Vector("--inspect", "--port", "fake"),
       Vector("--inspect", "--port"),
@@ -593,6 +600,95 @@ class CliLaws extends munit.FunSuite:
       ended.await(10, TimeUnit.SECONDS): Unit
   }
 
+  // ── /inspect (docs/code-harness/OBSERVABILITY.md, 5.6) ──
+
+  test("CLI: parseLine reads /inspect, and /inspect gives no command to the session") {
+    assertEquals(parseLine("/inspect"), Line.Inspect)
+    assertEquals(parseLine("/inspect now"), Line.Unknown("/inspect now"))
+    assertEquals(commandsFor(Line.Inspect, SessionState.initial, request), Right(Vector.empty))
+  }
+
+  /** A root with the journal of the session `fake-session` of `FakeHandle`, so the inspector has its page. */
+  private def withSessionRoot[A](body: Path => A): A =
+    dspy4s.harness.host.HostSupport.withRoot { root =>
+      val session = SessionId("fake-session")
+      val file    = dspy4s.harness.host.SessionFile.open(dspy4s.harness.host.SessionFile.pathOf(root, session), session)
+        .fold(e => fail(e.toString), identity)
+      try file.append(
+          Vector(Logged(0L, Meta(1000L, Source.User, Taint.Trusted, true), Entry.Input(request, "FAKE-HI", Map.empty))),
+          flush = true
+        ).fold(e => fail(e.toString), identity)
+      finally file.close()
+      body(root)
+    }
+
+  /** A port of 127.0.0.1 that no process holds now. */
+  private def freePort(): Int =
+    val socket = java.net.ServerSocket(0, 50, java.net.InetAddress.getByName("127.0.0.1"))
+    try socket.getLocalPort
+    finally socket.close()
+
+  /** Runs the loop of `FakeHandle` with a root and the port `port` of `/inspect`, types `/inspect` two times, and gives
+    * the two texts, the status of a GET of the link of the first text, and the port of that link. It checks that the
+    * end of the loop frees that port when this client started the inspector.
+    */
+  private def inspectTwice(root: Path, port: Int): (String, String, Int, Int) =
+    val console = QueueConsole()
+    val loop    = Thread.ofPlatform().start { () =>
+      Cli.loop(
+        FakeHandle(),
+        console,
+        false,
+        None,
+        "",
+        () => ModelFacts.unknown,
+        ClientFacts(root, "", false, port)
+      ): Unit
+    }
+    try
+      console.give("/inspect")
+      val first = console.next(_.contains("http://"))
+      console.give("/inspect")
+      val second = console.next(_.contains("http://"))
+      val link   = "http://127\\.0\\.0\\.1:(\\d+)/s/fake-session".r.findFirstMatchIn(first)
+        .getOrElse(fail(s"no link to the session: $first"))
+      val status = java.net.http.HttpClient.newHttpClient().send(
+        java.net.http.HttpRequest.newBuilder(java.net.URI.create(link.matched)).GET().build(),
+        java.net.http.HttpResponse.BodyHandlers.discarding()
+      ).statusCode()
+      (first, second, status, link.group(1).toInt)
+    finally
+      console.end()
+      loop.join(10_000)
+
+  private def refused(port: Int): Boolean =
+    scala.util.Try(java.net.Socket("127.0.0.1", port).close()).isFailure
+
+  test("CLI: /inspect prints the link to the page of the session, the same link again, and the end stops it") {
+    withSessionRoot { root =>
+      val port                          = freePort()
+      val (first, second, status, used) = inspectTwice(root, port)
+      assertEquals(used, port, first)
+      assertEquals(status, 200, first)
+      assertEquals(second, first)
+      assert(first.contains("this client ends"), first)
+      assert(refused(port), "the inspector runs after the end of the client")
+    }
+  }
+
+  test("CLI: /inspect takes a free port when another program has the port, and says so") {
+    withSessionRoot { root =>
+      val socket = java.net.ServerSocket(0, 50, java.net.InetAddress.getByName("127.0.0.1"))
+      try
+        val (first, _, status, used) = inspectTwice(root, socket.getLocalPort)
+        assert(used != socket.getLocalPort, first)
+        assertEquals(status, 200, first)
+        assert(first.contains(s"The port ${socket.getLocalPort} is taken"), first)
+        assert(refused(used), "the inspector runs after the end of the client")
+      finally socket.close()
+    }
+  }
+
   test("CLI: /show prints a cell of the session in full, and an unknown id gives an error") {
     val console = RecordingConsole(Vector("/show 3", "/show 99"))
     assert(Cli.loop(EntriesHandle(screenTurn, feedEnds = false), console, script = false))
@@ -689,6 +785,25 @@ private final class RecordingConsole(lines: Vector[String] = Vector.empty) exten
   override def onDetail(action: () => Unit): Unit = details.set(action)
 
   def release(): Unit = gate.countDown()
+
+/** A plain console that a law drives: `give` types a line, `end` ends the input, and `next` waits for a printed text.
+  */
+private final class QueueConsole extends ClientConsole:
+  private val lines   = java.util.concurrent.LinkedBlockingQueue[Typed]()
+  private val printed = java.util.concurrent.LinkedBlockingQueue[String]()
+
+  def give(text: String): Unit = lines.put(Typed.Text(text))
+  def end(): Unit              = lines.put(Typed.End)
+
+  /** The next printed text that meets `wanted`, after at most 10 s. */
+  def next(wanted: String => Boolean): String =
+    val end                    = System.nanoTime() + 10_000_000_000L
+    def take(): Option[String] = Option(printed.poll(50, TimeUnit.MILLISECONDS))
+    Iterator.continually(take()).takeWhile(_ => System.nanoTime() < end).flatten.find(wanted)
+      .getOrElse(throw AssertionError("no such text was printed"))
+
+  def read(): Typed             = lines.take()
+  def print(text: String): Unit = printed.put(text)
 
 /** A closed session whose feed gives `log` once. With `feedEnds`, the feed then ends. Its draft is `drafted`. */
 private final class EntriesHandle(

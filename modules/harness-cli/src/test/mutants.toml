@@ -1,0 +1,39 @@
+# The mutants of the terminal client. Each mutant breaks one rule of the client, and the laws of the module must kill
+# it. The first mutants break the rules of /inspect (docs/code-harness/OBSERVABILITY.md, 5.6, law L22).
+#
+# `python3 scripts/mutants/mutants.py modules/harness-cli/src/test/mutants.toml` applies each mutant alone, runs the
+# tests of the module, and restores the code. At least one test must fail for each mutant.
+
+module = "harness-cli"
+project = "harnessCli"
+sources = "modules/harness-cli/src/main/scala/dspy4s/harness/cli"
+
+# ── /inspect ──
+
+[[mutant]]
+name = "Mutant: /inspect does not try the port of --port first"
+[[mutant.edit]]
+file = "Cli.scala"
+old = "case None      => Inspector.serve(client.root, client.inspectPort)"
+new = "case None      => Inspector.serve(client.root, 0)"
+
+[[mutant]]
+name = "Mutant: a second /inspect does not use the inspector that the first one started"
+[[mutant.edit]]
+file = "Cli.scala"
+old = "val next = served.get.filter(_.owned) match"
+new = "val next = served.get.filter(_ => false) match"
+
+[[mutant]]
+name = "Mutant: the end of the client leaves the inspector that it started"
+[[mutant.edit]]
+file = "Cli.scala"
+old = "served.get.foreach(_.close())"
+new = "served.get.foreach(_ => ())"
+
+[[mutant]]
+name = "Mutant: the text of /inspect does not name the port that was taken"
+[[mutant.edit]]
+file = "Cli.scala"
+old = "else if wanted != 0 && served.port != wanted then"
+new = "else if wanted < 0 && served.port != wanted then"

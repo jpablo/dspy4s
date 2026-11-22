@@ -3357,7 +3357,7 @@ name = "CliArgs"
 ops = ["parse"]
 ref = "15"
 uses = ["session-id", "harness-limits"]
-text = "The folder of a new session, the root of the host, the session to open again, the script mode, the memory calls, the list of the sessions, and the controller (8.7). A session that opens again keeps its own configuration. --no-memory-calls gives the limits with no summary call of the memory tree (7.1). A proposal: [--root DIR] [--session ID | --controller] [--script] [--no-memory-calls] [--list] [FOLDER], with the root <home>/.dspy4s/harness, and the start of an id is enough when only one session has it."
+text = "The folder of a new session, the root of the host, the session to open again, the script mode, the memory calls, the list of the sessions, and the controller (8.7). A session that opens again keeps its own configuration. --no-memory-calls gives the limits with no summary call of the memory tree (7.1). A proposal: [--root DIR] [--session ID | --controller] [--script] [--no-memory-calls] [--list] [FOLDER], with the root <home>/.dspy4s/harness, and the start of an id is enough when only one session has it. --port gives the port of --inspect, and the first port of /inspect in a session."
 
 [[group]]
 id = "screen"
@@ -3442,7 +3442,7 @@ kind = "data"
 name = "Line"
 ref = "10.3"
 uses = ["grant-lifetime", "reasoning-view", "effect-id", "session-id", "session-outcome"]
-text = "A message, /stop, /stopall, /allow [N] [once|turn|session], /jobs, /stopjob ID, /status, /reasoning off|short|full, /help, /close [merged|parked|abandoned REASON|replaced ID], /sessions, /open ID, /reopen ID, /controller, /quit, /wait SECONDS, or an unknown command. N is the number of a pending call, and ID is the name of a job or the id of a session. /effort [LEVEL] shows the effort or sets it (CLI_SCREEN.md, 14.4)."
+text = "A message, /stop, /stopall, /allow [N] [once|turn|session], /jobs, /stopjob ID, /status, /reasoning off|short|full, /help, /close [merged|parked|abandoned REASON|replaced ID], /sessions, /open ID, /reopen ID, /controller, /inspect, /quit, /wait SECONDS, or an unknown command. N is the number of a pending call, and ID is the name of a job or the id of a session. /effort [LEVEL] shows the effort or sets it (CLI_SCREEN.md, 14.4)."
 
 [[node]]
 id = "reasoning-view"
@@ -3632,11 +3632,11 @@ id = "cli"
 group = "cli"
 kind = "data"
 name = "Cli"
-ops = ["main", "loop", "listText", "deskStep"]
+ops = ["main", "loop", "listText", "deskStep", "inspectText"]
 ref = "15"
 uses = ["session-handle", "console", "desk", "host-desk", "screen", "model-facts", "effort"]
 proof_uses = ["cli-args", "local-host", "work-runtime", "work-env", "entry-text", "parse-line", "commands-for", "plain-console", "editor-console", "stop-notice", "jobs-text", "status-text", "job-starts", "pending-calls", "sessions-text", "resolve-session", "card-text", "open-refusal", "plan-text", "host-error", "screen", "effort", "model-facts"]
-text = "main makes the model from the environment, makes the console, starts a LocalHost with a WorkRuntime, and opens the session. --list prints the sessions and opens none. loop prints the feed, and each text goes through printable. It sends a message, /stop and /stopall, and it runs /close, /allow and /stopjob so the person sees a refusal. Each error of the host prints in words (HostError.words). A Ctrl-C during a turn is /stop, and the stop notice follows a turn that a stop ended. With a desk, /sessions, /open, /reopen, /controller and /close go to deskStep (8.7). A proposal: JDK 21. A rich console gets the rows of Screen for each entry, and the live block and the footer of the session that it shows. A new session gets the effort of Effort.startOptions, a daemon thread reads the facts of the model, and /effort prints the effort or sends ChangeModel (CLI_SCREEN.md, 14.4)."
+text = "main makes the model from the environment, makes the console, starts a LocalHost with a WorkRuntime, and opens the session. --list prints the sessions and opens none. loop prints the feed, and each text goes through printable. It sends a message, /stop and /stopall, and it runs /close, /allow and /stopjob so the person sees a refusal. Each error of the host prints in words (HostError.words). A Ctrl-C during a turn is /stop, and the stop notice follows a turn that a stop ended. With a desk, /sessions, /open, /reopen, /controller and /close go to deskStep (8.7). A proposal: JDK 21. A rich console gets the rows of Screen for each entry, and the live block and the footer of the session that it shows. A new session gets the effort of Effort.startOptions, a daemon thread reads the facts of the model, and /effort prints the effort or sends ChangeModel (CLI_SCREEN.md, 14.4). /inspect starts the inspector of the root, or takes the inspector of another client of that root, and prints the link to the page of the session (OBSERVABILITY.md, 5.6). The end of the loop stops the inspector that the client started."
 
 # ── Phase 7: the laws ─────────────────────────────────────────────────────────────────────────────────────────────
 

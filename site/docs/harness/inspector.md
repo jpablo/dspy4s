@@ -56,6 +56,22 @@ DSPY_EXCHANGES=off dspy4s-harness
 
 ## Start the inspector
 
+In a session, type `/inspect`. The client starts the inspector of its root and prints the link to the page of the
+session:
+
+```text
+› /inspect
+The inspector runs at http://127.0.0.1:7411/s/<id> . It stops when this client ends.
+```
+
+- When another client of the same root already serves the inspector on the port, the client uses it, and the text
+  says so. That inspector stops when that client ends.
+- When another program has the port, the client starts the inspector on a free port, and the text names the port that
+  was taken.
+- `--port N` of the session sets the first port, and `--port 0` takes a free port.
+
+To run the inspector with no session, start it on its own:
+
 ```bash
 dspy4s-harness --inspect
 dspy4s-harness --inspect --root ~/test-root --port 0
@@ -68,7 +84,7 @@ The inspector of <root> runs at http://127.0.0.1:7411/ . Ctrl-C ends it.
 ```
 
 - The server listens on `127.0.0.1` only. The default port is 7411. `--port 0` takes a free port.
-- `--inspect` takes only `--root` and `--port`. `--port` needs `--inspect`.
+- `--inspect` takes only `--root` and `--port`.
 - The server answers only `GET`. A request with a `Host` header other than `127.0.0.1:PORT` or `localhost:PORT` gets
   the status 403.
 - The server opens each journal read-only for one request. It changes no file of the root.

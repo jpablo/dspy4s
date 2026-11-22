@@ -5,7 +5,7 @@ import dspy4s.core.contracts.{DspyError, RuntimeContext, RuntimeError}
 import dspy4s.core.runtime.RuntimeEnvironment
 import dspy4s.harness.Secrets
 import dspy4s.harness.guest.{JobStatus, SessionCard}
-import dspy4s.harness.inspect.Inspector
+import dspy4s.harness.inspect.{Inspector, Served}
 import dspy4s.harness.host.{
   Behind,
   Controller,
@@ -176,7 +176,7 @@ object Cli:
                   console.print(
                     s"The session ${visible(handle.id.value)} is open. Type a message, or /help for the commands."
                   )
-                  val client = ClientFacts(cli.root, base, ExchangeFile.enabled(env))
+                  val client = ClientFacts(cli.root, base, ExchangeFile.enabled(env), cli.port)
                   if loop(handle, console, cli.script, Some(desk), home.toString, () => facts.get, client) then 0
                   else 1
             finally
@@ -279,6 +279,10 @@ object Cli:
     *     Ctrl-C while no read waits does the same (`ClientConsole.onInterrupt`).
     *   - Each text goes through `printable` before it reaches the console, so no text sends a control character.
     *   - `/help` prints `helpText`.
+    *   - `/inspect` prints `inspectText`: the link to the page of the session that the client shows. The first
+    *     `/inspect` starts the inspector of the root of `client` on its port, or takes the inspector of another client
+    *     of that root on that port, or starts one on a free port (`Inspector.serve`). The end of the loop stops the
+    *     inspector that this client started.
     *   - A message, `/stop` and `/stopall` go through `send`. `/close`, `/allow` and `/stopjob` go through `run`, so
     *     the person sees a refusal, for example `Close` during a turn.
     *   - `/jobs`, `/status` and `/config` print `jobsText`, `statusText` and `configText`, with the facts `client` of
@@ -370,6 +374,20 @@ object Cli:
           done.await(200, TimeUnit.MILLISECONDS): Unit
       done.countDown()
     }
+    // The inspector of `/inspect` (docs/code-harness/OBSERVABILITY.md, 5.6). The first `/inspect` starts it, or finds
+    // the inspector of another client of the root. The end of the loop stops the inspector that this client started.
+    val served                              = AtomicReference[Option[Served]](None)
+    def inspect(session: SessionId): String =
+      if client.root.toString.isEmpty then "This client knows no root, so it has no inspector."
+      else
+        val next = served.get.filter(_.owned) match
+          case Some(own) => Right(own)
+          case None      => Inspector.serve(client.root, client.inspectPort)
+        next match
+          case Left(error) => s"The inspector did not start: $error"
+          case Right(now)  =>
+            served.set(Some(now))
+            inspectText(now, session, client.inspectPort)
     // The script mode: the reader waits until the session has no open turn, until its feed ends, or until the loop
     // ends.
     def idle(): Unit =
@@ -397,6 +415,7 @@ object Cli:
           ))
         case Line.Config                          => print(configText(current.id, current.state, client, facts(), home))
         case Line.Help                            => print(helpText)
+        case Line.Inspect                         => print(inspect(current.id))
         case Line.Effort(None)                    => print(effortText(current.state, facts().choices))
         case Line.Goal(GoalLine.Show)             => print(loopText(current.state))
         case _ if deskLine(parsed, desk.nonEmpty) =>
@@ -452,8 +471,20 @@ object Cli:
     view.drain()
     val failed = view.ended && !view.handle.state.closed
     view.close()
+    served.get.foreach(_.close())
     if failed then print("The session stopped: its host can write no more. The journal keeps each committed entry.")
     !failed
+
+  /** The text of `/inspect` for the inspector `served` and the page of `session`. `wanted` is the port that the client
+    * tried first, and the text says when that port was taken (docs/code-harness/OBSERVABILITY.md, 5.6).
+    */
+  private[cli] def inspectText(served: Served, session: SessionId, wanted: Int): String =
+    val link = served.link(session)
+    if !served.owned then
+      s"The inspector of another client of this root runs at $link . It stops when that client ends."
+    else if wanted != 0 && served.port != wanted then
+      s"The port $wanted is taken, so the inspector runs at $link . It stops when this client ends."
+    else s"The inspector runs at $link . It stops when this client ends."
 
   /** True for a line that goes through the desk (8.7): `/sessions`, `/open`, `/reopen` and `/controller`, and `/close`
     * when the client has a desk.

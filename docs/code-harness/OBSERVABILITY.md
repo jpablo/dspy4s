@@ -208,7 +208,8 @@ token and a prompt of 20 to 80 KB.
 ### 5.1 The server
 
 - `dspy4s-harness --inspect [--root DIR] [--port N]` starts the server and prints its URL. The default port is 7411,
-  and `--port 0` takes a free port. `--inspect` takes no session, no list, no script mode and no folder.
+  and `--port 0` takes a free port. `--inspect` takes no session, no list, no script mode and no folder. A session can
+  also start the server with `/inspect` (5.6).
 - It uses the JDK `com.sun.net.httpserver.HttpServer` on virtual threads, so it adds no dependency.
 - It listens on 127.0.0.1 only. It answers only a request whose `Host` header is `127.0.0.1:PORT` or
   `localhost:PORT`, so a web page that uses DNS rebinding gets 403 and no data. It sends no CORS headers, so a page of
@@ -366,6 +367,32 @@ comes from a file, so the name keeps only ASCII letters, digits, `-`, `_` and `.
 `_`. The bar of a session has a `Raw` group of links and a `Download` group of links, and the Request and Reply
 views of an exchange each have a `Download` link (5.4).
 
+### 5.6 The inspector of a client (`/inspect`)
+
+The person types `/inspect` in the terminal client, and the client prints the link to the page of the session that it
+shows, for example `http://127.0.0.1:7411/s/<id>`. The user asked for this on 2026-11-22: a person who sees a slow turn
+wants its page with no second terminal. The user chose a command and not a server that always runs:
+
+- Each client would take a port, and two clients would clash on 7411.
+- The journals and the exact requests hold the prompts, and a local port has no password. So the data is on a port
+  only when the person asks for it.
+
+The first `/inspect` of a client runs `Inspector.serve` with the root of the client and the port of `--port`, 7411 by
+default:
+
+1. It starts the inspector on that port.
+2. When the port is taken, it asks that port for `/root`. When the answer is the real path of the same root, the
+   inspector of another client serves this root, and the client uses it. It starts no second server.
+3. Else, it starts the inspector on a free port, and the text names the port that was taken.
+
+`/root` gives the real path of the root of the inspector as text, with the same checks of `Host` and of `GET` as each
+other path. The question waits at most 1 s, so a program that never answers does not hold the client.
+
+A later `/inspect` prints the link again, with the same inspector. When the client uses the inspector of another
+client, a later `/inspect` asks again, because that client can end first. The end of the client stops the inspector
+that it started, and never the inspector of another client. `--port` of a session sets the first port, and `--port 0`
+always starts a new inspector on a free port.
+
 ## 6. The laws
 
 As in the other parts of the harness, each law is a property or a test, and each law must fail first.
@@ -450,6 +477,12 @@ The inspector:
   chunk gives no reply. A role that each delta repeats comes once. For the same streams, the merged reply agrees
   with the reading of the model: the text, the reasoning, the ids and names of the tool calls, the finish reason and
   the usage. The Reply view of a stream opens on the merged reply, with its toggle, and a plain reply has no toggle.
+- **L22. The inspector of a client.** `/root` gives the real path of the root. `serve` on a free port starts the
+  inspector on that port, its link opens the page of a session, and its close frees the port. `serve` on the port of
+  an inspector of the same root starts no server, and its close leaves that inspector. `serve` on a port of another
+  program, or of the inspector of another root, starts the inspector on a free port. In the client, `/inspect` prints
+  the link to the page of the session, a second `/inspect` prints the same link, the text names a port that was
+  taken, and the end of the client frees the port of its inspector.
 - **The links to the views.** The `request` and `reply` links of a row open the page of the exchange with
   `?tab=request` and `?tab=reply`, and no row links to a raw path. `?tab=` opens the page on that view, an unknown
   tab opens the chat, and `?against=` with no tab opens the diff. The links to the exchange before and after keep

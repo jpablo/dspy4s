@@ -54,6 +54,11 @@ enum Line derives CanEqual:
   /** `/help`: the commands, one line each. */
   case Help
 
+  /** `/inspect`: the client starts the inspector of its root, or finds the inspector of another client of that root,
+    * and prints the link to the page of the session that it shows (docs/code-harness/OBSERVABILITY.md, 5.6).
+    */
+  case Inspect
+
   /** `/close`: the end of the session with an outcome (8.7). `/close` and `/close parked` give `Parked`,
     * `/close merged` gives `Merged`, `/close abandoned REASON` gives `Abandoned(REASON)`, and `/close replaced ID`
     * gives `Replaced(ID)`. With a desk, the client shows the release plan, and the host runs it before the end.
@@ -127,6 +132,7 @@ private def command(words: List[String]): Option[Line] =
     case List("/config")          => Some(Line.Config)
     case List("/show", id)        => Some(Line.Show(id))
     case List("/help")            => Some(Line.Help)
+    case List("/inspect")         => Some(Line.Inspect)
     case "/goal" :: rest          => goal(rest)
     case List("/reasoning", view) => ReasoningView.values.find(_.toString.equalsIgnoreCase(view)).map(Line.Reasoning(_))
     case List("/effort")          => Some(Line.Effort(None))
@@ -207,6 +213,7 @@ val commandHelp: Vector[(String, String)] = Vector(
   "/reasoning off|line|short|full" -> "set how much of the reasoning of a step the client shows",
   "/effort [LEVEL]"                -> "show the reasoning effort and its levels, or set the effort of the next steps",
   "/show ID"                       -> "show the cell ID or the call ID of the session in full, for example 12 or 12.0",
+  "/inspect"                       -> "start the inspector of the journals, and show the link to this session",
   "/goal"                          -> "show the goal and the goal loop",
   "/goal on [N]"                   -> "let the session go on by itself until its goal is met, at most N turns (50)",
   "/goal off"                      -> "end the goal loop",
@@ -250,9 +257,9 @@ def jobOrder(state: SessionState): Vector[EffectId] = state.jobs.keys.toVector.s
   *     that effort (CLI_SCREEN.md, 14.4). Another level gives an error with the levels.
   *   - `Goal` gives `StartLoop` for `/goal on`, `StopLoop` for `/goal off` and `ChangeGoal` for `/goal set` (8.5).
   *     `/goal` with no word gives no command, because it only shows the loop.
-  *   - `Jobs`, `Status`, `Reasoning`, `Show`, `Help`, `Quit`, `Wait`, `Sessions`, `Open`, `Reopen`, `Controller` and
-  *     `Effort` with no level give no command, because they change only the client. The client runs `Sessions`, `Open`,
-  *     `Reopen` and `Controller` through its desk. `Unknown` gives an error that points to `/help`.
+  *   - `Jobs`, `Status`, `Reasoning`, `Show`, `Help`, `Inspect`, `Quit`, `Wait`, `Sessions`, `Open`, `Reopen`,
+  *     `Controller` and `Effort` with no level give no command, because they change only the client. The client runs
+  *     `Sessions`, `Open`, `Reopen` and `Controller` through its desk. `Unknown` gives an error that points to `/help`.
   *
   * The client side of `Grant` (5.5): only a client of the user sends `Grant`. To refuse, the person sends a plain
   * message.
@@ -297,7 +304,8 @@ def commandsFor(
     case Line.Goal(GoalLine.Change(go)) => Right(Vector(Command.ChangeGoal(go)))
     case Line.Unknown(text)             => Left(s"$text is not a command. /help lists the commands.")
     // These lines change only the client.
-    case Line.Jobs | Line.Status | Line.Config | Line.Reasoning(_) | Line.Show(_) | Line.Help | Line.Quit | Line.Wait(
+    case Line.Jobs | Line.Status | Line.Config | Line.Reasoning(_) | Line.Show(_) | Line.Help | Line.Inspect |
+        Line.Quit | Line.Wait(
           _
         ) |
         Line.Sessions | Line.Open(_) | Line.Controller | Line.Reopen(_) | Line.Effort(None) |

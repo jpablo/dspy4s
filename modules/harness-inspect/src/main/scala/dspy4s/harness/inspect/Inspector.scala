@@ -7,6 +7,7 @@ import zio.blocks.schema.json.Json
 import com.sun.net.httpserver.{HttpExchange, HttpServer}
 
 import java.io.{IOException, OutputStream}
+import java.net.http.{HttpClient, HttpRequest, HttpResponse}
 import java.net.{InetAddress, InetSocketAddress, URI}
 import java.nio.charset.StandardCharsets.UTF_8
 import java.nio.file.{Files, Path}
@@ -45,6 +46,66 @@ object Inspector:
       server.start()
       Inspector(server, executor, bound)
     }.toEither.left.map(e => s"the inspector did not start on 127.0.0.1:$port: ${e.getMessage}")
+
+  /** The inspector of the root `root` for a client (5.6): one that starts on `port`, else the inspector of another
+    * process that serves the same root on `port`, else one that starts on a free port. Two clients of one root so share
+    * one inspector, and a client never stops the inspector of another client. The port 0 always starts a new one.
+    */
+  def serve(root: Path, port: Int = DefaultPort): Either[String, Served] =
+    start(root, port) match
+      case Right(started)           => Right(Served.Own(started))
+      case Left(error) if port == 0 => Left(error)
+      case Left(error)              =>
+        if rootAt(port).contains(rootText(root)) then Right(Served.Shared(port))
+        else start(root, 0).map(Served.Own(_)).left.map(again => s"$error; $again")
+
+  /** The text of `/root`: the real path of `root`, so two paths of one folder give one text. */
+  private[inspect] def rootText(root: Path): String =
+    Try(root.toRealPath()).getOrElse(root.toAbsolutePath.normalize()).toString
+
+  /** How long `serve` waits for the answer of the process on a port that it found taken. */
+  private val AskMillis = 1_000L
+
+  /** The root of the inspector on `port` of 127.0.0.1 (`/root`), or none when that port gives no such answer in time,
+    * for example because another program holds it.
+    */
+  private def rootAt(port: Int): Option[String] =
+    Try {
+      val wait     = java.time.Duration.ofMillis(AskMillis)
+      val client   = HttpClient.newBuilder().connectTimeout(wait).build()
+      val request  = HttpRequest.newBuilder(URI.create(s"http://127.0.0.1:$port/root")).timeout(wait).GET().build()
+      val response = client.send(request, HttpResponse.BodyHandlers.ofString())
+      Option.when(response.statusCode() == 200)(response.body())
+    }.toOption.flatten
+
+/** The inspector that a client shows with `/inspect` (docs/code-harness/OBSERVABILITY.md, 5.6). */
+enum Served:
+
+  /** An inspector that this client started. Its `close` stops it. */
+  case Own(inspector: Inspector)
+
+  /** The inspector of another process for the same root, on the port `at`. Its `close` does nothing. */
+  case Shared(at: Int)
+
+  /** The port of the inspector. */
+  def port: Int =
+    this match
+      case Own(inspector) => inspector.port
+      case Shared(at)     => at
+
+  /** True when this client started the inspector, so it stops with the client. */
+  def owned: Boolean =
+    this match
+      case Own(_)    => true
+      case Shared(_) => false
+
+  /** The address of the page of `session`. */
+  def link(session: SessionId): String = s"http://127.0.0.1:$port/s/${session.value}"
+
+  def close(): Unit =
+    this match
+      case Own(inspector) => inspector.close()
+      case Shared(_)      => ()
 
 /** A reply of the inspector. A page gets the policy of its scripts with its nonce. A reply with `download` gets the
   * header that tells a browser to save it as a file with that name.
@@ -135,6 +196,7 @@ private[inspect] final class Routes(store: Store, port: Int):
       val parts = uri.getRawPath.split('/').toList.filter(_.nonEmpty)
       parts match
         case Nil                            => page(Right(Pages.sessions(store, nonce)))
+        case "root" :: Nil                  => Reply(200, "text/plain", Body.Text(Inspector.rootText(store.root)))
         case "s" :: id :: Nil               => withSession(id)(s => page(Pages.session(store, s, nonce)))
         case "s" :: id :: "x" :: xid :: Nil => withSession(id) { s =>
             val asked = query(uri)

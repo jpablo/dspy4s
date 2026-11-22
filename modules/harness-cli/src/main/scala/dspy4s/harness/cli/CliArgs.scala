@@ -28,7 +28,8 @@ import scala.concurrent.duration.*
   * @param inspect
   *   the inspector of the root (docs/code-harness/OBSERVABILITY.md, 5), in place of a session
   * @param port
-  *   the port of the inspector on 127.0.0.1, 0 for a free port
+  *   the port of the inspector on 127.0.0.1, 0 for a free port: of `--inspect`, and the first port that `/inspect` of a
+  *   session tries (5.6)
   * @param memoryCalls
   *   false with `--no-memory-calls`: the memory tree of each session of the host makes no `compress` or `merge` call
   *   (7.1), so a person can compare the cost and the replies of a session with and without them. A message of the
@@ -74,7 +75,7 @@ object CliArgs:
   /** The text that an error of the arguments gives. */
   val usage
       : String = "Usage: dspy4s-harness [--root DIR] [--session ID | --controller] [--script] [--no-memory-calls]\n" +
-    "                      [--cell-wall-minutes N] [--unattended-turns N] [FOLDER]\n" +
+    "                      [--cell-wall-minutes N] [--unattended-turns N] [--port N] [FOLDER]\n" +
     "       dspy4s-harness [--root DIR] --list\n" +
     "       dspy4s-harness [--root DIR] --inspect [--port N]\n" +
     "  --root DIR     the root of the host, by default ~/.dspy4s/harness\n" +
@@ -83,7 +84,8 @@ object CliArgs:
     "  --controller   open the controller of the root, which starts and follows the work sessions\n" +
     "  --list         list the sessions of the root, the newest first\n" +
     "  --inspect      serve the inspector of the journals and the exchange files of the root on 127.0.0.1\n" +
-    s"  --port N       the port of the inspector, by default ${Inspector.DefaultPort}; 0 takes a free port\n" +
+    s"  --port N       the port of the inspector of --inspect and of /inspect, by default ${Inspector.DefaultPort}; 0 takes a\n" +
+    "                 free port. When /inspect finds the port taken, it takes a free port\n" +
     "  --script       run one line at a time: each line waits for the end of the turn before it, and the end of\n" +
     "                 the input waits for the open turn\n" +
     "  --no-memory-calls\n" +
@@ -117,7 +119,7 @@ object CliArgs:
     def walk(rest: List[String], got: CliArgs, folder: Option[Path], port: Boolean = false): Either[String, CliArgs] =
       rest match
         case Nil if got.controller && got.session.nonEmpty => Left(s"Give --session or --controller, not both.\n$usage")
-        case Nil if port && !got.inspect                   => Left(s"Give --port only with --inspect.\n$usage")
+        case Nil if port && got.list                       => Left(s"Give --port with --inspect or a session, not with --list.\n$usage")
         case Nil
             if got.inspect &&
               (got.session.nonEmpty || got.controller || got.list || got.script || !got.memoryCalls ||

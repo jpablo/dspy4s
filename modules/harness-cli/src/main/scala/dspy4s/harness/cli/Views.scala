@@ -5,6 +5,7 @@ import dspy4s.harness.host.{CatalogRow, ContextUse, ExchangeFile, SessionFile, j
 import dspy4s.harness.kernel.{EffectId, EffectResult, Entry, GuardRule, Logged, Position, SessionId, SessionState}
 import dspy4s.harness.kernel.{GoalLoop, TurnLimit, grouped, limitLines, modeWords, sandboxLines}
 import dspy4s.harness.kernel.{unattendedLimit, unattendedUsed, waitsForPerson}
+import dspy4s.harness.inspect.Inspector
 import dspy4s.harness.sandbox.SandboxedShell
 
 import java.nio.file.Path
@@ -166,11 +167,16 @@ private def grantLines(current: SessionState): Vector[String] =
   current.grants.toVector.map(grant => (grant.lifetime.ordinal, s"  ${grant.lifetime.words}: ${callText(grant.rule)}"))
     .sorted.map(_._2)
 
-/** What the client knows apart from the journal, for `/config`: the root of the host, the base URL of the endpoint of
-  * the model, and whether the host writes the exchange file of each session (`DSPY_EXCHANGES`). An empty root or URL is
-  * not known.
+/** What the client knows apart from the journal, for `/config` and `/inspect`: the root of the host, the base URL of
+  * the endpoint of the model, whether the host writes the exchange file of each session (`DSPY_EXCHANGES`), and the
+  * port that `/inspect` tries first (`--port`). An empty root or URL is not known.
   */
-final case class ClientFacts(root: Path, endpoint: String, exchanges: Boolean) derives CanEqual
+final case class ClientFacts(
+    root       : Path,
+    endpoint   : String,
+    exchanges  : Boolean,
+    inspectPort: Int = Inspector.DefaultPort
+) derives CanEqual
 
 object ClientFacts:
   val unknown: ClientFacts = ClientFacts(Path.of(""), "", exchanges = false)

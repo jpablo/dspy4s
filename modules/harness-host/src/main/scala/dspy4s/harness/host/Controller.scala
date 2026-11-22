@@ -85,6 +85,8 @@ object Controller:
       "/reasoning off|line|short|full sets how much of the reasoning of a step the client shows.\n" +
       "/effort [LEVEL] shows the reasoning effort and its levels, or sets the effort of the next steps.\n" +
       "/show ID shows the cell ID or the call ID of the session in full.\n" +
+      "/inspect starts the inspector of the journals and the model calls, a page in the browser, and shows the link " +
+      "to the page of the session.\n" +
       "/goal shows the goal and the goal loop. /goal set TEXT sets the goal. /goal on [N] lets the session go on by " +
       "itself until its goal is met, for at most N turns with no message of the person (50 with no N). /goal off " +
       "ends the loop. In the controller, /goal on lets the reports of the sessions start turns, and it gives turns " +

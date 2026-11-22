@@ -158,6 +158,7 @@ A line that starts with `/` is a command. Each other line is a message to the se
 | `/reasoning off|line|short|full` | set how much of the reasoning of a step the client shows | The history keeps the rows that it printed. |
 | `/effort [LEVEL]` | show the reasoning effort and its levels, or set the effort of the next steps | The level must be one of the levels of the model. |
 | `/show ID` | show the cell ID or the call ID of the session in full, for example 12 or 12.0 | A cell shows its full form. A call shows all of its result. |
+| `/inspect` | start the inspector of the journals, and show the link to this session | When the port is taken, it uses the inspector of another client of the root, or a free port. [The inspector](inspector.md) tells more. |
 | `/goal` | show the goal and the goal loop | `/status` shows the same lines when the session has a goal or a loop. |
 | `/goal on [N]` | let the session go on by itself until its goal is met, at most N turns (50) | N must be 1 or more. A restart ends the loop. [Sessions](sessions.md#the-goal-loop) tells more. |
 | `/goal off` | end the goal loop | |
