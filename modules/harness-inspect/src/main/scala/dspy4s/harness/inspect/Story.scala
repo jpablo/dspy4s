@@ -417,15 +417,28 @@ object Story:
   private def firstLine(text: String, limit: Int): Option[String] =
     text.linesIterator.map(_.trim).find(_.nonEmpty).map(l => if l.length > limit then l.take(limit) + "…" else l)
 
-  /** An entry outside a turn in words, for the chat view (5.7): a title and its facts, or none for an entry that the
+  /** An entry outside a turn in words, for the chat view (5.7): the words of `words`, or none for an entry that the
     * chat leaves out. The chat leaves out the records of the harness (`ScopeRecorded` and `DerivedRead`), and an entry
     * of a turn, which comes outside a turn only on a page that starts in the middle of that turn.
     */
   private[inspect] def event(row: Row): Option[(String, String)] =
+    row.logged.toOption.map(_.entry) match
+      case Some(
+            Entry.ScopeRecorded(_, _) | Entry.DerivedRead(_, _) | Entry.Input(_, _, _) | Entry.TurnStarted |
+            Entry.StepStarted(_) | Entry.Acted(_, _, _) | Entry.EffectStarted(_, _, _) | Entry.EffectDone(_, _) |
+            Entry.Observed(_, _, _) | Entry.TurnEnded(_)
+          ) => None
+      case _ => words(row)
+
+  /** An entry in words (5.7, L30): a title and its facts, the minute first. The `NOTE` rows of the trajectory and the
+    * lines of the chat use these words. A `DerivedRead` has none, so it has no row.
+    */
+  private[inspect] def words(row: Row): Option[(String, String)] =
     row.logged match
       case Left(_)       => Some(("A row that does not decode", s"#${row.seq}"))
       case Right(logged) =>
         val minute                             = Html.minute(logged.meta.atMillis)
+        def first(text: String): String        = firstLine(text, 160).getOrElse("")
         def model(choice: ModelChoice): String =
           (choice.model +: choice.options.toVector.sortBy(_._1).map {
             case ("reasoning_effort", value) => s"effort ${Prompt.words(value)}"
@@ -443,15 +456,27 @@ object Story:
           case Entry.GoalLoopEnded(why) => Some(("Goal loop ended", s"$minute · ${why.report}"))
           case Entry.JobEnded(job, end) =>
             Some(("Job", s"$minute · ${jobName(job)} ${jobStatusWords(jobStatusOf(end))}"))
-          case Entry.Granted(_, rule, life)  => Some(("Allowed", s"$minute · ${ScalaText.line(rule)} ${life.words}"))
-          case Entry.StopRequested(reason)   => Some(("Stop", s"$minute · $reason"))
-          case Entry.JobsStopRequested(_, r) => Some(("Stop of jobs", s"$minute · $r"))
-          case Entry.Ended(outcome, reason)  => Some(("Session ended", s"$minute · ${outcome.report(reason)}"))
-          case Entry.Releasing(plan)         => Some(("Release", s"$minute · ${plural(plan.size.toLong, "step")}"))
-          case Entry.Released(step)          => Some(("Released", s"$minute · ${ScalaText.line(step)}"))
-          case Entry.ScopeRecorded(_, _) | Entry.DerivedRead(_, _) | Entry.Input(_, _, _) | Entry.TurnStarted |
-              Entry.StepStarted(_) | Entry.Acted(_, _, _) | Entry.EffectStarted(_, _, _) | Entry.EffectDone(_, _) |
-              Entry.Observed(_, _, _) | Entry.TurnEnded(_) => None
+          case Entry.Granted(_, rule, life)     => Some(("Allowed", s"$minute · ${ScalaText.line(rule)} ${life.words}"))
+          case Entry.StopRequested(reason)      => Some(("Stop", s"$minute · $reason"))
+          case Entry.JobsStopRequested(_, r)    => Some(("Stop of jobs", s"$minute · $r"))
+          case Entry.Ended(outcome, reason)     => Some(("Session ended", s"$minute · ${outcome.report(reason)}"))
+          case Entry.Releasing(plan)            => Some(("Release", s"$minute · ${plural(plan.size.toLong, "step")}"))
+          case Entry.Released(step)             => Some(("Released", s"$minute · ${ScalaText.line(step)}"))
+          case Entry.ScopeRecorded(head, clean) =>
+            Some(("Scope", s"$minute · git head ${head.take(12)} · ${if clean then "no change" else "with changes"}"))
+          case Entry.Input(_, text, _)       => Some(("Message", s"$minute · ${who(row)}: ${first(text)}"))
+          case Entry.TurnStarted             => Some(("Turn started", minute))
+          case Entry.StepStarted(step)       => Some((s"Step ${step + 1}", minute))
+          case Entry.Acted(_, text, _)       => Some(("Model text", s"$minute · ${first(text)}"))
+          case Entry.EffectStarted(_, op, a) =>
+            val args = a match
+              case Json.Null => ""
+              case other     => s" ${firstLine(other.print, 80).getOrElse("")}"
+            Some(("API call", s"$minute · $op$args"))
+          case Entry.EffectDone(_, _)        => Some(("API result", s"$minute · ${first(resultWords(Some(row)))}"))
+          case Entry.Observed(_, outcome, _) => Some(("Cell output", s"$minute · ${first(outcome.words)}"))
+          case Entry.TurnEnded(outcome)      => Some(("Turn ended", s"$minute · ${first(outcome.report)}"))
+          case Entry.DerivedRead(_, _)       => None
 
   /** The words of the outcome of a cell. */
   private def outcomeWords(outcome: CellOutcome): String =
@@ -540,17 +565,17 @@ object Story:
       s"""<span class="link">$links</span></div><span class="n">${escape(duration(time))}</span>""" +
       s"""<span class="n">${escape(sum)}</span><span class="n"></span><span class="n"></span></div>"""
 
+  /** A `NOTE` row (5.7, L30): the entry in words, and the card of the entry, as the Entries view shows it, behind a
+    * click. A `DerivedRead` has no row, and a row that does not decode is a bad row.
+    */
   private def noteRow(note: Row): String =
-    note.logged.toOption.map(_.entry) match
-      case Some(Entry.DerivedRead(_, _)) => ""
-      case Some(entry)                   =>
-        val kind  = entry.productPrefix
-        val whole = ScalaText.of(entry)
-        // The Scala text has a line for each field, so the row shows it on one line, and the click shows its lines.
-        val (sum, _) = short(whole.replaceAll("\\s+", " "), 160)
-        val more     = s"""<details><summary>all</summary><pre>${escape(whole)}</pre></details>"""
-        row("NOTE", s"""<b>${escape(kind)}</b> $sum""", more, numbers(None, None))
-      case None => row("NOTE", s"The row ${note.seq} does not decode.", "", numbers(None, None), bad = true)
+    words(note).fold("") { (title, facts) =>
+      val card = note.logged.toOption.fold("")(logged =>
+        s"""<details><summary>entry</summary><div class="v-card">${EntryViews.card(logged)}</div></details>"""
+      )
+      val line = s"""<b>${escape(title)}</b> <span class="note">${escape(facts)}</span>"""
+      row("NOTE", line, card, numbers(None, None), note.logged.isLeft)
+    }
 
   /** The HTML of `items` (5.7): each item with its key. The chat view and the trajectory view show the same items, and
     * the class of the body picks the parts of each view: `c-only` for the chat and `t-only` for the trajectory.

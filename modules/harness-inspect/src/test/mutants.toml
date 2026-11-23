@@ -1,5 +1,5 @@
 # The mutants of the inspector. Each mutant breaks one rule of section 5 of docs/code-harness/OBSERVABILITY.md, and
-# laws L10 to L29 of its section 6 must kill it.
+# laws L10 to L30 of its section 6 must kill it.
 #
 # `python3 scripts/mutants/mutants.py modules/harness-inspect/src/test/mutants.toml` applies each mutant alone, runs the
 # tests of the module, and restores the code. At least one test must fail for each mutant.
@@ -1276,3 +1276,68 @@ name = "Mutant: requests: the Changes tab names the earlier call by its entry"
 file = "PromptView.scala"
 old = '''        s"""${earlier.index + 1}</a>. <a href="$whole">'''
 new = '''        s"""${earlier.after}</a>. <a href="$whole">'''
+
+# ── The notes of the trajectory (5.7, law L30) ──
+
+[[mutant]]
+name = "Mutant: notes: a NOTE row shows the Scala text of its entry"
+[[mutant.edit]]
+file = "Story.scala"
+old = '''      val line = s"""<b>${escape(title)}</b> <span class="note">${escape(facts)}</span>"""'''
+new = '''      val line = s"""<b>${escape(title)}</b> <span class="note">${escape(note.logged.fold(_ => facts, l => ScalaText.of(l.entry)))}</span>"""'''
+
+[[mutant]]
+name = "Mutant: notes: the click shows the Scala text, not the card"
+[[mutant.edit]]
+file = "Story.scala"
+old = '''<details><summary>entry</summary><div class="v-card">${EntryViews.card(logged)}</div></details>'''
+new = '''<details><summary>entry</summary><div class="v-card">${escape(ScalaText.of(logged.entry))}</div></details>'''
+
+[[mutant]]
+name = "Mutant: notes: a DerivedRead has a row"
+[[mutant.edit]]
+file = "Story.scala"
+old = '''          case Entry.DerivedRead(_, _)       => None'''
+new = '''          case Entry.DerivedRead(_, _)       => Some(("Read", minute))'''
+
+[[mutant]]
+name = "Mutant: notes: a scope with changes says no change"
+[[mutant.edit]]
+file = "Story.scala"
+old = '''${if clean then "no change" else "with changes"}'''
+new = '''${if clean then "with changes" else "no change"}'''
+
+[[mutant]]
+name = "Mutant: notes: the head of a scope is whole"
+[[mutant.edit]]
+file = "Story.scala"
+old = '''git head ${head.take(12)}'''
+new = '''git head ${head.take(40)}'''
+
+[[mutant]]
+name = "Mutant: notes: a step outside a turn has its number from 0"
+[[mutant.edit]]
+file = "Story.scala"
+old = '''          case Entry.StepStarted(step)       => Some((s"Step ${step + 1}", minute))'''
+new = '''          case Entry.StepStarted(step)       => Some((s"Step $step", minute))'''
+
+[[mutant]]
+name = "Mutant: notes: an API call with no arguments shows null"
+[[mutant.edit]]
+file = "Story.scala"
+old = '''              case Json.Null => ""'''
+new = '''              case Json.Null => " null"'''
+
+[[mutant]]
+name = "Mutant: notes: the chat shows a record of the harness"
+[[mutant.edit]]
+file = "Story.scala"
+old = '''            Entry.ScopeRecorded(_, _) | Entry.DerivedRead(_, _) | Entry.Input(_, _, _) | Entry.TurnStarted |'''
+new = '''            Entry.DerivedRead(_, _) | Entry.Input(_, _, _) | Entry.TurnStarted |'''
+
+[[mutant]]
+name = "Mutant: notes: a row that does not decode is not a bad row"
+[[mutant.edit]]
+file = "Story.scala"
+old = '''      row("NOTE", line, card, numbers(None, None), note.logged.isLeft)'''
+new = '''      row("NOTE", line, card, numbers(None, None), card.isEmpty && card.nonEmpty)'''

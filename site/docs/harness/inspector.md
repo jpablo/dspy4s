@@ -136,7 +136,7 @@ The raw files are in the `Files` menu.
 | `CALL` | an API call of the cell: the operation, the arguments and the result in short |
 | `OUTPUT` | the first line of the output of the cell; the rest is folded |
 | `MEMORY` | the summary calls of the memory, in gray, with the number of each exchange and a link to its page |
-| `NOTE` | each other entry, for example `Activated` or `StopRequested`, on one line |
+| `NOTE` | each other entry in words, for example `Session started 17:26 · gpt-6.1-terra · effort low · …` for `Activated`, or `Scope 17:30 · git head 6e4d30c4f9cc · with changes` at the end of a turn. Click `entry` to see the card of the entry, as the `Entries` view shows it. |
 
 An `HTTP` row has four columns of numbers: the time, the tokens in and out, the part of the prompt from the cache of
 the endpoint, and the tokens per second of the reply. A `CELL` or `CALL` row has its time. A row with an error has a

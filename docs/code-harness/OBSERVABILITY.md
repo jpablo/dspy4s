@@ -494,7 +494,7 @@ the colors of Scala source (5.3).
 - `MODEL`: the `Acted` of the policy calls of the step, with its text, and the reasoning behind a click.
 - `CELL`: the code and its outcome. `CALL`: an API call, with its operation, its arguments and its result in short.
   `OUTPUT`: the output of the cell, with its first lines and the rest behind a click.
-- `MEMORY`: a memory row. `NOTE`: each other entry in a step, for example `StopRequested` or `Granted`.
+- `MEMORY`: a memory row. `NOTE`: each other entry, for example `Activated`, `StopRequested` or `Granted`.
 
 An `HTTP` row has the time, the tokens in and out, the cached part of the prompt, and the tokens per second of the
 reply:
@@ -527,6 +527,20 @@ text, or with a column of links on the right. The changes:
   links each of its calls by `#N`.
 - The `SYSTEM` row has no link. Its `Settings` and `Changes` tabs name a call as `exchange N`.
 - The steps have their numbers from 1, as the status in the prompt: `StepStarted(0)` is `Step 1`.
+
+**The notes in the trajectory (2026-11-23).** A `NOTE` row showed the Scala text of its entry on one line, for
+example `Activated( versions = Versions(compiler = …`. The user asked for readable rows. The changes:
+
+- A `NOTE` row gives its entry in words (`Story.words`): a title in bold, then the minute and the facts. An entry
+  that the chat shows has the words of the chat, for example `Session started 17:26 · gpt-6.1-terra · effort low ·
+  work mode · 10 steps a turn`.
+- An entry that the chat leaves out has words too. A `ScopeRecorded` is `Scope 17:30 · git head 6e4d30c4f9cc · with
+  changes`. An entry of a turn out of its place, for example on a page that starts in the middle of a turn, has its
+  words: `Step N`, `Model text`, `API call`, `API result`, `Cell output` or `Turn ended`. A `DerivedRead` still has no
+  row.
+- The `entry` click under the line shows the card of the entry, as the Entries view shows it, in place of the Scala
+  text.
+- A row that does not decode is a bad row with the words `A row that does not decode` and its `seq`.
 
 **The follow.** When the follow of 5.2 brings new entries, the page asks for `/s/{id}/story?from={seq}`, with the first
 `seq` of its last item. It puts the items of the reply in place of its items from that `seq`. The views show the same
@@ -731,6 +745,10 @@ The inspector:
   `stream`, the error and the four numbers, and it comes before the `MODEL` row of its reply. A request of another
   predictor names it, and a failed request is a bad row. The `MODEL` row has no link and no numbers. The steps have
   their numbers from 1, and the `Changes` tab names the earlier call as `exchange N`.
+- **L30. The notes of the trajectory.** For any entry with a `NOTE` row, the row gives the title and the facts of
+  `Story.words`, escaped, and the card of the entry behind the `entry` click, and it has no Scala text of the entry.
+  A `DerivedRead` has no row. The records of the harness and the entries of a turn out of their place have their
+  words, the chat still leaves them out, and a row that does not decode is a bad row.
 - **The links to the views.** The `request` and `reply` links of a row open the page of the exchange with
   `?tab=request` and `?tab=reply`, and no row links to a raw path. `?tab=` opens the page on that view, an unknown
   tab opens the chat, and `?against=` with no tab opens the diff. The links to the exchange before and after keep

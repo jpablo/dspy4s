@@ -320,6 +320,76 @@ class StoryLaws extends ScalaCheckSuite:
     assert(html.contains("""<div class="bstep"><span class="i">3</span>"""), html)
   }
 
+  // ── L30: the notes of the trajectory ──
+
+  property("Story L30: a NOTE row gives its entry in words, with the card of the entry behind a click") {
+    forAllNoShrink(entry(text)) { e =>
+      val rows = rowsOf(Vector(e))
+      val html = Story.html(SessionId("fake-session-1"), Story.of(rows, Vector.empty), Start)
+      e match
+        // An Input alone is a message, and a TurnStarted alone is a turn, so they have no NOTE row.
+        case Entry.Input(_, _, _) | Entry.TurnStarted => ()
+        case Entry.DerivedRead(_, _)                  => assert(!html.contains("k-note"), html)
+        case _                                        =>
+          val (title, facts) = Story.words(rows.head).getOrElse(fail(s"no words for $e"))
+          val card           = rows.head.logged.fold(error => fail(error), EntryViews.card)
+          assert(
+            html.contains(
+              s"""<div class="r k-note"><span class="kind">NOTE</span><div class="sum"><b>${Html.escape(title)}""" +
+                s"""</b> <span class="note">${Html.escape(facts)}</span><details><summary>entry</summary>""" +
+                s"""<div class="v-card">$card</div></details></div>"""
+            ),
+            html
+          )
+          // The row has no Scala text of the entry.
+          assert(!html.contains(Html.escape(ScalaText.of(e))), html)
+    }
+  }
+
+  test("Story L30: the records of the harness and the entries of a turn out of their place have their words") {
+    val entries = Vector(
+      Entry.StepStarted(1),
+      Entry.Acted("FAKE-REASONING", "FAKE-TEXT\nFAKE-LINE-2", None),
+      Entry.EffectStarted(EffectId(1L, 0), "read", Json.Null),
+      Entry.EffectDone(EffectId(1L, 0), EffectResult.Error("FAKE-NO-FILE")),
+      Entry.Observed("", CellOutcome.Ok, Map.empty),
+      Entry.TurnEnded(TurnOutcome.Replied("FAKE-REPLY")),
+      Entry.ScopeRecorded("0123456789abcdef", clean = false)
+    )
+    val html                                       = Story.html(SessionId("fake-session-1"), Story.of(rowsOf(entries), Vector.empty), Start)
+    def line(i: Int, title: String, facts: String) =
+      val tail = if facts.isEmpty then "" else s" · $facts"
+      s"""<b>$title</b> <span class="note">${Html.minute(Start + i * 1000L)}$tail</span>"""
+    Vector(
+      line(0, "Step 2", ""),
+      line(1, "Model text", "FAKE-TEXT"),
+      line(2, "API call", "read"),
+      line(3, "API result", "error: FAKE-NO-FILE"),
+      line(4, "Cell output", "ok"),
+      line(5, "Turn ended", "The turn ended with a reply: FAKE-REPLY"),
+      line(6, "Scope", "git head 0123456789ab · with changes")
+    ).foreach(expected => assert(html.contains(expected), s"$expected in $html"))
+    // A row that does not decode is a bad NOTE row, with no card.
+    val bad    = Vector(SessionFile.Row(0L, required = true, "{", Left("FAKE-ERROR")))
+    val broken = Story.html(SessionId("fake-session-1"), Story.of(bad, Vector.empty), Start)
+    assert(
+      broken.contains(
+        """<div class="r k-note bad"><span class="kind">NOTE</span><div class="sum"><b>A row that does not """ +
+          """decode</b> <span class="note">#0</span></div>"""
+      ),
+      broken
+    )
+    // The first entry of the fixture is the start of the session, in the words of the chat.
+    val start = Story.html(SessionId("fake-session-1"), Story.of(rowsOf(turn), calls), Start)
+    assert(
+      start.contains(
+        s"""<b>Session started</b> <span class="note">${Html.minute(Start)} · fake-model · custom mode · """ +
+          "3 steps a turn</span>"
+      ),
+      start
+    )
+  }
+
   test("Story L23: the work line of a turn opens a short list of its steps, and the turn holds its numbers") {
     val html = Story.html(SessionId("fake-session-1"), Story.of(rowsOf(turn), calls), Start)
     assert(
