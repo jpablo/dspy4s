@@ -124,8 +124,10 @@ body.tab-chat .x-chat,body.tab-request .x-request,body.tab-reply .x-reply,body.t
 .msg summary{cursor:pointer;color:var(--muted);font-size:12.5px}
 .msg .role{font-size:11px;font-weight:600;color:var(--muted);text-transform:uppercase}
 .msg .text{white-space:pre-wrap;overflow-wrap:anywhere}
-.role-user{border-left:3px solid var(--good)}.role-assistant{border-left:3px solid var(--policy)}
-.role-tool{border-left:3px solid var(--leaf)}
+.msg .role::before{content:"";display:inline-block;width:7px;height:7px;border-radius:50%;margin-right:6px;
+vertical-align:1px;background:var(--muted)}
+.role-user .role::before{background:var(--good)}.role-assistant .role::before{background:var(--policy)}
+.role-tool .role::before{background:var(--leaf)}
 .code{font:12.5px/1.45 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;margin:4px 0;padding:8px 10px 8px 0;
 background:var(--code);border-radius:6px}
 .code .ln{display:grid;grid-template-columns:4.5em 1fr}
