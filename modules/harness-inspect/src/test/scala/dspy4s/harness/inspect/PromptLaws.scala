@@ -221,7 +221,9 @@ class PromptLaws extends munit.FunSuite:
     assert(html.contains("""data-pview="instructions">"""), html.take(600))
     assert(html.contains("""data-pview="settings" hidden>"""), html.take(600))
     assert(html.contains(s"API (${prompt.calls.size})"), html.take(600))
-    assert(html.contains("""href="/s/fake-session-1/x/x1""""), html.take(600))
+    // The row of the prompt links to no request: the HTTP row of the call links to it (L29).
+    val head = html.take(html.indexOf("</summary>"))
+    assert(!head.contains("href="), head)
     assert(!html.contains(Markup), html)
     assert(html.contains(Html.escape(Markup)), html)
     // A field of another name shows its text, escaped.
@@ -371,6 +373,8 @@ class PromptLaws extends munit.FunSuite:
     assert(html.contains("""<span class="d del">- FAKE-TASK-LINE-2</span>"""), html)
     assert(html.contains("""<span class="d add">+ FAKE-NEW-LINE</span>"""), html)
     assert(html.contains("""href="/s/fake-session-1/x/x4?against=x2""""), html)
+    // The text names the earlier call by its number, as its HTTP row does (L29).
+    assert(html.contains("""Against the prompt of <a href="/s/fake-session-1/x/x2">exchange 1</a>."""), html)
   }
 
   // ── The page ──

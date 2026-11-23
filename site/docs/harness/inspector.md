@@ -126,20 +126,21 @@ first message, with a link to the journal of each probe.
 The bar shows the totals of the turns on the page, for example `3 turns · 1 min 1 s of work · 145.2k → 3.2k tokens`.
 The raw files are in the `Files` menu.
 
-**The `Trajectory` view** opens each turn. Each step has its time and one row for each part:
+**The `Trajectory` view** opens each turn. Each step has its number from 1, its time, and one row for each part:
 
 | Row | What it shows |
 |---|---|
-| `MODEL` | a model call of the policy: the text, the reasoning (folded), and a link to the page of the exchange |
+| `HTTP` | an HTTP request to the model: its number, for example `#3`, with a link to the page of the exchange, the path, the status, `stream` for a stream, and the error. A request of another predictor names it, for example `subQuery` for `llmQuery`. A retry is a second `HTTP` row. |
+| `MODEL` | the reply of the policy as the harness reads it: the text and the reasoning (folded). It comes after its `HTTP` row. |
 | `CELL` | the first line of the code, the count of its lines, and the outcome; the whole code is folded, with the colors of Scala |
 | `CALL` | an API call of the cell: the operation, the arguments and the result in short |
 | `OUTPUT` | the first line of the output of the cell; the rest is folded |
-| `MEMORY` | the summary calls of the memory, in gray, with a link to each exchange |
-| `LLM` | another model call, for example of `llmQuery` |
+| `MEMORY` | the summary calls of the memory, in gray, with the number of each exchange and a link to its page |
 | `NOTE` | each other entry, for example `Activated` or `StopRequested`, on one line |
 
-A row has four columns of numbers: the time, the tokens in and out, the part of the prompt from the cache of the
-endpoint, and the tokens per second of the reply. A row with an error has a red kind.
+An `HTTP` row has four columns of numbers: the time, the tokens in and out, the part of the prompt from the cache of
+the endpoint, and the tokens per second of the reply. A `CELL` or `CALL` row has its time. A row with an error has a
+red kind.
 
 **The prompt.** A `SYSTEM` row shows the prompt of the policy. The `Chat` and `Trajectory` views both show it. The
 first `SYSTEM` row comes before the first turn. Another `SYSTEM` row comes before each turn whose prompt changed, for
@@ -157,7 +158,7 @@ with these tabs:
 | `Instructions` | the objective, a table of the input and output fields, and the order of the markers. Click `Raw` to see the text, with the marker lines such as `[[ ## task ## ]]` in color. |
 | `Task` | the field `task` as Markdown. Click `Raw` to see the exact text, and `Markdown` to go back. |
 | `API (N)` | each call of `object api`, with its first sentence. Click a call for its signature and its comment. The Scala source is folded. The signatures and the source have the colors of Scala. |
-| `Settings` | the call, the URL, each option, the place of the fixed fields, the size of each part, and the configuration of the last `Activated`, with its preamble in the colors of Scala |
+| `Settings` | the exchange of the request, the URL, each option, the place of the fixed fields, the size of each part, and the configuration of the last `Activated`, with its preamble in the colors of Scala |
 | `Changes` | only for a prompt that changed: the line diff of each part that changed. The box opens on this tab. |
 
 **The `Entries` view** shows the entries of the journal in the order of their `seq`, in flat rows. Turn on `Indent`
@@ -251,5 +252,8 @@ An example of `exchanges.py --width 60`, with values for this page:
 5. Go back to the page of the session, and click `Trajectory`. Above the first turn, click the `SYSTEM` row. Click
    `API` and then the call `read`. You must see `def read(path: String)(using f: Files): String`. Click `Settings`.
    You must see the model of the session and the card of `Activated`.
+
+6. In the `Trajectory` view, find `Step 1`. Its first row is an `HTTP` row with `#1`. Click `#1`. You must see the
+   page `Exchange 1 of N`, where N is the count of exchanges of the session.
 
 Next: [Code harness](index.md).

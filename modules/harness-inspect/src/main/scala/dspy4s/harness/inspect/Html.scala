@@ -202,7 +202,11 @@ text-align:center;background:var(--code)}
 .r .note,.r .link{color:var(--muted);font-size:12px}
 .r.cols{color:var(--muted);font-size:11.5px}.r.cols:hover{background:none}
 .k-model .kind{color:var(--policy)}.k-cell .kind,.k-call .kind{color:var(--warn)}.k-output .kind{color:var(--good)}
-.k-memory{color:var(--muted)}.k-memory .kind{color:var(--memory)}.k-llm .kind{color:var(--leaf)}
+.k-memory{color:var(--muted)}.k-memory .kind{color:var(--memory)}
+.k-http .kind{color:var(--muted);background:none;border:1px solid var(--line)}
+.xref{display:inline-block;font:500 11px ui-monospace,SFMono-Regular,Menlo,monospace;color:var(--accent);
+border:1px solid var(--line);border-radius:999px;padding:0 7px;text-decoration:none}
+.xref::after{content:" ↗"}.xref:hover{border-color:var(--accent)}
 .k-note .kind{color:var(--muted)}.r.bad .kind{color:var(--bad)}
 body.mode-trajectory .say{max-width:none;margin-left:0;border-radius:6px}
 .say .text.md{white-space:normal}

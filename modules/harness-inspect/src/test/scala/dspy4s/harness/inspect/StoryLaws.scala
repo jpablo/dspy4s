@@ -46,7 +46,10 @@ class StoryLaws extends ScalaCheckSuite:
       first    : Option[Long]               = None,
       status   : Long                       = 200L,
       usage    : Option[(Long, Long, Long)] = None,
-      error    : Option[String]             = None
+      error    : Option[String]             = None,
+      index    : Int                        = 0,
+      stream   : Boolean                    = false,
+      open     : Boolean                    = false
   ): Exchange =
     val request = Json.Object(
       "kind"      -> Json.String("request"),
@@ -54,7 +57,7 @@ class StoryLaws extends ScalaCheckSuite:
       "after"     -> n(after),
       "predictor" -> Json.String(predictor),
       "at"        -> n(at),
-      "stream"    -> Json.Boolean(false),
+      "stream"    -> Json.Boolean(stream),
       "body"      -> Json.String("{}"),
       "url"       -> Json.String("http://test.invalid/v1/chat/completions")
     )
@@ -68,19 +71,23 @@ class StoryLaws extends ScalaCheckSuite:
       "status" -> n(status),
       "body"   -> Json.String(body)
     ) ++ first.map("first" -> n(_)) ++ error.map("error" -> Json.String(_))
-    Exchange(0, request, Some(Json.Object(fields*)))
+    Exchange(index, request, Option.when(!open)(Json.Object(fields*)))
 
   /** The turn of the fixture, with a policy call in each step and a summary call after the output of the cell. */
   private val calls = Vector(
     exchange("x1", 3L, "policy", Start + 3000L, Start + 4200L, Some(Start + 3200L), usage = Some((1000L, 100L, 920L))),
-    exchange("x2", 7L, "compress", Start + 7000L, Start + 7500L, usage = Some((300L, 50L, 0L))),
-    exchange("x3", 8L, "policy", Start + 8000L, Start + 8600L, usage = Some((1200L, 30L, 1100L)))
+    exchange("x2", 7L, "compress", Start + 7000L, Start + 7500L, usage = Some((300L, 50L, 0L)), index = 1),
+    exchange("x3", 8L, "policy", Start + 8000L, Start + 8600L, usage = Some((1200L, 30L, 1100L)), index = 2)
   )
 
   private def turnOf(items: Vector[Item]): Turn =
     items.collectFirst { case Item.OfTurn(turn) => turn }.getOrElse(fail(s"no turn in $items"))
 
   private def seqs(rows: Vector[SessionFile.Row]): Vector[Long] = rows.map(_.seq)
+
+  /** A link of a row to the page of an exchange: the id, the number in the title, and the number in the label. */
+  private val Xref =
+    """<a class="xref" href="/s/fake-session-1/x/([^"]+)" title="Exchange (\d+): the HTTP request and its reply">#(\d+)</a>""".r
 
   // ── L23 ──
 
@@ -238,6 +245,79 @@ class StoryLaws extends ScalaCheckSuite:
     val code = Highlight.sourceHtml("""val n = api.read("notes.txt").linesIterator.size""")
     assert(code.startsWith("""<span class="t-keyword">val</span> <span class="t-def">n</span> = """), code)
     assert(html.contains(s"<details><summary>code</summary><pre>$code</pre>"), html)
+  }
+
+  // ── L29: the requests in the trajectory ──
+
+  property("Story L29: the rows link each exchange once, by its number, and the row of a prompt links none") {
+    val journal   = Gen.frequency(3 -> Gen.listOf(entry(text)).map(_.toVector), 1 -> Gen.const(turn))
+    val predictor = Gen.oneOf("policy", "compress", "merge", "shorten", "subQuery", "none")
+    val call      = Gen.zip(Gen.choose(-1L, 40L), predictor, Gen.prob(0.3))
+    val prompt    = Prompt("FAKE-INSTRUCTIONS", Vector.empty, Vector.empty, "", inSystem = true)
+    forAllNoShrink(journal, Gen.listOf(call)) { (entries, raw) =>
+      val exchanges = raw.toVector.zipWithIndex.map { case ((after, p, _), i) => exchange(s"x$i", after, p, index = i) }
+      val marks     = raw.toVector.zip(exchanges).collect { case ((_, _, true), x) =>
+        x.id -> PromptMark(x, prompt, None, None)
+      }.toMap
+      val html  = Story.html(SessionId("fake-session-1"), Story.of(rowsOf(entries), exchanges, marks), Start)
+      val links = Xref.findAllMatchIn(html).map(m => (m.group(1), m.group(2), m.group(3))).toVector
+      assertEquals(links.map(_._1).sorted, exchanges.map(_.id).sorted)
+      val numbers = exchanges.map(x => x.id -> (x.index + 1).toString).toMap
+      links.foreach((id, title, label) => assertEquals((title, label), (numbers(id), numbers(id))))
+      """(?s)<summary class="r k-system">.*?</summary>""".r.findAllIn(html).foreach(head =>
+        assert(!head.contains("href="), head)
+      )
+    }
+  }
+
+  test("Story L29: an HTTP row gives the number, the path, the status and the numbers of a request, before its reply") {
+    val failed                   = exchange("x4", 5L, "subQuery", status = 500L, error = Some("FAKE-BOOM"), index = 3, stream = true)
+    val open                     = exchange("x5", 6L, "subQuery", index = 4, open = true)
+    val html                     = Story.html(SessionId("fake-session-1"), Story.of(rowsOf(turn), calls ++ Vector(failed, open)), Start)
+    def link(id: String, k: Int) =
+      s"""<a class="xref" href="/s/fake-session-1/x/$id" title="Exchange $k: the HTTP request and its reply">#$k</a>"""
+    val first = """<div class="r k-http"><span class="kind">HTTP</span><div class="sum">""" +
+      s"""${link("x1", 1)} <span class="note">POST /v1/chat/completions · 200</span></div>""" +
+      """<span class="n">1.2 s</span><span class="n">1,000 → 100</span><span class="n">92%</span>""" +
+      """<span class="n">100 tok/s</span></div>"""
+    // The MODEL row has the text of the Acted, with no link and no numbers.
+    val model = """<div class="r k-model"><span class="kind">MODEL</span><div class="sum">Reading notes.txt.""" +
+      """<details class="reasoning"><summary>Reasoning</summary><pre>I read the file.</pre></details></div>""" +
+      """<span class="n"></span>""" * 4 + "</div>"
+    assert(html.contains(first) && html.contains(model), html)
+    assert(html.indexOf(first) < html.indexOf(model), html)
+    // A request of another predictor names it, a stream says so, and a failed request is a bad row with its error.
+    assert(
+      html.contains(
+        """<div class="r k-http bad"><span class="kind">HTTP</span><div class="sum">""" +
+          s"""${link("x4", 4)} <span class="note">subQuery · POST /v1/chat/completions · 500 · stream · """ +
+          "error: FAKE-BOOM</span></div>"
+      ),
+      html
+    )
+    assert(
+      html.contains(s"""${link(
+          "x5",
+          5
+        )} <span class="note">subQuery · POST /v1/chat/completions · no reply yet</span>"""),
+      html
+    )
+    // The memory row links its call by its number.
+    assert(
+      html.contains(s"""<div class="r k-memory"><span class="kind">MEMORY</span><div class="sum">1 compress """ +
+        s"""<span class="link">${link("x2", 2)}</span></div>"""),
+      html
+    )
+  }
+
+  test("Story L29: the steps have their numbers from 1, as the status of the prompt") {
+    val html = Story.html(SessionId("fake-session-1"), Story.of(rowsOf(turn), calls), Start)
+    // The fixture has StepStarted(1) and StepStarted(2), so the steps are 2 and 3.
+    assert(html.contains("""<div class="step-head">Step 2 · """) &&
+      html.contains("""<div class="step-head">Step 3 · """))
+    assert(!html.contains("""<div class="step-head">Step 1 · """), html)
+    assert(html.contains("""<div class="bstep"><span class="i">2</span>"""), html)
+    assert(html.contains("""<div class="bstep"><span class="i">3</span>"""), html)
   }
 
   test("Story L23: the work line of a turn opens a short list of its steps, and the turn holds its numbers") {

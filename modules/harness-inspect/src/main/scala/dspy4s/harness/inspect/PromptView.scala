@@ -29,7 +29,7 @@ object PromptView:
     val title =
       if changed then s"<b>The prompt changed:</b> ${escape(mark.changes.mkString(", "))}" else "<b>The prompt</b>"
     val head = s"""<summary class="r k-system"><span class="kind">SYSTEM</span><div class="sum">$title · """ +
-      s"""${escape(facts)} <span class="link">${link(session, mark.call)}</span></div>""" +
+      s"""${escape(facts)}</div>""" +
       """<span class="n"></span>""" * 4 + "</summary>"
     val fields = prompt.fields.map((name, value) => (s"field-$name", label(name, calls), field(name, value, calls)))
     val tabs   = (("instructions", "Instructions", instructions(prompt.instructions)) +: fields) ++
@@ -43,9 +43,6 @@ object PromptView:
       s"""<div class="pview" data-pview="${escape(key)}"${if key == first then "" else " hidden"}>$body</div>"""
     }.mkString
     s"""<details class="prompt">$head<div class="pbox">$buttons$views</div></details>"""
-
-  private def link(session: SessionId, x: Exchange): String =
-    s"""<a href="/s/${escape(session.value)}/x/${escape(x.id)}">${escape(x.predictor.getOrElse("call"))}</a>"""
 
   /** The name of the tab of a field: `API` with the count of its calls for the API reference, `Task` for the task. */
   private def label(name: String, calls: Vector[ApiCall]): String =
@@ -115,7 +112,9 @@ object PromptView:
         .flatten ++ prompt.options.map((name, value) => name -> Prompt.words(value)) ++
         Vector("fixed fields" -> place, "instructions" -> size(prompt.instructions)) ++
         prompt.fields.map((name, value) => name -> size(value))
-    val rows = s"""<dt>call</dt><dd>${link(session, mark.call)} after #${mark.call.after}</dd>""" +
+    val call =
+      s"""<a href="/s/${escape(session.value)}/x/${escape(mark.call.id)}">exchange ${mark.call.index + 1}</a>"""
+    val rows = s"""<dt>request</dt><dd>$call, after the entry #${mark.call.after}</dd>""" +
       plain.map((k, v) => s"<dt>${escape(k)}</dt><dd>${escape(v)}</dd>").mkString
     val activation = mark.activation.flatMap(_.logged.toOption).fold(
       """<p class="note">The journal has no Activated before this call.</p>"""
@@ -130,8 +129,8 @@ object PromptView:
     mark.before.fold("") { (earlier, before) =>
       val base  = s"/s/${escape(session.value)}/x"
       val whole = s"""$base/${escape(mark.call.id)}?against=${escape(earlier.id)}"""
-      val head  = s"""<p class="note">Against the prompt of the <a href="$base/${escape(earlier.id)}">policy call """ +
-        s"""after #${earlier.after}</a>. <a href="$whole">The diff of the two requests</a> also shows the memory and """ +
+      val head  = s"""<p class="note">Against the prompt of <a href="$base/${escape(earlier.id)}">exchange """ +
+        s"""${earlier.index + 1}</a>. <a href="$whole">The diff of the two requests</a> also shows the memory and """ +
         "the messages.</p>"
       head + mark.changes.map { name =>
         val lines = (p: Prompt) => p.part(name).fold(Vector.empty[String])(_.linesIterator.toVector)

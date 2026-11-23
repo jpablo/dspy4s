@@ -1,5 +1,5 @@
 # The mutants of the inspector. Each mutant breaks one rule of section 5 of docs/code-harness/OBSERVABILITY.md, and
-# laws L10 to L28 of its section 6 must kill it.
+# laws L10 to L29 of its section 6 must kill it.
 #
 # `python3 scripts/mutants/mutants.py modules/harness-inspect/src/test/mutants.toml` applies each mutant alone, runs the
 # tests of the module, and restores the code. At least one test must fail for each mutant.
@@ -1158,3 +1158,121 @@ name = "Mutant: entries: an Input row has a thick bar"
 file = "Html.scala"
 old = ".kind-Input .kind::before{background:var(--good)}"
 new = ".kind-Input{border-left:3px solid var(--good)}"
+
+# ── The requests in the trajectory (5.7, law L29) ──
+
+[[mutant]]
+name = "Mutant: requests: the row of a prompt links to its call"
+[[mutant.edit]]
+file = "PromptView.scala"
+old = '''      s"""${escape(facts)}</div>""" +'''
+new = '''      s"""${escape(facts)} <a href="/s/${escape(session.value)}/x/${escape(mark.call.id)}">call</a></div>""" +'''
+
+[[mutant]]
+name = "Mutant: requests: the MODEL row has the numbers of its last request"
+[[mutant.edit]]
+file = "Story.scala"
+old = '''acted.fold("")(_ => row("MODEL", sum, more + reasoning, numbers(None, None)))'''
+new = '''acted.fold("")(_ => row("MODEL", sum, more + reasoning, numbers(calls.lastOption.flatMap(timeOf), calls.lastOption)))'''
+
+[[mutant]]
+name = "Mutant: requests: the MODEL row comes before its requests"
+[[mutant.edit]]
+file = "Story.scala"
+old = '''          calls.map(httpRow(session, _)).mkString +
+            acted.fold("")(_ => row("MODEL", sum, more + reasoning, numbers(None, None)))'''
+new = '''          acted.fold("")(_ => row("MODEL", sum, more + reasoning, numbers(None, None))) +
+            calls.map(httpRow(session, _)).mkString'''
+
+[[mutant]]
+name = "Mutant: requests: the number of an exchange starts at 0"
+[[mutant.edit]]
+file = "Story.scala"
+old = "    val number = x.index + 1"
+new = "    val number = x.index"
+
+[[mutant]]
+name = "Mutant: requests: the title and the label of a link differ"
+[[mutant.edit]]
+file = "Story.scala"
+old = '''title="Exchange $number: the HTTP request and its reply">#$number</a>"""'''
+new = '''title="Exchange ${x.index}: the HTTP request and its reply">#$number</a>"""'''
+
+[[mutant]]
+name = "Mutant: requests: a policy request names its predictor"
+[[mutant.edit]]
+file = "Story.scala"
+old = '''      x.predictor.filterNot(_ == "policy"),'''
+new = '''      x.predictor,'''
+
+[[mutant]]
+name = "Mutant: requests: a stream does not say so"
+[[mutant.edit]]
+file = "Story.scala"
+old = '''      Option.when(x.stream)("stream"),'''
+new = '''      Option.when(x.open)("stream"),'''
+
+[[mutant]]
+name = "Mutant: requests: a request with no reply shows no status"
+[[mutant.edit]]
+file = "Story.scala"
+old = '''    val state = if x.open then "no reply yet" else'''
+new = '''    val state = if x.stream then "no reply yet" else'''
+
+[[mutant]]
+name = "Mutant: requests: the row of a request has no error"
+[[mutant.edit]]
+file = "Story.scala"
+old = '''      x.error.flatMap(firstLine(_, 120)).map(e => s"error: $e")'''
+new = '''      x.error.flatMap(firstLine(_, 120)).filter(_.isEmpty)'''
+
+[[mutant]]
+name = "Mutant: requests: a failed request is not a bad row"
+[[mutant.edit]]
+file = "Story.scala"
+old = '''      numbers(timeOf(x), Some(x)),
+      failedExchange(x)'''
+new = '''      numbers(timeOf(x), Some(x)),
+      x.open'''
+
+[[mutant]]
+name = "Mutant: requests: the row shows the whole URL"
+[[mutant.edit]]
+file = "Story.scala"
+old = '''.flatMap(u => Option(u.getRawPath))'''
+new = '''.flatMap(u => Option(u.toString))'''
+
+[[mutant]]
+name = "Mutant: requests: the memory row links its calls by their place in the row"
+[[mutant.edit]]
+file = "Story.scala"
+old = '''    val links = calls.map(xref(session, _)).mkString(" ")'''
+new = '''    val links = calls.zipWithIndex.map((x, k) => s"""<a href="/s/${escape(session.value)}/x/${escape(x.id)}">${k + 1}</a>""").mkString(" ")'''
+
+[[mutant]]
+name = "Mutant: requests: a request of a step that is not the policy has no row"
+[[mutant.edit]]
+file = "Story.scala"
+old = '''        case Part.Llm(x)        => httpRow(session, x)'''
+new = '''        case Part.Llm(x)        => escape(x.id)'''
+
+[[mutant]]
+name = "Mutant: requests: a request outside a turn has no row"
+[[mutant.edit]]
+file = "Story.scala"
+old = '''        case Item.Llm(x, _)          => httpRow(session, x)'''
+new = '''        case Item.Llm(x, _)          => escape(x.id)'''
+
+[[mutant]]
+name = "Mutant: requests: the steps have their numbers from 0"
+[[mutant.edit]]
+file = "Story.scala"
+old = '''.collect { case Entry.StepStarted(i) => i }.getOrElse(k) + 1'''
+new = '''.collect { case Entry.StepStarted(i) => i }.getOrElse(k)'''
+
+[[mutant]]
+name = "Mutant: requests: the Changes tab names the earlier call by its entry"
+[[mutant.edit]]
+file = "PromptView.scala"
+old = '''        s"""${earlier.index + 1}</a>. <a href="$whole">'''
+new = '''        s"""${earlier.after}</a>. <a href="$whole">'''

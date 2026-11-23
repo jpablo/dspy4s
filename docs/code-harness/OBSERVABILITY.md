@@ -490,13 +490,14 @@ the colors of Scala source (5.3).
 
 **The trajectory view.** Each turn is open, with one row for each part of each step:
 
-- `MODEL`: a policy call, with the text of its `Acted`, and the reasoning behind a click. It links to the page of
-  its exchange.
+- `HTTP`: an exchange, that is an HTTP request to the model and its reply. It links to the page of the exchange.
+- `MODEL`: the `Acted` of the policy calls of the step, with its text, and the reasoning behind a click.
 - `CELL`: the code and its outcome. `CALL`: an API call, with its operation, its arguments and its result in short.
   `OUTPUT`: the output of the cell, with its first lines and the rest behind a click.
 - `MEMORY`: a memory row. `NOTE`: each other entry in a step, for example `StopRequested` or `Granted`.
 
-A row has the time, the tokens in and out, the cached part of the prompt, and the tokens per second of the reply:
+An `HTTP` row has the time, the tokens in and out, the cached part of the prompt, and the tokens per second of the
+reply:
 
 - The time of a model call goes from its request to the end of its reply. The tokens per second are the completion
   tokens over the time from the first line to the end of a stream, or over the whole time of a plain reply.
@@ -504,6 +505,28 @@ A row has the time, the tokens in and out, the cached part of the prompt, and th
 - The time of a cell goes from its `Acted` to its `Observed`, and of an API call from `EffectStarted` to `EffectDone`.
 - An error is a cell whose outcome is not `Ok` or `Submitted`, an API call whose result is `Error`, or an exchange
   with an error or with a status that is not 200.
+
+**The requests in the trajectory (2026-11-23).** The user kept the table of the trajectory, with its Kind column and
+its columns of numbers. But the link of a `MODEL` row had problems:
+
+- The link came after the text of the model, so its place changed from row to row.
+- Its scope was not clear. The numbers were on the `MODEL` row, but they are the numbers of the request.
+- Its name was `policy`, the name of the predictor. Each `MODEL` row is a policy call, so the name told nothing.
+- The `SYSTEM` row of a prompt linked to the same exchange as the `MODEL` row of the first step.
+
+The user chose a request row of three mockups. The other two kept the `MODEL` row with a pill at the start of the
+text, or with a column of links on the right. The changes:
+
+- Each exchange is an `HTTP` row: `#N`, its number in the exchange file as the title of its page gives it, with a
+  link to its page and the title `Exchange N: the HTTP request and its reply`. Then the predictor when it is not
+  `policy`, `POST` and the path of the URL, the status or `no reply yet`, `stream` for a stream, and the error. The
+  four numbers are on this row, and a failed request is a bad row. A retry is a second `HTTP` row.
+- The `MODEL` row comes after the `HTTP` rows of its step. It has the text and the reasoning of the `Acted`, with no
+  link and no numbers.
+- A model call of `llmQuery` or of another predictor is an `HTTP` row, in place of the `LLM` row. The `MEMORY` row
+  links each of its calls by `#N`.
+- The `SYSTEM` row has no link. Its `Settings` and `Changes` tabs name a call as `exchange N`.
+- The steps have their numbers from 1, as the status in the prompt: `StepStarted(0)` is `Step 1`.
 
 **The follow.** When the follow of 5.2 brings new entries, the page asks for `/s/{id}/story?from={seq}`, with the first
 `seq` of its last item. It puts the items of the reply in place of its items from that `seq`. The views show the same
@@ -702,6 +725,12 @@ The inspector:
   in the value. The HTML of the fields has each name and each value, and it escapes each text. On the page of an
   exchange, the user message of a real policy request and its reply open on their fields, with the text as
   Markdown and the code in color, and the `Raw` button of each shows the exact text.
+- **L29. The requests in the trajectory.** For any journal and any exchanges, the rows of the trajectory link each
+  exchange exactly once, in an `HTTP` row or a `MEMORY` row, by `#N`, where N is its place in the exchange file from
+  1. The row of a prompt links to no exchange. An `HTTP` row gives the path of the URL, the status or `no reply yet`,
+  `stream`, the error and the four numbers, and it comes before the `MODEL` row of its reply. A request of another
+  predictor names it, and a failed request is a bad row. The `MODEL` row has no link and no numbers. The steps have
+  their numbers from 1, and the `Changes` tab names the earlier call as `exchange N`.
 - **The links to the views.** The `request` and `reply` links of a row open the page of the exchange with
   `?tab=request` and `?tab=reply`, and no row links to a raw path. `?tab=` opens the page on that view, an unknown
   tab opens the chat, and `?against=` with no tab opens the diff. The links to the exchange before and after keep

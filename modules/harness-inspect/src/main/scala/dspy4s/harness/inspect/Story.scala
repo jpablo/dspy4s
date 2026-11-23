@@ -355,8 +355,35 @@ object Story:
       else s"""<details><summary>all</summary><pre>${escape(text)}</pre></details>"""
     (escape(cut), more)
 
-  private def link(session: SessionId, x: Exchange): String =
-    s"""<a href="/s/${escape(session.value)}/x/${escape(x.id)}">${escape(x.predictor.getOrElse("call"))}</a>"""
+  /** The link of a row to the page of an exchange (L29): its number in the exchange file, as its page gives it. */
+  private[inspect] def xref(session: SessionId, x: Exchange): String =
+    val number = x.index + 1
+    s"""<a class="xref" href="/s/${escape(session.value)}/x/${escape(x.id)}" """ +
+      s"""title="Exchange $number: the HTTP request and its reply">#$number</a>"""
+
+  /** The path of a URL, or the URL when it has no path. */
+  private def pathOf(url: String): String =
+    scala.util.Try(java.net.URI(url)).toOption.flatMap(u => Option(u.getRawPath)).filter(_.nonEmpty).getOrElse(url)
+
+  /** The row of an HTTP request to a model (5.7, L29): its link, the predictor when it is not the policy, the method
+    * and the path, the status, the word `stream` for a stream, the error, and the numbers of the request.
+    */
+  private def httpRow(session: SessionId, x: Exchange): String =
+    val state = if x.open then "no reply yet" else x.status.fold("no status")(_.toString)
+    val facts = Vector(
+      x.predictor.filterNot(_ == "policy"),
+      Some(s"POST ${pathOf(x.url)}"),
+      Some(state),
+      Option.when(x.stream)("stream"),
+      x.error.flatMap(firstLine(_, 120)).map(e => s"error: $e")
+    ).flatten.mkString(" · ")
+    row(
+      "HTTP",
+      s"""${xref(session, x)} <span class="note">${escape(facts)}</span>""",
+      "",
+      numbers(timeOf(x), Some(x)),
+      failedExchange(x)
+    )
 
   private def who(row: Row): String =
     row.logged.toOption.map(_.meta.source).fold("") {
@@ -456,18 +483,9 @@ object Story:
           val reasoning   = act.map(_.reasoning).filter(_.trim.nonEmpty).fold("")(r =>
             s"""<details class="reasoning"><summary>Reasoning</summary><pre>${escape(r)}</pre></details>"""
           )
-          if calls.isEmpty then row("MODEL", sum, more + reasoning, numbers(None, None))
-          else
-            calls.zipWithIndex.map { (x, k) =>
-              val last = k == calls.size - 1
-              row(
-                "MODEL",
-                (if last then sum else "") + s""" <span class="link">${link(session, x)}</span>""",
-                if last then more + reasoning else "",
-                numbers(timeOf(x), Some(x)),
-                failedExchange(x)
-              )
-            }.mkString
+          // Each request is an HTTP row with its numbers, and the reply that the harness read is the MODEL row.
+          calls.map(httpRow(session, _)).mkString +
+            acted.fold("")(_ => row("MODEL", sum, more + reasoning, numbers(None, None)))
         case Part.Cell(acted) =>
           val code     = acted.logged.toOption.map(_.entry).collect { case Entry.Acted(_, _, Some(c)) => c }.getOrElse("")
           val output   = all.drop(i + 1).collectFirst { case Part.Output(o) => o }
@@ -507,7 +525,7 @@ object Story:
           val (sum, more) = if text.isEmpty then ("(no output)", "") else short(text)
           row("OUTPUT", s"<code>$sum</code>", more, numbers(None, None))
         case Part.Memory(calls) => memoryRow(session, calls)
-        case Part.Llm(x)        => row("LLM", link(session, x), "", numbers(timeOf(x), Some(x)), failedExchange(x))
+        case Part.Llm(x)        => httpRow(session, x)
         case Part.Note(note)    => noteRow(note)
     }.mkString
 
@@ -515,9 +533,7 @@ object Story:
     val counts = calls.groupBy(_.predictor.getOrElse("call")).toVector.sortBy(_._1)
       .map((p, xs) => s"${xs.size} $p").mkString(", ")
     val time  = calls.flatMap(timeOf).sum
-    val links = calls.zipWithIndex.map((x, k) =>
-      s"""<a href="/s/${escape(session.value)}/x/${escape(x.id)}">${k + 1}</a>"""
-    ).mkString(" ")
+    val links = calls.map(xref(session, _)).mkString(" ")
     val usage = calls.flatMap(_.usage)
     val sum   = if usage.isEmpty then "" else s"${thousands(usage.map(_._1).sum)} → ${thousands(usage.map(_._2).sum)}"
     s"""<div class="r k-memory"><span class="kind">MEMORY</span><div class="sum">${escape(counts)} """ +
@@ -560,7 +576,7 @@ object Story:
           )
           if note.isEmpty && line.isEmpty then "" else s"""$line<div class="t-only">$note</div>"""
         case Item.Memory(calls, _)   => memoryRow(session, calls)
-        case Item.Llm(x, _)          => row("LLM", link(session, x), "", numbers(timeOf(x), Some(x)), failedExchange(x))
+        case Item.Llm(x, _)          => httpRow(session, x)
         case Item.NewPrompt(mark, _) => PromptView.html(session, mark)
       // The follow keeps the item of a prompt that it already shows, so its box stays as the person left it (5.8).
       val (kind, attrs) = item match
@@ -584,8 +600,9 @@ object Story:
       end.zip(at(step.start)).map((b, a) => b - a)
     }
 
+  /** The number of a step from 1, as the status of the prompt gives it (L29): `StepStarted(0)` is step 1. */
   private def stepNumber(step: Step, k: Int): Int =
-    step.start.logged.toOption.map(_.entry).collect { case Entry.StepStarted(i) => i }.getOrElse(k)
+    step.start.logged.toOption.map(_.entry).collect { case Entry.StepStarted(i) => i }.getOrElse(k) + 1
 
   private def replied(turn: Turn): Boolean =
     turn.end.flatMap(_.logged.toOption).map(_.entry).exists {
