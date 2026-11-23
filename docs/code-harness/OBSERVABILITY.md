@@ -542,6 +542,15 @@ example `Activated( versions = Versions(compiler = …`. The user asked for read
   text.
 - A row that does not decode is a bad row with the words `A row that does not decode` and its `seq`.
 
+**The text of the model (2026-11-23).** The `MODEL` row and the list of the steps in the chat showed the text of the
+model as escaped text, so the marks of its Markdown showed, for example `**assistant model for this session**`. Now:
+
+- `Markdown.inline` gives the HTML of one line: the inline parts of a paragraph (strong, em, del, a code span, a link
+  and a bare URL) and no block. A heading mark at the start of the line goes away, and a line end is a space.
+- The `MODEL` row shows the first line of the text, cut at 160 characters, with `Markdown.inline`. Its `all` click
+  shows the whole text with `Markdown.html`. The reasoning stays plain text.
+- The list of the steps in the chat view shows the first line of the text with `Markdown.inline`.
+
 **The follow.** When the follow of 5.2 brings new entries, the page asks for `/s/{id}/story?from={seq}`, with the first
 `seq` of its last item. It puts the items of the reply in place of its items from that `seq`. The views show the same
 last 2000 entries as the Entries view.
@@ -749,6 +758,11 @@ The inspector:
   `Story.words`, escaped, and the card of the entry behind the `entry` click, and it has no Scala text of the entry.
   A `DerivedRead` has no row. The records of the harness and the entries of a turn out of their place have their
   words, the chat still leaves them out, and a row that does not decode is a bad row.
+- **L31. The text of the model.** For any text, `Markdown.inline` gives only the tags of `Markdown.Tags`, each one
+  closed, no markup from the text, and no block: no paragraph, heading, list, quote, table, fence or line break. A
+  heading mark at the start goes away. The `MODEL` row shows the first line of the text with its inline parts and
+  the whole text as Markdown behind its `all` click, and the list of the steps shows the first line with its inline
+  parts.
 - **The links to the views.** The `request` and `reply` links of a row open the page of the exchange with
   `?tab=request` and `?tab=reply`, and no row links to a raw path. `?tab=` opens the page on that view, an unknown
   tab opens the chat, and `?against=` with no tab opens the diff. The links to the exchange before and after keep

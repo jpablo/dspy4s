@@ -51,6 +51,14 @@ object Markdown:
   /** The HTML of `text`. */
   def html(text: String): String = blocks(text.replace("\r\n", "\n").split("\n", -1).toVector)
 
+  /** The HTML of `line` for a row of a view (L31): its inline parts, as in a paragraph, with no block. A heading mark
+    * at its start goes away, and a line end is a space.
+    */
+  def inline(line: String): String = spans(HeadingMark.replaceFirstIn(line.replace("\r", "").replace('\n', ' '), ""))
+
+  /** The mark of a heading at the start of a line, with its spaces. */
+  private val HeadingMark = """^ {0,3}#{1,6}\s+""".r
+
   // ── The blocks ──
 
   private val Fence   = """^ {0,3}(`{3,}|~{3,})\s*([^`\s]*)[^`]*$""".r

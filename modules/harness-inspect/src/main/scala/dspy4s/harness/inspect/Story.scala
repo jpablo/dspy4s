@@ -355,6 +355,17 @@ object Story:
       else s"""<details><summary>all</summary><pre>${escape(text)}</pre></details>"""
     (escape(cut), more)
 
+  /** A text of the model in short (L31): its first line, cut at `limit` characters, with its inline Markdown, and a
+    * click for the whole text as Markdown.
+    */
+  private def shortMarkdown(text: String, limit: Int = 160): (String, String) =
+    val first = text.linesIterator.nextOption().getOrElse("")
+    val cut   = if first.length > limit then first.take(limit) + "…" else first
+    val more  =
+      if cut == text then ""
+      else s"""<details><summary>all</summary><div class="md">${Markdown.html(text)}</div></details>"""
+    (Markdown.inline(cut), more)
+
   /** The link of a row to the page of an exchange (L29): its number in the exchange file, as its page gives it. */
   private[inspect] def xref(session: SessionId, x: Exchange): String =
     val number = x.index + 1
@@ -504,7 +515,7 @@ object Story:
         case Part.Model(calls, acted) =>
           val act         = acted.flatMap(_.logged.toOption).map(_.entry).collect { case a: Entry.Acted => a }
           val text        = act.map(_.text).getOrElse("")
-          val (sum, more) = short(text)
+          val (sum, more) = shortMarkdown(text)
           val reasoning   = act.map(_.reasoning).filter(_.trim.nonEmpty).fold("")(r =>
             s"""<details class="reasoning"><summary>Reasoning</summary><pre>${escape(r)}</pre></details>"""
           )
@@ -674,7 +685,7 @@ object Story:
       s"""<div class="bstep"><span class="i">${stepNumber(
           step,
           k
-        )}</span><span class="t">${escape(text)}$run</span>""" +
+        )}</span><span class="t">${Markdown.inline(text)}$run</span>""" +
         s"""<span class="n">${escape(times(k).fold("")(duration))}</span></div>"""
     }
     val memory = turn.parts.collect { case Part.Memory(calls) => calls }.flatten

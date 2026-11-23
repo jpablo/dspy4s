@@ -390,6 +390,28 @@ class StoryLaws extends ScalaCheckSuite:
     )
   }
 
+  // ── L31: the text of the model ──
+
+  test("Story L31: the MODEL row and the list of the steps show the Markdown of the text of the model") {
+    val text    = "I **read** the `file`.\nFAKE-LINE-2 with *em*"
+    val entries = turn.map {
+      case Entry.Acted(r, "Reading notes.txt.", c) => Entry.Acted(r, text, c)
+      case other                                   => other
+    }
+    val html  = Story.html(SessionId("fake-session-1"), Story.of(rowsOf(entries), calls), Start)
+    val first = "I <strong>read</strong> the <code>file</code>."
+    assert(
+      html.contains(
+        s"""<div class="r k-model"><span class="kind">MODEL</span><div class="sum">$first<details><summary>all""" +
+          s"""</summary><div class="md">${Markdown.html(text)}</div></details><details class="reasoning">"""
+      ),
+      html
+    )
+    assert(html.contains(s"""<span class="t">$first<span class="c">"""), html)
+    // A short text has no click.
+    assert(html.contains("""<div class="sum">notes.txt has 42 lines.<details class="reasoning">"""), html)
+  }
+
   test("Story L23: the work line of a turn opens a short list of its steps, and the turn holds its numbers") {
     val html = Story.html(SessionId("fake-session-1"), Story.of(rowsOf(turn), calls), Start)
     assert(

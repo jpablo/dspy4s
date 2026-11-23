@@ -1,5 +1,5 @@
 # The mutants of the inspector. Each mutant breaks one rule of section 5 of docs/code-harness/OBSERVABILITY.md, and
-# laws L10 to L30 of its section 6 must kill it.
+# laws L10 to L31 of its section 6 must kill it.
 #
 # `python3 scripts/mutants/mutants.py modules/harness-inspect/src/test/mutants.toml` applies each mutant alone, runs the
 # tests of the module, and restores the code. At least one test must fail for each mutant.
@@ -1341,3 +1341,47 @@ name = "Mutant: notes: a row that does not decode is not a bad row"
 file = "Story.scala"
 old = '''      row("NOTE", line, card, numbers(None, None), note.logged.isLeft)'''
 new = '''      row("NOTE", line, card, numbers(None, None), card.isEmpty && card.nonEmpty)'''
+
+# ── The text of the model in the trajectory and in the list of the steps (5.7, law L31) ──
+
+[[mutant]]
+name = "Mutant: text: a line has no inline parts"
+[[mutant.edit]]
+file = "Markdown.scala"
+old = '''  def inline(line: String): String = spans('''
+new = '''  def inline(line: String): String = escape('''
+
+[[mutant]]
+name = "Mutant: text: a line keeps its heading mark"
+[[mutant.edit]]
+file = "Markdown.scala"
+old = '''  private val HeadingMark = """^ {0,3}#{1,6}\s+""".r'''
+new = '''  private val HeadingMark = """^ {0,3}#{7}\s+""".r'''
+
+[[mutant]]
+name = "Mutant: text: a line end in a line is a break"
+[[mutant.edit]]
+file = "Markdown.scala"
+old = '''.replace('\n', ' ')'''
+new = '''.replace('\t', ' ')'''
+
+[[mutant]]
+name = "Mutant: text: the MODEL row shows the escaped text"
+[[mutant.edit]]
+file = "Story.scala"
+old = '''    (Markdown.inline(cut), more)'''
+new = '''    (escape(cut), more)'''
+
+[[mutant]]
+name = "Mutant: text: the all click of a MODEL row shows the raw text"
+[[mutant.edit]]
+file = "Story.scala"
+old = '''<details><summary>all</summary><div class="md">${Markdown.html(text)}</div></details>'''
+new = '''<details><summary>all</summary><pre>${escape(text)}</pre></details>'''
+
+[[mutant]]
+name = "Mutant: text: the list of the steps shows the escaped text"
+[[mutant.edit]]
+file = "Story.scala"
+old = '''<span class="t">${Markdown.inline(text)}$run</span>'''
+new = '''<span class="t">${escape(text)}$run</span>'''

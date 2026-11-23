@@ -131,7 +131,7 @@ The raw files are in the `Files` menu.
 | Row | What it shows |
 |---|---|
 | `HTTP` | an HTTP request to the model: its number, for example `#3`, with a link to the page of the exchange, the path, the status, `stream` for a stream, and the error. A request of another predictor names it, for example `subQuery` for `llmQuery`. A retry is a second `HTTP` row. |
-| `MODEL` | the reply of the policy as the harness reads it: the text and the reasoning (folded). It comes after its `HTTP` row. |
+| `MODEL` | the reply of the policy as the harness reads it: the first line of the text with its Markdown, for example bold and code, and the reasoning (folded). Click `all` to see the whole text as Markdown. It comes after its `HTTP` row. |
 | `CELL` | the first line of the code, the count of its lines, and the outcome; the whole code is folded, with the colors of Scala |
 | `CALL` | an API call of the cell: the operation, the arguments and the result in short |
 | `OUTPUT` | the first line of the output of the cell; the rest is folded |

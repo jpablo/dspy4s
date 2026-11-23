@@ -208,6 +208,7 @@ text-align:center;background:var(--code)}
 border:1px solid var(--line);border-radius:999px;padding:0 7px;text-decoration:none}
 .xref::after{content:" ↗"}.xref:hover{border-color:var(--accent)}
 .k-note .kind{color:var(--muted)}.r.bad .kind{color:var(--bad)}
+.k-model .sum code,.bstep .t>code{background:var(--code);padding:1px 4px;border-radius:4px;font-size:12px}
 body.mode-trajectory .say{max-width:none;margin-left:0;border-radius:6px}
 .say .text.md{white-space:normal}
 .say .meta{font-size:11.5px;color:var(--muted);margin-top:6px}

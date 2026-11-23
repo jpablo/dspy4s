@@ -104,6 +104,28 @@ class MarkdownLaws extends ScalaCheckSuite:
     }
   }
 
+  property("Markdown L31: any text gives only inline tags of the renderer as one line, each one closed") {
+    forAll(texts) { text =>
+      val line = Markdown.inline(text)
+      assertEquals(problems(line), Vector.empty, s"text: ${text.take(300)}\nhtml: ${line.take(600)}")
+      assert(!line.contains(Markup) && !line.contains("<script"), line)
+      // A line has no block: no paragraph, heading, list, quote, table or fence.
+      Vector("<p>", "<h", "<ul>", "<ol>", "<li>", "<blockquote>", "<table", "<div", "<pre", "<br>").foreach(tag =>
+        assert(!line.contains(tag), s"$tag in $line")
+      )
+    }
+  }
+
+  test("Markdown L31: a line shows its inline parts, and a heading mark at its start goes away") {
+    assertEquals(
+      Markdown.inline("I **read** the `file` and *x*, see [a](https://example.com)."),
+      "I <strong>read</strong> the <code>file</code> and <em>x</em>, see " +
+        """<a href="https://example.com" rel="noopener noreferrer" target="_blank">a</a>."""
+    )
+    assertEquals(Markdown.inline("## The answer"), "The answer")
+    assertEquals(Markdown.inline("a < b & **open"), "a &lt; b &amp; **open")
+  }
+
   test("Markdown L25: a code fence keeps each line of its code, escaped, with its language and its colors") {
     val html = Markdown.html("Before:\n\n```scala\nval x = 1 < 2 && **y**\n  indented\n```\nAfter")
     assertEquals(
