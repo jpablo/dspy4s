@@ -322,6 +322,12 @@ Four buttons select its view. A row of the tree links to the page.
     them (5.8). After the parts come the fixed fields, each behind a click: the task as Markdown, the API reference
     with the colors of Scala, and each other field as its text. The `Raw` button shows the exact text. A system
     message with no parts shows its text only.
+  - A user message, a step of the history and the reply show their fields too (2026-11-23), when their text has a
+    marker and the message has no tool call. `Framed.parse` reads the text as `FramedTurns` of the adapters writes
+    it: a lead, each field with its value, the marker `completed`, and the reminder of the output fields at the end
+    of a user message. Each field shows its name and its value: the `text` of the policy as Markdown, the `code` with
+    the colors of Scala, and each other field as its text. An empty value shows the word `empty`. The reminder is a
+    gray note, and the `Raw` button shows the exact text.
   - `Chat.read` sends the request again through `OpenAiLanguageModel` on a transport that gives the recorded status,
     headers, and body or lines. So the view and the model read a reply on one path: the same parser of the stream, the
     same assembly of the chunks and of the tool calls, and the same usage. The view copies no parser.
@@ -685,6 +691,12 @@ The inspector:
   system message splits into the instructions and the fixed fields after the marker `completed`. The Instructions tab
   of a real policy request opens on its parts, and its `Raw` button shows the text. The system message on the page
   of an exchange opens on its parts and its fixed fields, and its `Raw` button shows the exact text.
+- **L28. The fields of a message.** For a message with any lead, fields and end, `Framed.parse` gives back the lead,
+  each field with its value, the marker `completed`, and the reminder. A text with no marker has no fields. The
+  text after the marker `completed` is a part of the rest, and a reminder line right after a line of a value stays
+  in the value. The HTML of the fields has each name and each value, and it escapes each text. On the page of an
+  exchange, the user message of a real policy request and its reply open on their fields, with the text as
+  Markdown and the code in color, and the `Raw` button of each shows the exact text.
 - **The links to the views.** The `request` and `reply` links of a row open the page of the exchange with
   `?tab=request` and `?tab=reply`, and no row links to a raw path. `?tab=` opens the page on that view, an unknown
   tab opens the chat, and `?against=` with no tab opens the diff. The links to the exchange before and after keep

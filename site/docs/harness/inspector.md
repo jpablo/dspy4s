@@ -185,7 +185,7 @@ exchange, the `seq` of its entry (`after #41`), the links `earlier` and `later`,
 
 | View | What it shows |
 |---|---|
-| `Chat` | the options of the request, the tools (folded), and the messages with their roles. The system message is folded. It opens on the same parts as the `Instructions` tab, then the fixed fields (`task`, `apiReference` and `memory`), each behind a click. Click `Raw` to see the exact text. Then the reply: the reasoning (folded), the text, the tool calls, the finish reason and the tokens. |
+| `Chat` | the options of the request, the tools (folded), and the messages with their roles. The system message is folded. It opens on the same parts as the `Instructions` tab, then the fixed fields (`task`, `apiReference` and `memory`), each behind a click. Click `Raw` to see the exact text. The user messages and the reply show their fields, for example `status`, `observation`, `text` and `code`, each under its name; click `Raw` to see the exact text. Then the reply: the reasoning (folded), the text, the tool calls, the finish reason and the tokens. |
 | `Request` | the URL, the headers, the size of the body, and the body as numbered lines with indents |
 | `Reply` | the status, the end, the error and the headers, then the body. A stream has two views: `Response` (the reply put together from the chunks) and `Stream` (each raw line). |
 | `Diff` | the lines of this request against the request of the last earlier exchange of the same predictor. `Against:` selects another exchange. |

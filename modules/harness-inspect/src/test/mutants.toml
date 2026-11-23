@@ -1,5 +1,5 @@
 # The mutants of the inspector. Each mutant breaks one rule of section 5 of docs/code-harness/OBSERVABILITY.md, and
-# laws L10 to L27 of its section 6 must kill it.
+# laws L10 to L28 of its section 6 must kill it.
 #
 # `python3 scripts/mutants/mutants.py modules/harness-inspect/src/test/mutants.toml` applies each mutant alone, runs the
 # tests of the module, and restores the code. At least one test must fail for each mutant.
@@ -972,15 +972,15 @@ new = "val start = if done < 0 then -1 else -1"
 name = "Mutant: instructions: the task of the exchange page shows its raw text"
 [[mutant.edit]]
 file = "Instructions.scala"
-old = '''      case "task"         => s"""<div class="md ptask">${Markdown.html(value)}</div>"""'''
-new = '''      case "task"         => s"""<div class="md ptask">${escape(value)}</div>"""'''
+old = '''      case "task"                  => s"""<div class="md ptask">${Markdown.html(value)}</div>"""'''
+new = '''      case "task"                  => s"""<div class="md ptask">${escape(value)}</div>"""'''
 
 [[mutant]]
 name = "Mutant: instructions: a fixed field of the exchange page is not escaped"
 [[mutant.edit]]
 file = "Instructions.scala"
-old = '''      case _              => s"""<pre class="ptext">${escape(value)}</pre>"""'''
-new = '''      case _              => s"""<pre class="ptext">$value</pre>"""'''
+old = '''      case _                       => s"""<pre class="ptext">${escape(value)}</pre>"""'''
+new = '''      case _                       => s"""<pre class="ptext">$value</pre>"""'''
 
 [[mutant]]
 name = "Mutant: instructions: the exchange page shows no fixed field"
@@ -1030,3 +1030,89 @@ name = "Mutant: instructions: the first button of a box is not on"
 file = "Html.scala"
 old = '''${if i == 0 then " class=\"on\"" else ""}'''
 new = '''${if i == 1 then " class=\"on\"" else ""}'''
+
+# ── The fields of a message (5.4, law L28) ──
+
+[[mutant]]
+name = "Mutant: framed: the reminder stays in the last field"
+[[mutant.edit]]
+file = "Instructions.scala"
+old = "inner.lastIndexWhere(_.startsWith(ReminderStart))"
+new = '''inner.lastIndexWhere(_.startsWith(ReminderStart + "!"))'''
+
+[[mutant]]
+name = "Mutant: framed: a reminder line needs no blank line before it"
+[[mutant.edit]]
+file = "Instructions.scala"
+old = "(at > 0 && !inner(at - 1).isBlank)"
+new = "(at > 0 && false)"
+
+[[mutant]]
+name = "Mutant: framed: the end mark is lost"
+[[mutant.edit]]
+file = "Instructions.scala"
+old = "Framed(Instructions.trim(lines.take(first)), shown, ends.nonEmpty, rest)"
+new = "Framed(Instructions.trim(lines.take(first)), shown, ends.isEmpty, rest)"
+
+[[mutant]]
+name = "Mutant: framed: the lead is lost"
+[[mutant.edit]]
+file = "Instructions.scala"
+old = "Framed(Instructions.trim(lines.take(first)), shown, ends.nonEmpty, rest)"
+new = "Framed(Instructions.trim(lines.take(0)), shown, ends.nonEmpty, rest)"
+
+[[mutant]]
+name = "Mutant: framed: the text after the marker completed is lost"
+[[mutant.edit]]
+file = "Instructions.scala"
+old = "(reminder +: ends.map(_._2))"
+new = "(reminder +: ends.map(_ => \"\"))"
+
+[[mutant]]
+name = "Mutant: framed: an empty value shows nothing"
+[[mutant.edit]]
+file = "Instructions.scala"
+old = '''if value.isEmpty then """<div class="fempty">empty</div>"""'''
+new = '''if value.isEmpty then ""'''
+
+[[mutant]]
+name = "Mutant: framed: the code of a reply has no colors"
+[[mutant.edit]]
+file = "Instructions.scala"
+old = '''case "apiReference" | "code" =>'''
+new = '''case "apiReference" | "x"    =>'''
+
+[[mutant]]
+name = "Mutant: framed: the text of a reply shows no Markdown"
+[[mutant.edit]]
+file = "Instructions.scala"
+old = '''      case "text"                  => s"""<div class="md">${Markdown.html(value)}</div>"""'''
+new = '''      case "text"                  => s"""<div class="md">${escape(value)}</div>"""'''
+
+[[mutant]]
+name = "Mutant: framed: a user message shows no fields"
+[[mutant.edit]]
+file = "Chat.scala"
+old = "(if toolCallsOf(json).isEmpty then framed(role, all) else None).getOrElse(plain)"
+new = "(if toolCallsOf(json).nonEmpty then framed(role, all) else None).getOrElse(plain)"
+
+[[mutant]]
+name = "Mutant: framed: the reply shows no fields"
+[[mutant.edit]]
+file = "Chat.scala"
+old = '''reasoning + framed("assistant", o.text).getOrElse(plain) + calls'''
+new = '''reasoning + plain + calls'''
+
+[[mutant]]
+name = "Mutant: framed: the raw text of a message shows too"
+[[mutant.edit]]
+file = "Chat.scala"
+old = '''s"""<div class="text" data-form-view="raw" hidden>${escape(text)}</div></div>"""'''
+new = '''s"""<div class="text" data-form-view="raw">${escape(text)}</div></div>"""'''
+
+[[mutant]]
+name = "Mutant: framed: the raw text of a message is not escaped"
+[[mutant.edit]]
+file = "Chat.scala"
+old = '''s"""<div class="text" data-form-view="raw" hidden>${escape(text)}</div></div>"""'''
+new = '''s"""<div class="text" data-form-view="raw" hidden>$text</div></div>"""'''

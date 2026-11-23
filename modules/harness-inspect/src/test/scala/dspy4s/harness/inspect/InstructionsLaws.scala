@@ -7,7 +7,9 @@ import org.scalacheck.Prop.forAllNoShrink
 
 import InspectorLaws.{Markup, text}
 
-/** The laws of the parts of the instructions of a chat adapter (docs/code-harness/OBSERVABILITY.md, 5.8 and L27). */
+/** The laws of the parts of the instructions of a chat adapter, and of the fields of a message
+  * (docs/code-harness/OBSERVABILITY.md, 5.4, 5.8, L27 and L28).
+  */
 class InstructionsLaws extends ScalaCheckSuite:
 
   // ── Helpers ──
@@ -81,6 +83,35 @@ class InstructionsLaws extends ScalaCheckSuite:
       objective <- Gen.listOf(Gen.oneOf(words, Gen.const(""), words.map("  " + _))).map(_.toVector)
       rest      <- Gen.oneOf(Gen.const(""), Gen.const(PolicyAdapter.FixedHeader), words)
     yield Message(fields.take(split), fields.drop(split), noted.map(_ -> note).toMap, objective, rest)
+
+  private val Reminder = "Respond with the corresponding output fields, starting with the field `[[ ## text ## ]]`, " +
+    "then `[[ ## code ## ]]`, and then ending with the marker for `[[ ## completed ## ]]`."
+
+  private val value: Gen[String] =
+    Gen.oneOf(words, Gen.const(""), Gen.zip(words, words).map((a, b) => s"$a\n\n$b"), words.map(w => s"  $w\n$w"))
+
+  /** A message as `FramedTurns` writes it: a lead, the fields, and then the marker `completed` (`close` 1) or the
+    * reminder of the output fields (`close` 2), or neither.
+    */
+  private final case class Turn(lead: String, fields: Vector[(String, String)], close: Int):
+    def text: String =
+      val body = (Vector(lead).filter(_.nonEmpty) ++ fields.map((n, v) => s"[[ ## $n ## ]]\n$v")).mkString("\n\n")
+      close match
+        case 1 => s"$body\n\n[[ ## completed ## ]]\n"
+        case 2 => s"$body\n\n$Reminder"
+        case _ => body
+
+    def framed: Framed = Framed(lead, fields, close == 1, if close == 2 then Reminder else "")
+
+  private val turns: Gen[Turn] =
+    val pool = Vector("status", "observation", "reasoning", "text", "code", "task", "memory", "x_1")
+    for
+      size   <- Gen.choose(1, 4)
+      names  <- Gen.pick(size, pool)
+      values <- Gen.listOfN(size, value)
+      lead   <- Gen.oneOf(Gen.const(""), words)
+      close  <- Gen.choose(0, 2)
+    yield Turn(lead, names.toVector.zip(values), close)
 
   // ── L27 ──
 
@@ -163,4 +194,60 @@ class InstructionsLaws extends ScalaCheckSuite:
       s"""<pre class="ptext">${Highlight.sourceHtml("def f = 1")}</pre>"""
     )
     assertEquals(Instructions.fieldHtml("memory", Markup), s"""<pre class="ptext">${Html.escape(Markup)}</pre>""")
+  }
+
+  // ── L28: the fields of a message ──
+
+  property("Framed L28: the fields of a message give back its lead, its fields, its end mark and its reminder") {
+    forAllNoShrink(turns)(t => assertEquals(Framed.parse(t.text), Some(t.framed), t.text))
+  }
+
+  property("Framed L28: a text with no marker has no fields") {
+    forAllNoShrink(Gen.oneOf(text, words))(t => assertEquals(Framed.parse(t), None, t))
+  }
+
+  property("Framed L28: the HTML of the fields has each name and each value, escaped") {
+    forAllNoShrink(turns) { t =>
+      val html = Framed.html(t.framed)
+      t.fields.foreach { (name, value) =>
+        assert(html.contains(s"""<div class="fname"><code>$name</code></div>"""), html)
+        val shown = if value.isEmpty then """<div class="fempty">empty</div>""" else Instructions.fieldHtml(name, value)
+        assert(html.contains(shown), s"$name: $html")
+      }
+      assert(html.contains("""<div class="fend">completed</div>""") == (t.close == 1), html)
+      assert(!html.contains(Markup), html)
+    }
+  }
+
+  test("Framed L28: the HTML of a user message and of a reply") {
+    val user = Framed.parse(s"[[ ## status ## ]]\nStep 1.\n\n[[ ## observation ## ]]\nHi.\n\n$Reminder")
+      .getOrElse(fail("no fields"))
+    assertEquals(
+      Framed.html(user),
+      """<div class="field"><div class="fname"><code>status</code></div><pre class="ptext">Step 1.</pre></div>""" +
+        """<div class="field"><div class="fname"><code>observation</code></div><pre class="ptext">Hi.</pre></div>""" +
+        s"""<div class="rest">${Markdown.html(Reminder)}</div>"""
+    )
+    val reply = Framed.parse("[[ ## text ## ]]\n**Done**\n\n[[ ## code ## ]]\n\n[[ ## completed ## ]]")
+      .getOrElse(fail("no fields"))
+    assertEquals(
+      Framed.html(reply),
+      """<div class="field"><div class="fname"><code>text</code></div><div class="md"><p><strong>Done</strong></p></div>""" +
+        """</div><div class="field"><div class="fname"><code>code</code></div><div class="fempty">empty</div></div>""" +
+        """<div class="fend">completed</div>"""
+    )
+    assertEquals(
+      Instructions.fieldHtml("code", "val x = 1"),
+      s"""<pre class="ptext">${Highlight.sourceHtml("val x = 1")}</pre>"""
+    )
+    // The text after the marker completed is the rest, and a reminder line right after a line of the value stays in it.
+    assertEquals(
+      Framed.parse("[[ ## text ## ]]\nA\n\n[[ ## completed ## ]]\nFAKE-AFTER").map(_.rest),
+      Some("FAKE-AFTER")
+    )
+    val inline = s"[[ ## observation ## ]]\nA line.\n$Reminder"
+    assertEquals(
+      Framed.parse(inline).map(f => (f.fields, f.rest)),
+      Some((Vector("observation" -> s"A line.\n$Reminder"), ""))
+    )
   }

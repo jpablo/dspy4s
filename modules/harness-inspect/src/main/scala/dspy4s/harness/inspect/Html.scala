@@ -277,6 +277,10 @@ details.prompt[open]>summary .sum::before{content:"▾ "}
 .msg .parts h3{font-size:13px;margin:10px 0 4px}.msg .parts pre{max-height:36em;overflow:auto}
 .forms-bar{margin:6px 0 2px}
 details.fixed{border-top:1px solid var(--line);padding:3px 0}details.fixed>summary{cursor:pointer}
+.mhead{display:flex;gap:8px;align-items:center}
+.field{margin:6px 0}.fname{margin-bottom:2px}.fname code{color:var(--accent);font-size:11.5px;font-weight:600}
+.fempty,.fend{color:var(--muted);font-size:12px;font-style:italic}
+.framed pre{max-height:36em;overflow:auto;margin:0}
 .calls .call{border-bottom:1px solid var(--line);padding:3px 0}
 .calls .call>summary,.pbox details.source>summary{cursor:pointer}
 .calls .about{color:var(--muted)}

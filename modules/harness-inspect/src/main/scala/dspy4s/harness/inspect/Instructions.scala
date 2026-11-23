@@ -89,14 +89,15 @@ object Instructions:
     val start = if done < 0 then -1 else lines.indexWhere(Prompt.isMarker, done + 1)
     if start < 0 then (system, Vector.empty) else (trim(lines.take(start)), Prompt.sectionsOf(lines.drop(start)))
 
-  /** The view of the value of a fixed field: the task as Markdown, the API reference with the colors of Scala (L26),
-    * and each other field as its text.
+  /** The view of the value of a field: the task and the text of the policy as Markdown, the API reference and the code
+    * with the colors of Scala (L26), and each other field as its text.
     */
   def fieldHtml(name: String, value: String): String =
     name match
-      case "task"         => s"""<div class="md ptask">${Markdown.html(value)}</div>"""
-      case "apiReference" => s"""<pre class="ptext">${Highlight.sourceHtml(value)}</pre>"""
-      case _              => s"""<pre class="ptext">${escape(value)}</pre>"""
+      case "task"                  => s"""<div class="md ptask">${Markdown.html(value)}</div>"""
+      case "text"                  => s"""<div class="md">${Markdown.html(value)}</div>"""
+      case "apiReference" | "code" => s"""<pre class="ptext">${Highlight.sourceHtml(value)}</pre>"""
+      case _                       => s"""<pre class="ptext">${escape(value)}</pre>"""
 
   /** The parts of a system message for the page of an exchange (5.4): the parts of its instructions, and then each
     * fixed field behind a click. None for a system message whose instructions have no parts.
@@ -152,5 +153,57 @@ object Instructions:
     }.mkString("""<table class="fields">""", "", "</table>")
 
   /** `lines` with no blank lines at the start and at the end, as one text. */
-  private def trim(lines: Vector[String]): String =
+  private[inspect] def trim(lines: Vector[String]): String =
     lines.dropWhile(_.isBlank).reverse.dropWhile(_.isBlank).reverse.mkString("\n")
+
+/** A message with its fields in markers, as `FramedTurns` of the adapters writes it
+  * (docs/code-harness/OBSERVABILITY.md, 5.4 and L28): a user message, a reply, or a step of the history.
+  *
+  * @param lead
+  *   the text before the first marker
+  * @param fields
+  *   each field with its value, in their order, but the marker `completed`
+  * @param completed
+  *   true when the text has the marker `completed`, the end of a reply
+  * @param rest
+  *   the reminder of the output fields at the end of a user message, and the text after the marker `completed`
+  */
+final case class Framed(lead: String, fields: Vector[(String, String)], completed: Boolean, rest: String)
+    derives CanEqual
+
+object Framed:
+
+  /** The start of the reminder of the output fields (upstream `ChatAdapter.user_message_output_requirements`). */
+  private val ReminderStart = "Respond with the corresponding output fields"
+
+  /** The fields of `text`, or none for a text with no marker. Each line of the text is in one part: the lead, a marker,
+    * a line of a value, or a line of the rest. The reminder is the last paragraph of the last field when it starts with
+    * `ReminderStart`.
+    */
+  def parse(text: String): Option[Framed] =
+    val lines = text.linesIterator.toVector
+    val first = lines.indexWhere(Prompt.isMarker)
+    Option.when(first >= 0) {
+      val (ends, fields)    = Prompt.sectionsOf(lines.drop(first)).partition(_._1 == "completed")
+      val (shown, reminder) = fields.lastOption.fold((fields, "")) { (name, value) =>
+        val inner = value.linesIterator.toVector
+        val at    = inner.lastIndexWhere(_.startsWith(ReminderStart))
+        if at < 0 || (at > 0 && !inner(at - 1).isBlank) then (fields, "")
+        else (fields.init :+ (name -> Instructions.trim(inner.take(at))), Instructions.trim(inner.drop(at)))
+      }
+      val rest = (reminder +: ends.map(_._2)).filter(_.nonEmpty).mkString("\n\n")
+      Framed(Instructions.trim(lines.take(first)), shown, ends.nonEmpty, rest)
+    }
+
+  /** The HTML of `framed`: the lead, each field with its name and the view of its value (`Instructions.fieldHtml`), the
+    * end mark, and the rest as Markdown. An empty value shows the word `empty`.
+    */
+  def html(framed: Framed): String =
+    val lead   = if framed.lead.isEmpty then "" else s"""<pre class="ptext">${escape(framed.lead)}</pre>"""
+    val fields = framed.fields.map { (name, value) =>
+      val shown = if value.isEmpty then """<div class="fempty">empty</div>""" else Instructions.fieldHtml(name, value)
+      s"""<div class="field"><div class="fname"><code>${escape(name)}</code></div>$shown</div>"""
+    }.mkString
+    val end  = if framed.completed then """<div class="fend">completed</div>""" else ""
+    val rest = if framed.rest.isEmpty then "" else s"""<div class="rest">${Markdown.html(framed.rest)}</div>"""
+    lead + fields + end + rest

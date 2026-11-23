@@ -299,6 +299,43 @@ class PromptLaws extends munit.FunSuite:
     )
   }
 
+  test("Prompt L28: the user message and the reply on the page of an exchange show their fields") {
+    val body = bodyOf(input.copy(observation = s"FAKE-OBSERVATION $Markup"))
+    val last = Json.parse(body).toOption.flatMap(Exchanges.field(_, "messages")).flatMap(_.elements.lastOption)
+      .getOrElse(fail(s"no message in $body"))
+    val user   = Chat.contentOf(last).mkString("\n")
+    val fields = Framed.parse(user).getOrElse(fail(s"no fields in $user"))
+    assertEquals(fields.fields.map(_._1), Vector("status", "observation"))
+    assert(fields.rest.startsWith("Respond with the corresponding output fields"), fields.rest)
+    val answer     = Models.policy("FAKE-DONE **ok**", Some("val n = 1"))
+    val completion = Json.Object("choices" -> Json.Array(Json.Object(
+      "index"         -> Json.Number(0),
+      "message"       -> Json.Object("role" -> Json.String("assistant"), "content" -> Json.String(answer)),
+      "finish_reason" -> Json.String("stop")
+    )))
+    val reply = Json.Object(
+      "kind"   -> Json.String("reply"),
+      "id"     -> Json.String("x1"),
+      "at"     -> Json.Number(Start + 1000L),
+      "status" -> Json.Number(200),
+      "body"   -> Json.String(completion.print),
+      "end"    -> Json.String("done")
+    )
+    val html                                              = Chat.html(exchange("x1", 3L, body).copy(reply = Some(reply)))
+    val buttons                                           = Html.forms("fields" -> "Fields", "raw" -> "Raw")
+    def framed(role: String, text: String, parts: Framed) =
+      s"""<div class="msg role-$role" data-forms><div class="mhead"><div class="role">$role</div>$buttons</div>""" +
+        s"""<div class="framed" data-form-view="fields">${Framed.html(parts)}</div>""" +
+        s"""<div class="text" data-form-view="raw" hidden>${Html.escape(text)}</div></div>"""
+    assert(html.contains(framed("user", user, fields)), html)
+    val parts = Framed.parse(answer).getOrElse(fail(s"no fields in $answer"))
+    assertEquals(parts.fields.map(_._1), Vector("reasoning", "text", "code"))
+    assert(parts.completed, parts.toString)
+    assert(html.contains(framed("assistant", answer, parts)), html)
+    assert(html.contains("<strong>ok</strong>") && html.contains("""<span class="t-keyword">val</span>"""), html)
+    assert(!html.contains(Markup), html)
+  }
+
   test("Prompt L26: the API tab gives the Scala source and each signature with the colors of Scala") {
     val tokens = Highlight.source(api)
     val prompt = promptOf(bodyOf(input))

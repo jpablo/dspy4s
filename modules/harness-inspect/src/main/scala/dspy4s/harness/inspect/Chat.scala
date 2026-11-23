@@ -90,7 +90,8 @@ object Chat:
             s"<li><code>${escape(c.name)}</code> <code>${escape(ScalaText.line(c.args))}</code></li>"
           )
             .mkString("<p>Tool calls:</p><ul>", "", "</ul>")
-      reasoning + s"""<div class="msg role-assistant"><div class="text">${escape(o.text)}</div></div>""" + calls
+      val plain = s"""<div class="msg role-assistant"><div class="text">${escape(o.text)}</div></div>"""
+      reasoning + framed("assistant", o.text).getOrElse(plain) + calls
     }
     val facts = Vector(
       reading.finish.map(f => "finish" -> f),
@@ -102,7 +103,8 @@ object Chat:
     error + output + dl
 
   /** One message of a request: its role, and its content and tool calls. A system message is folded, because the
-    * instructions of the policy are long, and the instructions of a chat adapter show their parts.
+    * instructions of the policy are long, and the instructions of a chat adapter show their parts. A message with
+    * fields in markers and no tool call shows its fields.
     */
   private def message(json: Json): String =
     val role  = text(json, "role").getOrElse("?")
@@ -121,8 +123,22 @@ object Chat:
           s"""<div class="text" data-form-view="raw" hidden>$body</div></details>"""
       )
     else
-      s"""<div class="msg role-${escape(role)}"><div class="role">${escape(role)}</div>""" +
+      val plain = s"""<div class="msg role-${escape(role)}"><div class="role">${escape(role)}</div>""" +
         s"""<div class="text">$body</div></div>"""
+      (if toolCallsOf(json).isEmpty then framed(role, all) else None).getOrElse(plain)
+
+  /** A message whose text has fields in markers (5.4, L28): a head with its role and the buttons, its fields, and the
+    * exact text behind the Raw button. None for a text with no marker.
+    */
+  private def framed(role: String, text: String): Option[String] =
+    Framed.parse(text).map { parts =>
+      s"""<div class="msg role-${escape(role)}" data-forms><div class="mhead"><div class="role">${escape(
+          role
+        )}</div>""" +
+        s"""${Html.forms("fields" -> "Fields", "raw" -> "Raw")}</div>""" +
+        s"""<div class="framed" data-form-view="fields">${Framed.html(parts)}</div>""" +
+        s"""<div class="text" data-form-view="raw" hidden>${escape(text)}</div></div>"""
+    }
 
   private def messageLines(json: Json): Vector[String] =
     val role = text(json, "role").getOrElse("?")
