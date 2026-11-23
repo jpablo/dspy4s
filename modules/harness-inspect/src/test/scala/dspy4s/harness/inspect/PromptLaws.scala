@@ -265,7 +265,7 @@ class PromptLaws extends munit.FunSuite:
         // The prompt comes after the note of `Activated` and before the turn, with the key of the turn.
         val note   = page.indexOf("""<section class="item other" data-key="0">""")
         val prompt = page.indexOf("""<section class="item prompt" data-key="1" data-prompt="x1">""")
-        val turn   = page.indexOf("""<section class="item turn" data-key="1">""")
+        val turn   = page.indexOf("""<section class="item turn" data-key="1" """)
         assert(note >= 0 && note < prompt && prompt < turn, page)
         assert(page.contains("The activation: #0"), page)
         assert(!page.contains("data-prompt=\"x2\""), page)

@@ -40,6 +40,11 @@ object Html:
   /** The time of `millis` on the clock of this machine, to the millisecond. */
   def time(millis: Long): String = clock.format(Instant.ofEpochMilli(millis))
 
+  private val minuteOf = DateTimeFormatter.ofPattern("HH:mm").withZone(ZoneId.systemDefault())
+
+  /** The hour and the minute of `millis` on the clock of this machine, for a message of the chat (5.7). */
+  def minute(millis: Long): String = minuteOf.format(Instant.ofEpochMilli(millis))
+
   /** The day and the minute of `millis` on the clock of this machine. */
   def date(millis: Long): String = day.format(Instant.ofEpochMilli(millis))
 
@@ -186,6 +191,58 @@ text-align:center;background:var(--code)}
 .k-memory{color:var(--muted)}.k-memory .kind{color:var(--memory)}.k-llm .kind{color:var(--leaf)}
 .k-note .kind{color:var(--muted)}.r.bad .kind{color:var(--bad)}
 body.mode-trajectory .say{max-width:none;margin-left:0;border-radius:6px}
+.say .text.md{white-space:normal}
+.say .meta{font-size:11.5px;color:var(--muted);margin-top:6px}
+body:not(.mode-chat) .c-only,body.mode-chat .t-only,body.mode-chat .item.quiet{display:none}
+body.mode-chat #story{max-width:780px;margin:0 auto}
+#story .item{scroll-margin-top:120px}
+body.mode-chat #story .item{margin:6px 0}
+body.mode-chat #story .item.turn{margin:22px 0 26px}
+body.mode-chat .say.person,body.mode-chat .say.other{max-width:82%;width:fit-content}
+body.mode-chat .say.person{border-radius:14px 14px 4px 14px}
+body.mode-chat .say.reply{background:none;border:none;padding:0;max-width:none}
+body.mode-chat .say.reply .who{display:none}
+body.mode-chat .say.reply.bad .text{color:var(--bad)}
+.ev{display:flex;align-items:center;gap:10px;color:var(--muted);font-size:12px;margin:12px 0}
+.ev::before,.ev::after{content:"";flex:1;min-width:24px;border-top:1px solid var(--line)}
+.ev span{max-width:85%;text-align:center;overflow-wrap:anywhere}.ev b{font-weight:600}
+.mk.ok{color:var(--good)}.mk.bad{color:var(--bad)}.mk.run{color:var(--warn)}.mk{margin-right:5px}
+body.mode-chat details.work>summary{display:inline-flex;align-items:center;list-style:none;border:1px solid var(--line);
+border-radius:7px;padding:2px 9px;background:var(--card);margin:10px 0 8px}
+body.mode-chat details.work>summary::-webkit-details-marker{display:none}
+body.mode-chat details.work>summary::before{content:"▸";margin-right:6px}
+body.mode-chat details.work[open]>summary::before{content:"▾"}
+.brief{border-left:2px solid var(--line);margin:0 0 12px 6px;padding:2px 0 2px 14px;font-size:12.5px}
+.bstep{display:grid;grid-template-columns:22px minmax(0,1fr) 56px;gap:8px;padding:3px 0;align-items:baseline}
+.bstep .i,.bstep .n{color:var(--muted);font-variant-numeric:tabular-nums}.bstep .n{text-align:right;white-space:nowrap}
+.bstep .c{display:block;color:var(--muted);font:12px ui-monospace,SFMono-Regular,Menlo,monospace;white-space:nowrap;
+overflow:hidden;text-overflow:ellipsis}
+.bstep .ok{color:var(--good)}.bstep .bad{color:var(--bad)}.bstep .run{color:var(--warn)}
+.bfoot{font-size:12px;color:var(--muted);margin-top:4px}.bfoot button{font-size:11.5px}
+body.mode-chat details.prompt>summary.r{display:flex;justify-content:center;padding:0;margin:8px 0}
+body.mode-chat details.prompt>summary.r:hover{background:none}
+body.mode-chat details.prompt>summary .kind,body.mode-chat details.prompt>summary .n{display:none}
+body.mode-chat details.prompt>summary .sum{border:1px solid var(--line);border-radius:999px;padding:1px 12px;
+background:var(--card);font-size:12px;color:var(--muted)}
+.md p{margin:0 0 8px}.md p:last-child{margin-bottom:0}
+.md code{background:var(--code);padding:1px 5px;border-radius:4px;font-size:12.5px}
+.md-code{border:1px solid var(--line);border-radius:8px;margin:6px 0 10px;background:var(--code);overflow:hidden}
+.md-code-head{display:flex;justify-content:space-between;align-items:center;padding:2px 10px;
+border-bottom:1px solid var(--line);font-size:11.5px;color:var(--muted)}
+.md-code-head button{font-size:11px;padding:0 6px}
+.md .md-code pre{margin:0;padding:8px 12px;background:none;border-radius:0;white-space:pre;overflow:auto}
+.md pre code{background:none;padding:0}
+.md ul,.md ol{margin:4px 0 8px;padding-left:22px}.md li>p{margin:0}
+.md blockquote{margin:6px 0;padding:2px 12px;border-left:3px solid var(--line);color:var(--muted)}
+.md h3,.md h4,.md h5{margin:12px 0 6px;font-size:15px}.md h4{font-size:14px}.md h5{font-size:13.5px}
+.md hr{border:none;border-top:1px solid var(--line);margin:10px 0}
+.md-table{overflow-x:auto;margin:6px 0 10px}.md table{width:auto}
+.md th,.md td{border:1px solid var(--line);padding:4px 8px}
+.md .md-link{color:var(--accent);border-bottom:1px dotted var(--accent);cursor:help}
+.files{position:relative}.files>summary{cursor:pointer;list-style:none}
+.files>summary::-webkit-details-marker{display:none}.files>summary::after{content:" ▾"}
+.files .menu{position:absolute;right:0;top:1.7em;background:var(--card);border:1px solid var(--line);border-radius:6px;
+padding:6px 10px;z-index:3;display:flex;flex-direction:column;gap:4px;white-space:nowrap}
 details.prompt>summary{list-style:none;cursor:pointer}
 details.prompt>summary::-webkit-details-marker{display:none}
 details.prompt>summary .sum::before{content:"▸ ";color:var(--muted)}
@@ -270,14 +327,47 @@ if (rows) rows.addEventListener('click', ev => {
 });
 document.querySelectorAll('input[data-hide]').forEach(c =>
   c.addEventListener('change', () => body.classList.toggle('hide-' + c.dataset.hide, !c.checked)));
-// The tabs of the box of a prompt (5.8). The follow adds new boxes, so one listener on the page serves each box.
-document.addEventListener('click', ev => {
-  const b = ev.target.closest('button[data-ptab]');
-  if (!b) return;
-  const box = b.closest('.pbox');
-  box.querySelectorAll('[data-pview]').forEach(v => { v.hidden = v.dataset.pview !== b.dataset.ptab; });
-  box.querySelectorAll('button[data-ptab]').forEach(x => x.classList.toggle('on', x === b));
+// The buttons in the items of the chat and the trajectory: the tabs of the box of a prompt (5.8), the Copy button of a
+// code block, and the button that opens a turn in the trajectory (5.7). The follow adds new items, so one listener on
+// the page serves each button.
+document.addEventListener('click', async ev => {
+  const tab = ev.target.closest('button[data-ptab]');
+  if (tab) {
+    const box = tab.closest('.pbox');
+    box.querySelectorAll('[data-pview]').forEach(v => { v.hidden = v.dataset.pview !== tab.dataset.ptab; });
+    box.querySelectorAll('button[data-ptab]').forEach(x => x.classList.toggle('on', x === tab));
+    return;
+  }
+  const copy = ev.target.closest('button[data-copy-code]');
+  if (copy) {
+    const code = copy.closest('.md-code').querySelector('pre');
+    try { await navigator.clipboard.writeText(code.textContent); copy.textContent = 'Copied'; }
+    catch (e) { copy.textContent = 'The copy failed'; }
+    setTimeout(() => { copy.textContent = 'Copy'; }, 1500);
+    return;
+  }
+  const go = ev.target.closest('button[data-goto]');
+  if (go) {
+    const item = go.closest('.item');
+    const mode = document.querySelector('button[data-mode="trajectory"]');
+    if (mode) mode.click();
+    if (item) item.scrollIntoView({block: 'start'});
+  }
 });
+// The totals of the turns on the page, in the bar (5.7): the count, the time of the work, and the tokens.
+const span = ms => ms < 1000 ? ms + ' ms' : ms < 60000 ? (ms / 1000).toFixed(1) + ' s'
+  : Math.floor(ms / 60000) + ' min ' + Math.floor(ms % 60000 / 1000) + ' s';
+const short = n => n < 1000 ? String(n) : n < 1e6 ? (n / 1e3).toFixed(1).replace(/\.0$/, '') + 'k'
+  : (n / 1e6).toFixed(1).replace(/\.0$/, '') + 'M';
+const totals = () => {
+  const out = document.getElementById('totals');
+  if (!out || !story) return;
+  const turns = [...story.querySelectorAll('.item.turn')];
+  const sum = key => turns.reduce((a, t) => a + Number(t.dataset[key] || 0), 0);
+  out.textContent = turns.length === 0 ? '' : ' · ' + turns.length + (turns.length === 1 ? ' turn' : ' turns') +
+    ' · ' + span(sum('ms')) + ' of work · ' + short(sum('in')) + ' → ' + short(sum('out')) + ' tokens';
+};
+totals();
 if (!rows || !rows.dataset.session) return;
 const follow = document.getElementById('follow');
 let last = Number(rows.dataset.last), size = Number(rows.dataset.size), busy = false;
@@ -313,6 +403,7 @@ const refreshStory = async () => {
     if (all || open.has(e.dataset.key)) e.querySelectorAll('details.work').forEach(d => { d.open = true; });
     story.appendChild(e);
   }
+  totals();
 };
 const tick = async () => {
   if (busy || !follow || !follow.checked) return;

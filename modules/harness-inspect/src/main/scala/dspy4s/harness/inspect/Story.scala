@@ -1,6 +1,7 @@
 package dspy4s.harness.inspect
 
 import dspy4s.harness.host.SessionFile.Row
+import dspy4s.harness.host.{jobName, jobStatusOf, jobStatusWords, modeName}
 import dspy4s.harness.kernel.*
 
 import zio.blocks.schema.json.Json
@@ -369,8 +370,61 @@ object Story:
 
   private def clock(row: Row): String = at(row).fold("")(Html.time)
 
-  private def say(kind: String, by: String, text: String): String =
-    s"""<div class="say $kind"><div class="who">${escape(by)}</div><div class="text">${escape(text)}</div></div>"""
+  /** A message of the chat: who wrote it, and the minute, with the time to the millisecond on a hover. `html` is the
+    * text, already as HTML, and `meta` a line under it.
+    */
+  private def say(kind: String, by: String, row: Row, html: String, meta: String = ""): String =
+    val minute = at(row).fold("")(Html.minute)
+    s"""<div class="say $kind"><div class="who" title="${escape(clock(row))}">${escape(s"$by · $minute")}</div>""" +
+      s"""<div class="text md">$html</div>""" +
+      (if meta.isEmpty then "" else s"""<div class="meta">${escape(meta)}</div>""") + "</div>"
+
+  /** A count in short: `947`, `43.7k`, `1.2M`. */
+  private[inspect] def compact(n: Long): String =
+    def one(value: Double, unit: String) =
+      val text = String.format(Locale.ROOT, "%.1f", java.lang.Double.valueOf(value)).stripSuffix(".0")
+      s"$text$unit"
+    if n < 1_000L then n.toString else if n < 1_000_000L then one(n / 1e3, "k") else one(n / 1e6, "M")
+
+  /** The first line of `text` that is not blank, cut at `limit` characters, or none. */
+  private def firstLine(text: String, limit: Int): Option[String] =
+    text.linesIterator.map(_.trim).find(_.nonEmpty).map(l => if l.length > limit then l.take(limit) + "…" else l)
+
+  /** An entry outside a turn in words, for the chat view (5.7): a title and its facts, or none for an entry that the
+    * chat leaves out. The chat leaves out the records of the harness (`ScopeRecorded` and `DerivedRead`), and an entry
+    * of a turn, which comes outside a turn only on a page that starts in the middle of that turn.
+    */
+  private[inspect] def event(row: Row): Option[(String, String)] =
+    row.logged match
+      case Left(_)       => Some(("A row that does not decode", s"#${row.seq}"))
+      case Right(logged) =>
+        val minute                             = Html.minute(logged.meta.atMillis)
+        def model(choice: ModelChoice): String =
+          (choice.model +: choice.options.toVector.sortBy(_._1).map {
+            case ("reasoning_effort", value) => s"effort ${Prompt.words(value)}"
+            case (name, value)               => s"$name ${Prompt.words(value)}"
+          }).mkString(" · ")
+        logged.entry match
+          case Entry.Activated(_, config) =>
+            val title = if row.seq == 0L then "Session started" else "Session opened again"
+            Some((title, s"$minute · ${model(config.model)} · ${modeName(config.mode)} · ${config.steps} steps a turn"))
+          case Entry.ModelChanged(choice)   => Some(("Model", s"$minute · ${model(choice)}"))
+          case Entry.GoalChanged(goal)      => Some(("Goal", s"$minute · $goal"))
+          case Entry.GoalLoopStarted(limit) => Some(("Goal loop", s"$minute · at most $limit turns with no person"))
+          case Entry.GoalChecked(check)     =>
+            Some(("Goal check", s"$minute · ${if check.met then "met" else "not met"} · ${check.reason}"))
+          case Entry.GoalLoopEnded(why) => Some(("Goal loop ended", s"$minute · ${why.report}"))
+          case Entry.JobEnded(job, end) =>
+            Some(("Job", s"$minute · ${jobName(job)} ${jobStatusWords(jobStatusOf(end))}"))
+          case Entry.Granted(_, rule, life)  => Some(("Allowed", s"$minute · ${ScalaText.line(rule)} ${life.words}"))
+          case Entry.StopRequested(reason)   => Some(("Stop", s"$minute · $reason"))
+          case Entry.JobsStopRequested(_, r) => Some(("Stop of jobs", s"$minute · $r"))
+          case Entry.Ended(outcome, reason)  => Some(("Session ended", s"$minute · ${outcome.report(reason)}"))
+          case Entry.Releasing(plan)         => Some(("Release", s"$minute · ${plural(plan.size.toLong, "step")}"))
+          case Entry.Released(step)          => Some(("Released", s"$minute · ${ScalaText.line(step)}"))
+          case Entry.ScopeRecorded(_, _) | Entry.DerivedRead(_, _) | Entry.Input(_, _, _) | Entry.TurnStarted |
+              Entry.StepStarted(_) | Entry.Acted(_, _, _) | Entry.EffectStarted(_, _, _) | Entry.EffectDone(_, _) |
+              Entry.Observed(_, _, _) | Entry.TurnEnded(_) => None
 
   /** The words of the outcome of a cell. */
   private def outcomeWords(outcome: CellOutcome): String =
@@ -482,29 +536,112 @@ object Story:
         row("NOTE", s"""<b>${escape(kind)}</b> $sum""", more, numbers(None, None))
       case None => row("NOTE", s"The row ${note.seq} does not decode.", "", numbers(None, None), bad = true)
 
-  /** The HTML of `items` (5.7): each item with its key. A turn has the message, the line of its work with its
-    * trajectory behind a click, and its end. `now` gives the time so far of a turn that runs.
+  /** The HTML of `items` (5.7): each item with its key. The chat view and the trajectory view show the same items, and
+    * the class of the body picks the parts of each view: `c-only` for the chat and `t-only` for the trajectory.
+    *
+    *   - A turn has the message, the line of its work, and its end. Behind a click, the line opens a short list of the
+    *     steps in the chat view (`brief`), and each part of each step in the trajectory view. The turn holds its time
+    *     and its tokens in `data-ms`, `data-in` and `data-out`, for the totals of the bar.
+    *   - An entry outside a turn is a line of words in the chat (`event`) and a `NOTE` row in the trajectory. An entry
+    *     with no words, the memory summaries and the other model calls outside a turn are `quiet`: only the trajectory
+    *     shows them.
+    *
+    * `now` gives the time so far of a turn that runs.
     */
   def html(session: SessionId, items: Vector[Item], now: Long): String =
     items.map { item =>
       val body = item match
-        case Item.OfTurn(turn)       => turnHtml(session, turn, now)
-        case Item.Message(row)       => say("other", s"${who(row)} · ${clock(row)}", messageText(row))
-        case Item.Note(row)          => noteRow(row)
+        case Item.OfTurn(turn) => turnHtml(session, turn, now)
+        case Item.Message(row) => say("other", who(row), row, Markdown.html(messageText(row)))
+        case Item.Note(row)    =>
+          val note = noteRow(row)
+          val line = event(row).fold("")((title, facts) =>
+            s"""<div class="ev c-only"><span><b>${escape(title)}</b> ${escape(facts)}</span></div>"""
+          )
+          if note.isEmpty && line.isEmpty then "" else s"""$line<div class="t-only">$note</div>"""
         case Item.Memory(calls, _)   => memoryRow(session, calls)
         case Item.Llm(x, _)          => row("LLM", link(session, x), "", numbers(timeOf(x), Some(x)), failedExchange(x))
         case Item.NewPrompt(mark, _) => PromptView.html(session, mark)
       // The follow keeps the item of a prompt that it already shows, so its box stays as the person left it (5.8).
       val (kind, attrs) = item match
-        case Item.OfTurn(_)          => ("turn", "")
-        case Item.Message(_)         => ("message", "")
-        case Item.NewPrompt(mark, _) => ("prompt", s""" data-prompt="${escape(mark.call.id)}"""")
-        case _                       => ("other", "")
+        case Item.OfTurn(turn) =>
+          val s = summary(turn)
+          ("turn", s""" data-ms="${s.millis.getOrElse(0L)}" data-in="${s.prompt}" data-out="${s.completion}"""")
+        case Item.Message(_)                        => ("message", "")
+        case Item.NewPrompt(mark, _)                => ("prompt", s""" data-prompt="${escape(mark.call.id)}"""")
+        case Item.Note(row) if event(row).isDefined => ("other", "")
+        case _                                      => ("other quiet", "")
       if body.isEmpty then "" else s"""<section class="item $kind" data-key="${item.key}"$attrs>$body</section>"""
     }.mkString
 
   private def messageText(row: Row): String =
     row.logged.toOption.map(_.entry).collect { case Entry.Input(_, text, _) => text }.getOrElse("")
+
+  /** The time of each step of `turn`: from its `StepStarted` to the next one, or to the end of the turn. */
+  private def stepTimes(turn: Turn): Vector[Option[Long]] =
+    turn.steps.zipWithIndex.map { (step, k) =>
+      val end = turn.steps.lift(k + 1).map(_.start).orElse(turn.end).flatMap(at)
+      end.zip(at(step.start)).map((b, a) => b - a)
+    }
+
+  private def stepNumber(step: Step, k: Int): Int =
+    step.start.logged.toOption.map(_.entry).collect { case Entry.StepStarted(i) => i }.getOrElse(k)
+
+  private def replied(turn: Turn): Boolean =
+    turn.end.flatMap(_.logged.toOption).map(_.entry).exists {
+      case Entry.TurnEnded(TurnOutcome.Replied(_)) => true
+      case _                                       => false
+    }
+
+  /** True for a turn that ended well: with a reply, or with a value of `submit`, as a child session ends a turn. */
+  private def endedWell(turn: Turn): Boolean =
+    turn.end.flatMap(_.logged.toOption).map(_.entry).exists {
+      case Entry.TurnEnded(TurnOutcome.Replied(_) | TurnOutcome.Submitted(_)) => true
+      case _                                                                  => false
+    }
+
+  /** The work of a turn in short, for the chat view (5.7): a line for each step with the text of the model, then the
+    * first line of the cell and of its output with a mark for the outcome, and the time of the step. A step with no
+    * cell at the end of a turn that replied is `The reply`. The memory summaries of the turn come in one line, with a
+    * button that opens the turn in the trajectory view.
+    */
+  private def brief(turn: Turn): String =
+    val times = stepTimes(turn)
+    val lines = turn.steps.zipWithIndex.map { (step, k) =>
+      val acted = step.parts.collectFirst { case Part.Model(_, Some(a)) => a }.flatMap(_.logged.toOption)
+        .map(_.entry).collect { case a: Entry.Acted => a }
+      val cell   = step.parts.collectFirst { case Part.Cell(a) => a }
+      val output = step.parts.collectFirst { case Part.Output(o) => o }
+      val failed = output.flatMap(outcomeOf).exists(failedOutcome) || step.parts.exists {
+        case Part.Call(_, Some(done)) => failedCall(done)
+        case _                        => false
+      }
+      val code = cell.flatMap(_.logged.toOption).map(_.entry).collect { case Entry.Acted(_, _, Some(c)) => c }
+      val out  = output.flatMap(_.logged.toOption).map(_.entry).collect { case Entry.Observed(o, _, _) => o }
+      val run  = cell.fold("") { _ =>
+        val mark =
+          if output.isEmpty then """<span class="run">…</span>"""
+          else if failed then """<span class="bad">✗</span>"""
+          else """<span class="ok">✓</span>"""
+        val result = out.flatMap(firstLine(_, 100)).fold("")(o => s" → ${escape(o)}")
+        s"""<span class="c">$mark ${escape(code.flatMap(firstLine(_, 120)).getOrElse(""))}$result</span>"""
+      }
+      val text =
+        if cell.isEmpty && k == turn.steps.size - 1 && replied(turn) then "The reply"
+        else acted.fold("Working")(a => firstLine(a.text, 200).getOrElse(""))
+      s"""<div class="bstep"><span class="i">${stepNumber(
+          step,
+          k
+        )}</span><span class="t">${escape(text)}$run</span>""" +
+        s"""<span class="n">${escape(times(k).fold("")(duration))}</span></div>"""
+    }
+    val memory = turn.parts.collect { case Part.Memory(calls) => calls }.flatten
+    val words  =
+      if memory.isEmpty then ""
+      else
+        val count = if memory.size == 1 then "1 memory summary" else s"${memory.size} memory summaries"
+        s"$count · ${duration(memory.flatMap(timeOf).sum)} · "
+    lines.mkString + s"""<div class="bfoot">${escape(words)}<button data-goto>Open in the trajectory</button></div>"""
 
   private def turnHtml(session: SessionId, turn: Turn, now: Long): String =
     val s     = summary(turn)
@@ -515,24 +652,28 @@ object Story:
       Some(plural(s.steps, "step")),
       Some(plural(s.cells, "cell")),
       Some(plural(s.calls, "call")),
-      Option.when(s.prompt + s.completion > 0L)(s"${thousands(s.prompt)} → ${thousands(s.completion)} tokens"),
+      Option.when(s.prompt + s.completion > 0L)(s"${compact(s.prompt)} → ${compact(s.completion)} tokens"),
       Option.when(s.errors > 0)(plural(s.errors, "error"))
     ).flatten.mkString(" · ")
-    val message = turn.message.fold("")(m => say("person", s"${who(m)} · ${clock(m)}", messageText(m)))
+    val bad  = turn.end.isDefined && !endedWell(turn)
+    val mark =
+      if turn.end.isEmpty then """<span class="mk run">…</span>"""
+      else if bad then """<span class="mk bad">✗</span>"""
+      else """<span class="mk ok">✓</span>"""
+    val message = turn.message.fold("")(m => say("person", who(m), m, Markdown.html(messageText(m))))
     val lead    = if turn.lead.isEmpty then "" else s"""<div class="step">${parts(session, turn.lead)}</div>"""
+    val times   = stepTimes(turn)
     val steps   = turn.steps.zipWithIndex.map { (step, k) =>
-      val end  = turn.steps.lift(k + 1).map(_.start).orElse(turn.end).flatMap(at)
-      val took = end.zip(at(step.start)).map((b, a) => b - a).fold("")(t => s" · ${duration(t)}")
-      val n    = step.start.logged.toOption.map(_.entry).collect { case Entry.StepStarted(i) => i }.getOrElse(k)
-      s"""<div class="step"><div class="step-head">Step $n · ${escape(clock(step.start))}${escape(took)}</div>""" +
-        parts(session, step.parts) + "</div>"
+      val took = times(k).fold("")(t => s" · ${duration(t)}")
+      s"""<div class="step"><div class="step-head">Step ${stepNumber(step, k)} · ${escape(clock(step.start))}""" +
+        s"""${escape(took)}</div>""" + parts(session, step.parts) + "</div>"
     }.mkString
-    val bad = turn.end.flatMap(_.logged.toOption).map(_.entry).exists {
-      case Entry.TurnEnded(TurnOutcome.Replied(_)) => false
-      case _                                       => true
+    val end = turn.end.fold(s"""<div class="say working"><div class="text">Working</div></div>""") { e =>
+      val text = e.logged.toOption.map(_.entry) match
+        case Some(Entry.TurnEnded(TurnOutcome.Replied(reply))) => Markdown.html(reply)
+        case _                                                 => s"<p>${escape(endText(turn))}</p>"
+      val meta = Vector(at(e).map(Html.minute), s.millis.map(duration)).flatten.mkString(" · ")
+      say(if bad then "reply bad" else "reply", "The reply", e, text, meta)
     }
-    val end = turn.end.fold(s"""<div class="say working"><div class="text">Working</div></div>""")(e =>
-      say(if bad then "reply bad" else "reply", s"The reply · ${clock(e)}", endText(turn))
-    )
-    s"""$message<details class="work"><summary>${escape(facts)}</summary><div class="traj">$lead$steps</div>""" +
-      s"</details>$end"
+    s"""$message<details class="work"><summary>$mark${escape(facts)}</summary>""" +
+      s"""<div class="brief c-only">${brief(turn)}</div><div class="traj t-only">$lead$steps</div></details>$end"""

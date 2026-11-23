@@ -659,3 +659,15 @@ object WorkRuntime:
       val paths = JFiles.walk(folder)
       try paths.sorted(java.util.Comparator.reverseOrder[Path]()).forEach(p => JFiles.deleteIfExists(p): Unit)
       finally paths.close()
+
+/** The name of `mode` in the footer of the CLI and in the chat of the inspector, for example `work mode`. The
+  * controller runs `Controller.mode`, which is `Mode.controller` with no `Children`. Both modes get the name
+  * `controller mode`.
+  */
+def modeName(mode: Mode): String =
+  if mode == WorkRuntime.workMode then "work mode"
+  else if mode == Mode.full then "full mode"
+  else if mode == Mode.local then "local mode"
+  else if mode == Mode.readOnly then "read-only mode"
+  else if mode == Controller.mode || mode == Mode.controller then "controller mode"
+  else "custom mode"

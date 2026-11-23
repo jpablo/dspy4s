@@ -208,6 +208,77 @@ class StoryLaws extends ScalaCheckSuite:
     assert(html.contains(Html.escape(Markup)), html)
   }
 
+  // ── The chat view of design A ──
+
+  private def sectionOf(html: String, key: Long): String =
+    val start = html.indexOf(s"""data-key="$key"""")
+    if start < 0 then fail(s"no item $key in $html")
+    else html.substring(html.lastIndexOf("<section", start), html.indexOf("</section>", start))
+
+  test(
+    "Story L23: the chat gives an entry outside a turn in words, and only the trajectory has a record of the harness"
+  ) {
+    val effort  = Map("reasoning_effort" -> Json.String("high"))
+    val entries = turn ++
+      Vector(Entry.ScopeRecorded("FAKE-HEAD", clean = true), Entry.ModelChanged(ModelChoice("FAKE-MODEL", effort)))
+    val html    = Story.html(SessionId("fake-session-1"), Story.of(rowsOf(entries), calls), Start)
+    val started = sectionOf(html, 0L)
+    assert(started.contains("""<div class="ev c-only"><span><b>Session started</b> """), started)
+    assert(started.contains(" · fake-model · custom mode · 3 steps a turn"), started)
+    assert(started.contains("""<div class="t-only">"""), started)
+    // ScopeRecorded has no words, so only the trajectory shows it.
+    val scope = sectionOf(html, 11L)
+    assert(scope.startsWith("""<section class="item other quiet""""), scope)
+    assert(!scope.contains("c-only"), scope)
+    assert(sectionOf(html, 12L).contains("<b>Model</b> ") && html.contains(" · FAKE-MODEL · effort high</span>"), html)
+  }
+
+  test("Story L23: the work line of a turn opens a short list of its steps, and the turn holds its numbers") {
+    val html = Story.html(SessionId("fake-session-1"), Story.of(rowsOf(turn), calls), Start)
+    assert(
+      html.contains("""<section class="item turn" data-key="1" data-ms="8000" data-in="2200" data-out="130">"""),
+      html
+    )
+    assert(html.contains("""<summary><span class="mk ok">✓</span>Worked 8.0 s · 2 steps · 1 cell · 1 call"""), html)
+    assert(html.contains("""<div class="brief c-only">"""), html)
+    assert(
+      html.contains(
+        """<span class="t">Reading notes.txt.<span class="c"><span class="ok">✓</span> val n = """ +
+          """api.read(&quot;notes.txt&quot;).linesIterator.size → val n: Int = 42</span></span>"""
+      ),
+      html
+    )
+    assert(html.contains("""<span class="t">The reply</span>"""), html)
+    assert(html.contains("""<div class="bfoot">1 memory summary · 500 ms · <button data-goto>"""), html)
+    assert(html.contains("""<div class="traj t-only">"""), html)
+    // A cell that failed has a ✗.
+    val failed = turn.map {
+      case Entry.Observed(o, _, w) => Entry.Observed(o, CellOutcome.Failed("FAKE-BOOM"), w)
+      case other                   => other
+    }
+    val bad = Story.html(SessionId("fake-session-1"), Story.of(rowsOf(failed), calls), Start)
+    assert(bad.contains("""<span class="c"><span class="bad">✗</span> val n = """), bad)
+  }
+
+  test("Story L23: a reply shows its Markdown, a submitted value is a good end, and a failure is a bad end") {
+    def endOf(outcome: TurnOutcome): String =
+      Story.html(
+        SessionId("fake-session-1"),
+        Story.of(rowsOf(turn.dropRight(1) :+ Entry.TurnEnded(outcome)), Vector.empty),
+        Start
+      )
+    val reply = endOf(TurnOutcome.Replied("FAKE **bold** `code`"))
+    assert(reply.contains("""<div class="text md"><p>FAKE <strong>bold</strong> <code>code</code></p></div>"""), reply)
+    val submitted = endOf(TurnOutcome.Submitted(Json.String("FAKE-VALUE")))
+    assert(submitted.contains("""<span class="mk ok">✓</span>"""), submitted)
+    assert(!submitted.contains("reply bad"), submitted)
+    val failed = endOf(TurnOutcome.Failed("FAKE-WHY"))
+    assert(
+      failed.contains("""<span class="mk bad">✗</span>""") && failed.contains("""<div class="say reply bad">"""),
+      failed
+    )
+  }
+
   test("Story L23: the page of a session opens on the chat view, has the toggle, and still holds the entries") {
     withRoot { root =>
       val (session, _) = fixture(root)
@@ -220,6 +291,9 @@ class StoryLaws extends ScalaCheckSuite:
         assert(page.contains("""<body class="mode-chat"""), page.take(2000))
         Vector("chat", "trajectory", "entries").foreach(m => assert(page.contains(s"""data-mode="$m""""), m))
         assert(page.contains("""id="story""""), page.take(2000))
+        // The bar has a place for the totals of the turns, and a menu of the raw paths.
+        assert(page.contains("""<span id="totals"></span>"""), page.take(2000))
+        assert(page.contains("""<details class="files"><summary>Files</summary><div class="menu">"""), page.take(2000))
         assert(page.contains(Html.escape(FirstMessage)), page.take(2000))
         assertEquals(seqsOf(page), turn.indices.map(_.toLong).toVector)
         val from1 = get(s"s/${session.value}/story?from=1")

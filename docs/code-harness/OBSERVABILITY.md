@@ -421,8 +421,47 @@ Each entry and each exchange is in exactly one item. A `DerivedRead` is in its s
 
 **The chat view.** For each turn, the page shows the message of the person, one line of the work, and the reply. The
 line of the work gives the time, the steps, the cells, the API calls, the tokens of the policy calls, and the errors.
-A click on the line opens the trajectory of the turn. A turn that runs shows `Working` and the time so far. An end
-that is not a reply is in words: stopped, crashed, failed with its error, no steps left, or submitted with its value.
+A turn that runs shows `Working` and the time so far. An end that is not a reply is in words: stopped, crashed, failed
+with its error, no steps left, or submitted with its value.
+
+**The chat view, design A (2026-11-22).** The user found the first chat view messy. A live session (`6921bb78`) showed
+the causes:
+
+- Each entry outside a turn was a `NOTE` row with Scala text, for example `Activated( versions = …`, and each turn
+  ended with a `ScopeRecorded` row.
+- The summary calls of the memory were rows between the turns.
+- The rows of the trajectory, with a column for the kind and four columns of numbers, came between the bubbles.
+- A reply showed its Markdown as raw text, for example the fences and `**`.
+- The line of the work was between the message and the reply, with no owner.
+- The column was on the left of a wide window, and each time had milliseconds.
+
+The user chose design A of two mockups: one column of text, as a chat client shows it. Design B added a side panel
+with the selected turn. The changes:
+
+- The chat view has a column of 780 pixels in the center. The two views show the same items, and the classes `c-only`
+  and `t-only` pick the parts of each view.
+- An entry outside a turn is one line of words between two rules (`Story.event`), for example
+  `Session started 17:26 · gpt-6.1-terra · effort low · work mode · 10 steps a turn` or `Model 17:26 · … · effort
+  high`. The trajectory view keeps its `NOTE` row. `ScopeRecorded`, `DerivedRead`, the memory summaries and the other
+  model calls outside a turn are `quiet`: only the trajectory view shows them. `modeName` gives the name of the mode,
+  as the footer of the CLI does.
+- A message and a reply show their Markdown (`Markdown.html`). A reply has no bubble, and a line under it gives its
+  minute and the time of the turn. A message gives its minute, and the time to the millisecond on a hover.
+- The line of the work has a mark: ✓ for a reply or a submitted value, ✗ for each other end, and `…` for a turn that
+  runs. The counts of tokens are short, for example `43.7k → 947`. In the chat view, a click on the line opens a short
+  list of the steps (`Story.brief`): the text of the model, the first line of the cell and of its output with ✓ or ✗,
+  and the time of the step. The list ends with the memory summaries of the turn and a button that opens the turn in
+  the trajectory view.
+- The prompt of 5.8 is a small pill in the center.
+- The bar has the totals of the turns on the page: the count, the time of the work and the tokens. The script adds them
+  from `data-ms`, `data-in` and `data-out` of each turn, also after the follow. The raw paths are in a `Files` menu.
+
+**The Markdown.** `Markdown.html` renders a subset: a code fence with its language and a `Copy` button, a heading, a
+rule, a quote, a list with a nested list, a table, a paragraph, a code span, strong, em, del, a link and a bare URL. A
+line end in a paragraph stays a line end, as in a chat. Each character of the text goes through `Html.escape`, and the
+renderer makes only the tags of `Markdown.Tags`, each one closed. Only a link to `https:`, `http:` or `mailto:` gets an
+`href`. Another link, for example a relative path of the repository, shows its text with the target in its title. An
+underscore after a letter opens no emphasis, so `snake_case` stays as it is.
 
 **The trajectory view.** Each turn is open, with one row for each part of each step:
 
@@ -588,6 +627,13 @@ The inspector:
   its `Acted`, its API calls with their ends, and its `Observed`. The numbers of a turn are the counts and the sums of
   its parts. An end that is not a reply has its words, and each text of the views is escaped. The page of a session
   opens on the chat view, and it still holds the entries. `/story?from=` gives the items from that `seq`.
+- **L25. The chat view and its Markdown.** For any text, `Markdown.html` gives only the tags of `Markdown.Tags`, each one
+  closed, no markup from the text, and an `href` only for a safe target. A code fence keeps each line, escaped, with
+  its language, and a fence with no end holds the rest of the text. Each inline part has its tag, and a mark in a word
+  or with no end stays text. The chat gives an entry outside a turn in words, and a record of the harness is `quiet`.
+  The line of the work opens a short list of the steps, with ✓ or ✗ for each cell, and the turn holds its numbers for
+  the totals. A reply shows its Markdown, a submitted value is a good end, and a failure is a bad end. The bar has the
+  totals and the `Files` menu.
 - **L24. The prompt of a session.** A real policy request of the harness, as the OpenAI client sends it, gives the
   instructions, `task` and `apiReference`, and no memory. Another memory, status or observation makes no change, and
   another task or option does. Fixed fields in the last user message come from it. The calls of the API reference of

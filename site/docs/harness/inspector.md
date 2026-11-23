@@ -99,17 +99,31 @@ first message, with a link to the journal of each probe.
 **One session, at `/s/<id>`.** The page has three views. A session with more than 2,000 entries shows only its last
 2,000, with a note in the bar. The raw `journal.jsonl` has all of them. The bar at the top has these parts:
 
-- the facts: the id, the folder, the status, and the counts of the entries and of the exchanges;
+- the facts: the id, the folder, the status, the counts of the entries and of the exchanges, and the totals of the
+  turns on the page;
 - `View:` with the buttons `Chat`, `Trajectory` and `Entries`;
 - `Follow`, on by default: each second, the page asks for the new entries and adds them;
 - in the `Entries` view only: `Entry:` with the buttons `Card`, `Scala` and `JSON` for all the rows, and `Filters`,
   with a box for each kind of entry and a box for each predictor of the exchanges;
-- `Raw:` and `Download:`, with the links `journal.jsonl` and `http.jsonl`.
+- `Files`, a menu with `Raw:` and `Download:`, and the links `journal.jsonl` and `http.jsonl`.
 
-**The `Chat` view** opens first. It shows the session as you saw it in the client: each message, one line of the work
-of its turn, and the reply. The line of the work gives the time, the steps, the cells, the API calls, the tokens of
-the model calls and the errors, for example `Worked 6.2 s · 4 steps · 3 cells · 2 calls · 20,324 → 806 tokens ·
-1 error`. A turn that runs shows `Working`. A click on the line opens the trajectory of the turn.
+**The `Chat` view** opens first. It shows the session as you saw it in the client, in one column in the center:
+
+- Your message is a bubble on the right, with its minute. Hover over the minute to see the time to the millisecond.
+- The reply has no bubble. It shows its Markdown: code blocks with a `Copy` button, inline code, bold, lists, tables
+  and links. A line under the reply gives its minute and the time of the turn.
+- Between the message and the reply, one line gives the work of the turn: a mark, the time, the steps, the cells, the
+  API calls, the tokens of the model calls and the errors, for example `✓ Worked 6.2 s · 4 steps · 3 cells · 2 calls ·
+  20.3k → 806 tokens · 1 error`. The mark is ✓ for a reply or a submitted value, ✗ for each other end, and `…` for a
+  turn that runs.
+- Click the line of the work to see one line for each step: the text of the model, the first line of its cell and of
+  the output with ✓ or ✗, and the time of the step. `Open in the trajectory` shows the turn in the `Trajectory` view.
+- A change of the session is one line of words between two rules, for example `Session started 17:26 ·
+  gpt-6.1-terra · effort low · work mode · 10 steps a turn`. The records of the harness, such as `ScopeRecorded`, and
+  the memory summaries between the turns are only in the `Trajectory` view.
+
+The bar shows the totals of the turns on the page, for example `3 turns · 1 min 1 s of work · 145.2k → 3.2k tokens`.
+The raw files are in the `Files` menu.
 
 **The `Trajectory` view** opens each turn. Each step has its time and one row for each part:
 

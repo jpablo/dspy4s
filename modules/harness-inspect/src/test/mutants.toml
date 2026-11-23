@@ -1,5 +1,5 @@
 # The mutants of the inspector. Each mutant breaks one rule of section 5 of docs/code-harness/OBSERVABILITY.md, and
-# laws L10 to L24 of its section 6 must kill it.
+# laws L10 to L25 of its section 6 must kill it.
 #
 # `python3 scripts/mutants/mutants.py modules/harness-inspect/src/test/mutants.toml` applies each mutant alone, runs the
 # tests of the module, and restores the code. At least one test must fail for each mutant.
@@ -574,8 +574,8 @@ new = "store.rows(session, 0L).map { rows =>"
 name = "Mutant: a message of the chat is not escaped"
 [[mutant.edit]]
 file = "Story.scala"
-old = '''s"""<div class="say $kind"><div class="who">${escape(by)}</div><div class="text">${escape(text)}</div></div>"""'''
-new = '''s"""<div class="say $kind"><div class="who">${escape(by)}</div><div class="text">$text</div></div>"""'''
+old = '''say("person", who(m), m, Markdown.html(messageText(m)))'''
+new = '''say("person", who(m), m, messageText(m))'''
 
 # ── The prompt of a session (5.8) ──
 
@@ -671,3 +671,82 @@ name = "Mutant: prompt: the text of a field is not escaped"
 file = "PromptView.scala"
 old = '''val text = s"""<pre class="ptext">${escape(value)}</pre>"""'''
 new = '''val text = s"""<pre class="ptext">$value</pre>"""'''
+
+# ── The chat view of design A and its Markdown (5.7) ──
+
+[[mutant]]
+name = "Mutant: chat: a character of a Markdown text is not escaped"
+[[mutant.edit]]
+file = "Markdown.scala"
+old = "              out ++= escape(c.toString)"
+new = "              out ++= c.toString"
+
+[[mutant]]
+name = "Mutant: chat: the code of a fence is not escaped"
+[[mutant.edit]]
+file = "Markdown.scala"
+old = '''s"<pre><code>${escape(body.mkString("\n"))}</code></pre></div>"'''
+new = '''s"<pre><code>${body.mkString("\n")}</code></pre></div>"'''
+
+[[mutant]]
+name = "Mutant: chat: a link to any target gets an href"
+[[mutant.edit]]
+file = "Markdown.scala"
+old = "    if safe(target) then s"
+new = "    if target.nonEmpty then s"
+
+[[mutant]]
+name = "Mutant: chat: a line end in a paragraph is a space"
+[[mutant.edit]]
+file = "Markdown.scala"
+old = '''          out ++= "<br>"'''
+new = '''          out ++= " "'''
+
+[[mutant]]
+name = "Mutant: chat: an underscore in a word opens an emphasis"
+[[mutant.edit]]
+file = "Markdown.scala"
+old = "      !(underline && text.lift(i - 1).exists(_.isLetterOrDigit))"
+new = "      !(underline && text.lift(i - 1).exists(_ == '\\u0000'))"
+
+[[mutant]]
+name = "Mutant: chat: an entry with no words shows in the chat"
+[[mutant.edit]]
+file = "Story.scala"
+old = '''        case Item.Note(row) if event(row).isDefined => ("other", "")'''
+new = '''        case Item.Note(row) if row.seq >= 0L        => ("other", "")'''
+
+[[mutant]]
+name = "Mutant: chat: a reopen is a start of the session"
+[[mutant.edit]]
+file = "Story.scala"
+old = '''val title = if row.seq == 0L then "Session started" else "Session opened again"'''
+new = '''val title = if row.seq >= 0L then "Session opened again" else "Session started"'''
+
+[[mutant]]
+name = "Mutant: chat: a submitted value is a bad end"
+[[mutant.edit]]
+file = "Story.scala"
+old = "      case Entry.TurnEnded(TurnOutcome.Replied(_) | TurnOutcome.Submitted(_)) => true"
+new = "      case Entry.TurnEnded(TurnOutcome.Replied(_))                            => true"
+
+[[mutant]]
+name = "Mutant: chat: a failed cell has a check mark in the short list"
+[[mutant.edit]]
+file = "Story.scala"
+old = '''          else if failed then """<span class="bad">✗</span>"""'''
+new = '''          else if failed && output.isEmpty then """<span class="bad">✗</span>"""'''
+
+[[mutant]]
+name = "Mutant: chat: a reply shows its raw Markdown"
+[[mutant.edit]]
+file = "Story.scala"
+old = "        case Some(Entry.TurnEnded(TurnOutcome.Replied(reply))) => Markdown.html(reply)"
+new = '''        case Some(Entry.TurnEnded(TurnOutcome.Replied(reply))) => s"<p>${escape(reply)}</p>"'''
+
+[[mutant]]
+name = "Mutant: chat: a turn holds no time for the totals"
+[[mutant.edit]]
+file = "Story.scala"
+old = '''data-ms="${s.millis.getOrElse(0L)}"'''
+new = '''data-ms="${s.steps.toLong}"'''

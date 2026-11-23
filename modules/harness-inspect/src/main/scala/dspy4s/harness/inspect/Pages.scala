@@ -59,7 +59,7 @@ object Pages:
         Some(s"""<span id="status">${escape(row.fold("")(_.status.toString))}</span>"""),
         Some(s"""<span id="count-entries">$whole</span> entries"""),
         Some(s"""<span id="count-exchanges">${all.size}</span> exchanges""")
-      ).flatten.mkString(" · ")
+      ).flatten.mkString(" · ") + """<span id="totals"></span>"""
       val base = s"/raw/${session.value}"
       val note =
         if skipped == 0 then ""
@@ -67,7 +67,9 @@ object Pages:
           s"""<span class="cut">The page shows the last <span id="count-shown">${rows.size}</span> of """ +
             s"""<span id="count-all">$whole</span> entries. <a href="$base/journal.jsonl">journal.jsonl</a> has all """ +
             "of them.</span>"
-      val raw     = Html.rawLinks(base, Vector("journal.jsonl", "http.jsonl"))
+      // The raw paths are in a menu, so the bar stays short (5.7).
+      val raw = """<details class="files"><summary>Files</summary><div class="menu">""" +
+        Html.rawLinks(base, Vector("journal.jsonl", "http.jsonl")) + "</div></details>"
       val bar     = header(title, facts, modes + controls(withPredictors = true) + note + raw)
       val prompts = promptsOf(store, session, exchanges, Long.MinValue)
       val story   = Story.html(session, Story.of(rows, exchanges, prompts), System.currentTimeMillis())
