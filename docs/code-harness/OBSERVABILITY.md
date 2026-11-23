@@ -245,6 +245,10 @@ token and a prompt of 20 to 80 KB.
   - The bar has the facts (the id, the folder, the status and the counts), a switch for the view of all the entries
     (card, Scala or JSON), the follow, the filters, and the raw paths. The filters of the kinds of entries and of the
     predictors are folded, so the bar stays short in a small window. Each entry also has its own switch.
+  - The rows are flat (2026-11-23). The user found the indent of the tree hard to read: a step and its parts moved
+    to the right, and a deep row lost its width. The `Indent` switch of the bar gives the indent again, one step for
+    a step and two for the parts of a step, and the browser keeps the choice. A row of a turn, of a message, of a
+    stop or of an exchange has a small dot of its color before its kind, in place of a thick bar on its left.
   - The page shows only the last 2,000 entries of a session (`Pages.LastEntries`), with their exchanges. In a live
     run of 2026-11-16, the page of a session with 502,350 entries filled a heap of 12 GB, and the server closed the
     connection with no reply. The store finds the last `seq` with one query, so it reads no earlier row. When the
@@ -656,7 +660,8 @@ The inspector:
   one item, and the items keep the order of the journal. A turn holds its message, and a step holds its policy calls,
   its `Acted`, its API calls with their ends, and its `Observed`. The numbers of a turn are the counts and the sums of
   its parts. An end that is not a reply has its words, and each text of the views is escaped. The page of a session
-  opens on the chat view, and it still holds the entries. `/story?from=` gives the items from that `seq`.
+  opens on the chat view, and it still holds the entries. The Entries view is flat, its `Indent` switch is off at
+  the start, and a row has a dot of its kind and no thick bar. `/story?from=` gives the items from that `seq`.
 - **L25. The chat view and its Markdown.** For any text, `Markdown.html` gives only the tags of `Markdown.Tags`, each one
   closed, no markup from the text, and an `href` only for a safe target. A code fence keeps each line, escaped, with
   its language, and a fence with no end holds the rest of the text. Each inline part has its tag, and a mark in a word

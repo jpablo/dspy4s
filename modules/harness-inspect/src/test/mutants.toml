@@ -1135,3 +1135,26 @@ old = '''  if (form) {
 '''
 new = '''  if (form) {
 '''
+
+# ── The Indent switch of the Entries view (5.2, law L23) ──
+
+[[mutant]]
+name = "Mutant: entries: the rows have the indent with no switch"
+[[mutant.edit]]
+file = "Html.scala"
+old = "body.indent .depth-1{margin-left:18px}body.indent .depth-2{margin-left:36px}"
+new = ".depth-1{margin-left:18px}.depth-2{margin-left:36px}"
+
+[[mutant]]
+name = "Mutant: entries: the page has no Indent switch"
+[[mutant.edit]]
+file = "Pages.scala"
+old = '''<input type="checkbox" id="indent"> Indent</label>'''
+new = '''<input type="checkbox" id="indent-off"> Indent</label>'''
+
+[[mutant]]
+name = "Mutant: entries: an Input row has a thick bar"
+[[mutant.edit]]
+file = "Html.scala"
+old = ".kind-Input .kind::before{background:var(--good)}"
+new = ".kind-Input{border-left:3px solid var(--good)}"

@@ -155,7 +155,9 @@ object Pages:
 
   private def controls(withPredictors: Boolean): String =
     val views = """<span class="group entries-only">Entry: <button data-view="card" class="on">Card</button>""" +
-      """<button data-view="scala">Scala</button><button data-view="json">JSON</button></span>"""
+      """<button data-view="scala">Scala</button><button data-view="json">JSON</button></span>""" +
+      // The rows are flat, and this switch gives the indent of the tree (5.2).
+      """<label class="entries-only"><input type="checkbox" id="indent"> Indent</label>"""
     val kinds = Html.kinds.map(k => s"""<label><input type="checkbox" data-hide="kind-$k" checked> $k</label>""")
       .mkString("""<div class="group">Kinds: """, "", "</div>")
     val predictors =

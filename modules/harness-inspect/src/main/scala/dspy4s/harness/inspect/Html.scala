@@ -101,9 +101,8 @@ button{font:inherit;font-size:12px;border:1px solid var(--line);background:var(-
 border-radius:5px;padding:1px 8px;cursor:pointer}
 button.on{border-color:var(--accent);color:var(--accent)}
 main{padding:8px 16px 48px;max-width:1100px}
-.row{border-left:3px solid transparent;padding:6px 10px;margin:4px 0;background:var(--card);border-radius:6px;
-border:1px solid var(--line)}
-.depth-1{margin-left:18px}.depth-2{margin-left:36px}
+.row{padding:6px 10px;margin:4px 0;background:var(--card);border-radius:6px;border:1px solid var(--line)}
+body.indent .depth-1{margin-left:18px}body.indent .depth-2{margin-left:36px}
 .meta{display:flex;flex-wrap:wrap;gap:4px 10px;align-items:baseline;color:var(--muted);font-size:12px}
 .meta .kind{font-weight:600;color:var(--fg)}
 .meta .views{margin-left:auto;display:flex;gap:4px}
@@ -156,21 +155,25 @@ pre.diff{padding:4px 0}
 .v-card .error{color:var(--bad)}
 .v-card dl{display:grid;grid-template-columns:max-content 1fr;gap:2px 12px;margin:4px 0;font-size:12.5px}
 .v-card dt{color:var(--muted)}.v-card dd{margin:0;overflow-wrap:anywhere}
-.kind-TurnStarted,.kind-TurnEnded{border-left:3px solid var(--accent)}
-.kind-Input{border-left:3px solid var(--good)}
-.kind-StopRequested,.kind-JobsStopRequested{border-left:3px solid var(--warn)}
+.meta .kind::before{content:"";display:inline-block;width:7px;height:7px;border-radius:50%;margin-right:6px;
+vertical-align:1px;background:transparent}
+.kind-TurnStarted .kind::before,.kind-TurnEnded .kind::before{background:var(--accent)}
+.kind-Input .kind::before{background:var(--good)}
+.kind-StopRequested .kind::before,.kind-JobsStopRequested .kind::before{background:var(--warn)}
 .exchange{background:var(--x)}
 .exchange .meta a.kind{color:var(--accent);text-decoration:underline;text-underline-offset:2px}
-.exchange.pred-policy{border-left:3px solid var(--policy)}
-.exchange.pred-compress,.exchange.pred-merge,.exchange.pred-shorten{border-left:3px solid var(--memory)}
-.exchange.pred-subQuery{border-left:3px solid var(--leaf)}
+.exchange.pred-policy .kind::before{background:var(--policy)}
+.exchange.pred-compress .kind::before,.exchange.pred-merge .kind::before,.exchange.pred-shorten .kind::before{
+background:var(--memory)}
+.exchange.pred-subQuery .kind::before{background:var(--leaf)}
 .exchange.open .kind::after{content:" (open)";color:var(--warn)}
 table{border-collapse:collapse;width:100%;font-size:13px}
 th,td{text-align:left;padding:6px 8px;border-bottom:1px solid var(--line);vertical-align:top}
 th{color:var(--muted);font-weight:500}
 td.first{overflow-wrap:anywhere}
 .probes{font-size:12px;color:var(--muted)}
-@media (max-width:640px){.depth-1{margin-left:8px}.depth-2{margin-left:16px}main{padding:8px 16px 40px}
+@media (max-width:640px){body.indent .depth-1{margin-left:8px}body.indent .depth-2{margin-left:16px}
+main{padding:8px 16px 40px}
 .meta .views{margin-left:0}}
 body.mode-chat #rows,body.mode-trajectory #rows,body.mode-entries #story{display:none}
 body.mode-chat .entries-only,body.mode-trajectory .entries-only{display:none}
@@ -354,6 +357,16 @@ if (rows) rows.addEventListener('click', ev => {
 });
 document.querySelectorAll('input[data-hide]').forEach(c =>
   c.addEventListener('change', () => body.classList.toggle('hide-' + c.dataset.hide, !c.checked)));
+// The Indent switch of the Entries view (5.2). The rows are flat at the start, and the browser keeps the choice.
+const indent = document.getElementById('indent');
+if (indent) {
+  try { indent.checked = localStorage.getItem('inspector.indent') === 'on'; } catch (e) { indent.checked = false; }
+  body.classList.toggle('indent', indent.checked);
+  indent.addEventListener('change', () => {
+    body.classList.toggle('indent', indent.checked);
+    try { localStorage.setItem('inspector.indent', indent.checked ? 'on' : 'off'); } catch (e) {}
+  });
+}
 // The buttons in the items of the chat and the trajectory: the tabs of the box of a prompt, the buttons that switch the
 // views of a tab or of a system message (5.8), the Copy button of a code block, and the button that opens a turn in
 // the trajectory (5.7). The follow adds new items, so one listener on the page serves each button.

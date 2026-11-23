@@ -301,6 +301,16 @@ class StoryLaws extends ScalaCheckSuite:
         // The bar has a place for the totals of the turns, and a menu of the raw paths.
         assert(page.contains("""<span id="totals"></span>"""), page.take(2000))
         assert(page.contains("""<details class="files"><summary>Files</summary><div class="menu">"""), page.take(2000))
+        // The Entries view is flat. Its Indent switch, off at the start, gives the indent of the tree, and the script
+        // keeps the choice. A row has a dot of its kind, and no thick bar.
+        assert(page.contains("""<label class="entries-only"><input type="checkbox" id="indent"> Indent</label>"""))
+        assert(
+          page.contains("body.indent .depth-1{margin-left:18px}") && !page.contains("\n.depth-1{"),
+          page.take(4000)
+        )
+        assert(!page.contains("{.depth-1{") && page.contains("body.classList.toggle('indent'"), page.take(4000))
+        assert(page.contains(".kind-Input .kind::before{background:var(--good)}"), page.take(4000))
+        assert(!page.contains("border-left:3px solid var(--good)"), page.take(4000))
         assert(page.contains(Html.escape(FirstMessage)), page.take(2000))
         assertEquals(seqsOf(page), turn.indices.map(_.toLong).toVector)
         val from1 = get(s"s/${session.value}/story?from=1")

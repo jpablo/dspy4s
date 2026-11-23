@@ -160,8 +160,9 @@ with these tabs:
 | `Settings` | the call, the URL, each option, the place of the fixed fields, the size of each part, and the configuration of the last `Activated`, with its preamble in the colors of Scala |
 | `Changes` | only for a prompt that changed: the line diff of each part that changed. The box opens on this tab. |
 
-**The `Entries` view** shows the entries of the journal in the order of their `seq`. A step has an indent, and the
-parts of a step (`Acted`, the calls, `Observed`) have two indents.
+**The `Entries` view** shows the entries of the journal in the order of their `seq`, in flat rows. Turn on `Indent`
+in the bar to give a step an indent, and the parts of a step (`Acted`, the calls, `Observed`) two indents. Your
+browser keeps the choice.
 
 Each entry row has its `seq`, its kind, its time and its source, and the buttons `card`, `scala` and `json`:
 
