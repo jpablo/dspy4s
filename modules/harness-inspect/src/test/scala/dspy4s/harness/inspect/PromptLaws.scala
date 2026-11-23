@@ -281,20 +281,31 @@ class PromptLaws extends munit.FunSuite:
     val parts         = Instructions.parse(head).getOrElse(fail(s"no parts in $head"))
     assertEquals(fixed.map(_._1), Vector("task", "apiReference", "memory"))
     val html = Chat.html(exchange("x1", 3L, body))
-    assert(html.contains("""<details class="msg role-system" data-forms><summary>system · """), html.take(600))
-    assert(html.contains("""<button data-form="parts" class="on">Parts</button><button data-form="raw">Raw</button>"""))
+    // The head of the card is the head of a user card: the role with its dot, the count of the lines, and the buttons.
+    val lines = Story.plural(system.linesIterator.size.toLong, "line")
+    assert(
+      html.contains(
+        s"""<details class="msg role-system" data-forms><summary><span class="role">system</span>""" +
+          s"""<span class="lines"> · $lines</span>${Html.forms("parts" -> "Parts", "raw" -> "Raw")}</summary>""" +
+          """<div class="parts" data-form-view="parts">"""
+      ),
+      html.take(600)
+    )
     assert(html.contains(Instructions.html(parts)), html.take(600))
     assert(html.contains("<h3>The fixed fields</h3>"), html.take(600))
     fixed.foreach((name, value) => assert(html.contains(Instructions.fieldHtml(name, value)), name))
     assert(html.contains(s"""<div class="text" data-form-view="raw" hidden>${Html.escape(system)}</div>"""), html)
     assert(!html.contains(Markup), html)
-    // The buttons of a box with data-forms switch its views.
-    assert(Html.page("FAKE-TITLE", "FAKE-NONCE", "").contains("form.closest('[data-forms], .pview')"))
+    // The buttons of a box with data-forms switch its views, and a button in the head of a card does not close it.
+    val page = Html.page("FAKE-TITLE", "FAKE-NONCE", "")
+    assert(page.contains("form.closest('[data-forms], .pview')") &&
+      page.contains("if (form) {\n    ev.preventDefault();"))
     // A system message with no parts keeps its text.
     val bare = """{"messages":[{"role":"system","content":"FAKE-SYSTEM"}]}"""
     assert(
       Chat.html(exchange("x2", 3L, bare)).contains(
-        """<details class="msg role-system"><summary>system · 1 lines</summary><div class="text">FAKE-SYSTEM</div>"""
+        """<details class="msg role-system"><summary><span class="role">system</span><span class="lines"> · 1 line</span>""" +
+          """</summary><div class="text">FAKE-SYSTEM</div>"""
       )
     )
   }

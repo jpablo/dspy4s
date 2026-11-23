@@ -112,13 +112,15 @@ object Chat:
     val all   = lines.mkString("\n")
     val body  = escape(all)
     if role == "system" then
-      val summary = s"""<summary>system · ${all.linesIterator.size} lines</summary>"""
-      // The instructions of a chat adapter show their parts (5.8, L27), and a button shows the exact text.
+      // The head of the card is the head of a user card: the role with its dot, then the count of the lines.
+      def summary(buttons: String) =
+        s"""<summary><span class="role">system</span><span class="lines"> · """ +
+          s"""${Story.plural(all.linesIterator.size.toLong, "line")}</span>$buttons</summary>"""
+      // The instructions of a chat adapter show their parts (5.8, L27), and a button in the head shows the exact text.
       Instructions.systemHtml(all).fold(
-        s"""<details class="msg role-system">$summary<div class="text">$body</div></details>"""
+        s"""<details class="msg role-system">${summary("")}<div class="text">$body</div></details>"""
       )(parts =>
-        s"""<details class="msg role-system" data-forms>$summary""" +
-          s"""<div class="forms-bar">${Html.forms("parts" -> "Parts", "raw" -> "Raw")}</div>""" +
+        s"""<details class="msg role-system" data-forms>${summary(Html.forms("parts" -> "Parts", "raw" -> "Raw"))}""" +
           s"""<div class="parts" data-form-view="parts">$parts</div>""" +
           s"""<div class="text" data-form-view="raw" hidden>$body</div></details>"""
       )

@@ -1116,3 +1116,22 @@ name = "Mutant: framed: the raw text of a message is not escaped"
 file = "Chat.scala"
 old = '''s"""<div class="text" data-form-view="raw" hidden>${escape(text)}</div></div>"""'''
 new = '''s"""<div class="text" data-form-view="raw" hidden>$text</div></div>"""'''
+
+# ── The head of the system card (5.4) ──
+
+[[mutant]]
+name = "Mutant: card: the system card has no role in its head"
+[[mutant.edit]]
+file = "Chat.scala"
+old = '''s"""<summary><span class="role">system</span><span class="lines"> · """'''
+new = '''s"""<summary>system<span class="lines"> · """'''
+
+[[mutant]]
+name = "Mutant: card: a button in the head of a card closes it"
+[[mutant.edit]]
+file = "Html.scala"
+old = '''  if (form) {
+    ev.preventDefault();
+'''
+new = '''  if (form) {
+'''
