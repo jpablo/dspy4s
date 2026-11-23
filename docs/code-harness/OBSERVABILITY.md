@@ -290,7 +290,8 @@ token and a prompt of 20 to 80 KB.
   - A row that does not decode shows its error with no colors.
   - The code view of the Request and Reply views of an exchange (5.4) has the colors of JSON too.
   - Scala source code has its own lexer, `Highlight.source` (2026-11-22). The API reference of a prompt (5.8), the
-    code of a cell in the trajectory and in the card of `Acted`, and a Scala fence of a reply (5.7) use it.
+    code of a cell in the trajectory and in the card of `Acted`, the preamble in the card of `Activated`, and a Scala
+    fence of a reply (5.7) use it.
   - This lexer adds four classes: `t-keyword` for a keyword, `t-def` for the name after `def`, `val` or `var`,
     `t-annotation` for an annotation, and `t-comment` for a comment.
   - A comment is one piece, and a block comment can hold another one, as in Scala. A string with one quote ends at
@@ -528,7 +529,9 @@ shows the model, the effort, the size of the parts in characters, and the count 
 exchange. A click on the row opens a box with these tabs:
 
 - `Instructions`: the text, with each marker line in color.
-- `Task`: the text of the field.
+- `Task`: the task as Markdown (2026-11-22), so its headings, lists and code blocks show as in a reply, and a Scala
+  fence has the colors of Scala. A `Raw` button shows the exact text, and the `Markdown` button shows the Markdown
+  again.
 - `API (N)`: the calls of `object api` in the API reference. Each call has its first sentence, and a click shows its
   signature up to the `=` of its body and its whole comment. The Scala source is behind a click. The signatures and
   the source have the colors of Scala source (5.3).
@@ -651,7 +654,8 @@ The inspector:
   a mode each have a signature that ends at the `=` of its body, and a comment. A call has a new prompt when it is the
   first, or when its prompt differs from the prompt of the call before it. For any journal and any exchanges, a new
   prompt comes right before the item that holds its call, with its key, and L23 still holds. The box opens on the
-  instructions, or on the changes of a changed prompt, and it escapes each text. The page puts the first prompt after
+  instructions, or on the changes of a changed prompt, and it escapes each text. The Task tab shows the Markdown of
+  the task, and its `Raw` button shows the escaped text. The page puts the first prompt after
   the note of `Activated` and before the first turn, with that `Activated` in its settings, and the follow with
   `skipped` gives the same items as a page that starts at `skipped`. `lastOfKind` gives the last row of a case up to a
   `seq`, and a text with the key of the case is no match.
@@ -661,8 +665,8 @@ The inspector:
   the comments and the strings each have their color. A block comment can hold another one, and the `${...}` of an
   interpolation stays in its string. A soft keyword is a keyword only in its place. The API tab shows the source and
   each signature with these colors, and each call of the API reference is a definition. The code of a cell in the
-  trajectory, the code of an `Acted` card and a Scala fence of a reply have the colors. A fence of another language
-  has none.
+  trajectory, the code of an `Acted` card, the preamble of an `Activated` card and a Scala fence of a reply have the
+  colors. A fence of another language has none.
 - **The links to the views.** The `request` and `reply` links of a row open the page of the exchange with
   `?tab=request` and `?tab=reply`, and no row links to a raw path. `?tab=` opens the page on that view, an unknown
   tab opens the chat, and `?against=` with no tab opens the diff. The links to the exchange before and after keep

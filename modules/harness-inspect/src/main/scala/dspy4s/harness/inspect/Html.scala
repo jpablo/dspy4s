@@ -257,6 +257,9 @@ details.prompt[open]>summary .sum::before{content:"▾ "}
 .pbox>.pview>dl{display:grid;grid-template-columns:max-content 1fr;gap:2px 12px;font-size:12.5px;margin:4px 0}
 .pbox>.pview>dl dt{color:var(--muted)}.pbox>.pview>dl dd{margin:0;overflow-wrap:anywhere}
 .ptext .mk{color:var(--accent);font-weight:600}
+.forms{margin-left:6px}.forms button{font-size:11px;padding:0 6px}
+.ptask{background:var(--code);border-radius:6px;padding:8px 12px;max-height:36em;overflow:auto}
+.ptask :not(pre)>code{background:var(--card)}
 .calls .call{border-bottom:1px solid var(--line);padding:3px 0}
 .calls .call>summary,.pbox details.source>summary{cursor:pointer}
 .calls .about{color:var(--muted)}
@@ -328,15 +331,22 @@ if (rows) rows.addEventListener('click', ev => {
 });
 document.querySelectorAll('input[data-hide]').forEach(c =>
   c.addEventListener('change', () => body.classList.toggle('hide-' + c.dataset.hide, !c.checked)));
-// The buttons in the items of the chat and the trajectory: the tabs of the box of a prompt (5.8), the Copy button of a
-// code block, and the button that opens a turn in the trajectory (5.7). The follow adds new items, so one listener on
-// the page serves each button.
+// The buttons in the items of the chat and the trajectory: the tabs of the box of a prompt and the Markdown and Raw
+// buttons of its task (5.8), the Copy button of a code block, and the button that opens a turn in the trajectory
+// (5.7). The follow adds new items, so one listener on the page serves each button.
 document.addEventListener('click', async ev => {
   const tab = ev.target.closest('button[data-ptab]');
   if (tab) {
     const box = tab.closest('.pbox');
     box.querySelectorAll('[data-pview]').forEach(v => { v.hidden = v.dataset.pview !== tab.dataset.ptab; });
     box.querySelectorAll('button[data-ptab]').forEach(x => x.classList.toggle('on', x === tab));
+    return;
+  }
+  const form = ev.target.closest('button[data-form]');
+  if (form) {
+    const view = form.closest('.pview');
+    view.querySelectorAll('[data-form-view]').forEach(v => { v.hidden = v.dataset.formView !== form.dataset.form; });
+    view.querySelectorAll('button[data-form]').forEach(x => x.classList.toggle('on', x === form));
     return;
   }
   const copy = ev.target.closest('button[data-copy-code]');

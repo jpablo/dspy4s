@@ -72,14 +72,14 @@ object EntryViews:
           "guard"     -> guard,
           "compiler"  -> versions.compiler,
           "guest API" -> versions.guestApi
-        ) + host + folded("The preamble", config.preamble)
+        ) + host + folded("The preamble", Highlight.sourceHtml(config.preamble))
       case Entry.Input(request, text, values) => paragraph(text) +
           (if values.isEmpty then "" else facts(values.toVector.map((k, v) => k -> v.print)*)) +
           note(s"request ${request.value}")
       case Entry.TurnStarted                  => "<h2>Turn</h2>"
       case Entry.StepStarted(step)            => s"<h2>Step $step</h2>"
       case Entry.Acted(reasoning, text, code) =>
-        (if reasoning.trim.isEmpty then "" else folded("Reasoning", reasoning)) + paragraph(text) +
+        (if reasoning.trim.isEmpty then "" else folded("Reasoning", escape(reasoning))) + paragraph(text) +
           code.fold("")(c => s"<pre><code>${Highlight.sourceHtml(c)}</code></pre>")
       case Entry.EffectStarted(id, op, args) =>
         s"<p><code>${escape(op)}</code> <code>${escape(args.print)}</code></p>" + note(s"call ${id.cell}.${id.n}")
@@ -165,8 +165,9 @@ object EntryViews:
 
   private def note(text: String): String = s"""<p class="note">${escape(text)}</p>"""
 
-  private def folded(title: String, text: String): String =
-    s"<details><summary>${escape(title)}</summary><pre>${escape(text)}</pre></details>"
+  /** A folded block with the title `title` and the HTML `html`, which the caller escapes or colors. */
+  private def folded(title: String, html: String): String =
+    s"<details><summary>${escape(title)}</summary><pre>$html</pre></details>"
 
   private def facts(pairs: (String, String)*): String =
     pairs.map((k, v) => s"<dt>${escape(k)}</dt><dd>${escape(v)}</dd>").mkString("<dl>", "", "</dl>")

@@ -224,6 +224,29 @@ class PromptLaws extends munit.FunSuite:
     assert(html.contains("""href="/s/fake-session-1/x/x1""""), html.take(600))
     assert(!html.contains(Markup), html)
     assert(html.contains(Html.escape(Markup)), html)
+    // A field of another name shows its text, escaped.
+    val other = Prompt("FAKE-INSTRUCTIONS", Vector("other" -> Markup), Vector.empty, "http://test.invalid", true)
+    val box   = PromptView.html(SessionId("fake-session-1"), PromptMark(exchange("x1", 3L, ""), other, None, None))
+    assert(!box.contains(Markup) && box.contains(Html.escape(Markup)), box)
+  }
+
+  test("Prompt L24: the Task tab shows the task as Markdown, and a button shows its raw text") {
+    val prompt = promptOf(bodyOf(input.copy(task = "## Why\n\n- **A** `x`\n\n```scala\nval y = 1\n```")))
+    val task   = prompt.field("task").getOrElse(fail(s"no task in $prompt"))
+    val html   = PromptView.html(SessionId("fake-session-1"), PromptMark(exchange("x1", 3L, ""), prompt, None, None))
+    val view   = """(?s)<div class="pview" data-pview="field-task" hidden>(.*?)</div><div class="pview" """.r
+      .findFirstMatchIn(html).map(_.group(1)).getOrElse(fail(s"no task view in ${html.take(600)}"))
+    assert(
+      view.contains(
+        """<button data-form="markdown" class="on">Markdown</button><button data-form="raw">Raw</button>"""
+      ),
+      view
+    )
+    assert(view.contains(s"""<div class="md ptask" data-form-view="markdown">${Markdown.html(task)}</div>"""), view)
+    assert(view.contains(s"""<pre class="ptext" data-form-view="raw" hidden>${Html.escape(task)}</pre>"""), view)
+    assert(view.contains("<h4>Why</h4>") && view.contains("""<span class="t-keyword">val</span>"""), view)
+    // The page has the handler of the two buttons.
+    assert(Html.page("FAKE-TITLE", "FAKE-NONCE", "").contains("closest('button[data-form]')"))
   }
 
   test("Prompt L26: the API tab gives the Scala source and each signature with the colors of Scala") {

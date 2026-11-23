@@ -155,9 +155,9 @@ with these tabs:
 | Tab | What it shows |
 |---|---|
 | `Instructions` | the text of the instructions, with the marker lines such as `[[ ## task ## ]]` in color |
-| `Task` | the text of the field `task` |
+| `Task` | the field `task` as Markdown. Click `Raw` to see the exact text, and `Markdown` to go back. |
 | `API (N)` | each call of `object api`, with its first sentence. Click a call for its signature and its comment. The Scala source is folded. The signatures and the source have the colors of Scala. |
-| `Settings` | the call, the URL, each option, the place of the fixed fields, the size of each part, and the configuration of the last `Activated` |
+| `Settings` | the call, the URL, each option, the place of the fixed fields, the size of each part, and the configuration of the last `Activated`, with its preamble in the colors of Scala |
 | `Changes` | only for a prompt that changed: the line diff of each part that changed. The box opens on this tab. |
 
 **The `Entries` view** shows the entries of the journal in the order of their `seq`. A step has an indent, and the

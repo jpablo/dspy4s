@@ -871,3 +871,47 @@ name = "Mutant: source: the code of the card of an Acted has no colors"
 file = "EntryViews.scala"
 old = '''code.fold("")(c => s"<pre><code>${Highlight.sourceHtml(c)}</code></pre>")'''
 new = '''code.fold("")(c => s"<pre><code>${escape(c)}</code></pre>")'''
+
+[[mutant]]
+name = "Mutant: source: the preamble of an Activated card has no colors"
+[[mutant.edit]]
+file = "EntryViews.scala"
+old = '''folded("The preamble", Highlight.sourceHtml(config.preamble))'''
+new = '''folded("The preamble", escape(config.preamble))'''
+
+[[mutant]]
+name = "Mutant: source: the reasoning of an Acted card is not escaped"
+[[mutant.edit]]
+file = "EntryViews.scala"
+old = '''folded("Reasoning", escape(reasoning))'''
+new = '''folded("Reasoning", reasoning)'''
+
+# ── The task of a prompt as Markdown (5.8, law L24) ──
+
+[[mutant]]
+name = "Mutant: prompt: the raw text of the task shows too"
+[[mutant.edit]]
+file = "PromptView.scala"
+old = '''data-form-view="raw" hidden>'''
+new = '''data-form-view="raw">'''
+
+[[mutant]]
+name = "Mutant: prompt: the task shows its raw text in place of its Markdown"
+[[mutant.edit]]
+file = "PromptView.scala"
+old = '''data-form-view="markdown">${Markdown.html(value)}</div>'''
+new = '''data-form-view="markdown">${escape(value)}</div>'''
+
+[[mutant]]
+name = "Mutant: prompt: the raw text of the task is not escaped"
+[[mutant.edit]]
+file = "PromptView.scala"
+old = '''data-form-view="raw" hidden>${escape(value)}</pre>'''
+new = '''data-form-view="raw" hidden>$value</pre>'''
+
+[[mutant]]
+name = "Mutant: prompt: the page has no handler of the Markdown and Raw buttons"
+[[mutant.edit]]
+file = "Html.scala"
+old = "const form = ev.target.closest('button[data-form]');"
+new = "const form = ev.target.closest('button[data-none]');"

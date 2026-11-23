@@ -255,6 +255,22 @@ class InspectorLaws extends ScalaCheckSuite:
     assert(card(None).contains("no limits and no sandbox"), card(None))
   }
 
+  test("Inspect L26: the preamble of an Activated card has the colors of Scala") {
+    val preamble = "object Preamble:\n  def submit(value: String): Nothing = submitValue(value)\nimport Preamble.*"
+    val card     = EntryViews.card(Logged(
+      0L,
+      Meta(Start, Source.Harness, Taint.Trusted, true),
+      Entry.Activated(Versions("3.10.0", "1"), Support.config(TurnKind.Chat, 3).copy(preamble = preamble))
+    ))
+    val colored = Highlight.sourceHtml(preamble)
+    assert(
+      colored.startsWith("""<span class="t-keyword">object</span> <span class="t-type">Preamble</span>"""),
+      colored
+    )
+    assert(colored.contains("""<span class="t-keyword">def</span> <span class="t-def">submit</span>"""), colored)
+    assert(card.contains(s"<details><summary>The preamble</summary><pre>$colored</pre></details>"), card)
+  }
+
   test("Inspect L14: the escape gives an entity for each of the five marks of HTML") {
     assertEquals(Html.escape("""<a href="x">'&"""), "&lt;a href=&quot;x&quot;&gt;&#39;&amp;")
   }

@@ -68,13 +68,21 @@ object PromptView:
     s"""<p class="note">The system message up to its first fixed field: ${escape(size(text))}.</p>""" +
       s"""<pre class="ptext">${marked(text)}</pre>"""
 
-  /** The view of a fixed field. The API reference shows its calls first, each with its signature and its comment behind
-    * a click, and then its Scala source behind a click. The source and the signatures have the colors of Scala (L26).
+  /** The view of a fixed field. The task shows its Markdown, with a button for its raw text. The API reference shows
+    * its calls first, each with its signature and its comment behind a click, and then its Scala source behind a click.
+    * The source and the signatures have the colors of Scala (L26).
     */
   private def field(name: String, value: String, calls: Vector[ApiCall]): String =
     val shown = if name == "apiReference" then Highlight.sourceHtml(value) else escape(value)
     val text  = s"""<pre class="ptext">$shown</pre>"""
-    if name != "apiReference" || calls.isEmpty then
+    if name == "task" then
+      // The task is Markdown, so the tab shows it as Markdown, and a button shows its raw text.
+      val forms = """<span class="forms"><button data-form="markdown" class="on">Markdown</button>""" +
+        """<button data-form="raw">Raw</button></span>"""
+      s"""<p class="note">The field task: ${escape(size(value))}. $forms</p>""" +
+        s"""<div class="md ptask" data-form-view="markdown">${Markdown.html(value)}</div>""" +
+        s"""<pre class="ptext" data-form-view="raw" hidden>${escape(value)}</pre>"""
+    else if name != "apiReference" || calls.isEmpty then
       s"""<p class="note">The field ${escape(name)}: ${escape(size(value))}.</p>$text"""
     else
       val list = calls.map { c =>
