@@ -1,5 +1,5 @@
 # The mutants of the inspector. Each mutant breaks one rule of section 5 of docs/code-harness/OBSERVABILITY.md, and
-# laws L10 to L26 of its section 6 must kill it.
+# laws L10 to L27 of its section 6 must kill it.
 #
 # `python3 scripts/mutants/mutants.py modules/harness-inspect/src/test/mutants.toml` applies each mutant alone, runs the
 # tests of the module, and restores the code. At least one test must fail for each mutant.
@@ -583,8 +583,8 @@ new = '''say("person", who(m), m, messageText(m))'''
 name = "Mutant: prompt: the fixed fields start at the first marker of the system message"
 [[mutant.edit]]
 file = "Prompt.scala"
-old = "lines.indexWhere(line => marker(line).exists(PolicyAdapter.Fixed.contains), done + 1)"
-new = "lines.indexWhere(line => marker(line).exists(PolicyAdapter.Fixed.contains), 0)"
+old = "lines.indexWhere(line => markerOf(line).exists(PolicyAdapter.Fixed.contains), done + 1)"
+new = "lines.indexWhere(line => markerOf(line).exists(PolicyAdapter.Fixed.contains), 0)"
 
 [[mutant]]
 name = "Mutant: prompt: the memory is a part of the prompt"
@@ -892,8 +892,8 @@ new = '''folded("Reasoning", reasoning)'''
 name = "Mutant: prompt: the raw text of the task shows too"
 [[mutant.edit]]
 file = "PromptView.scala"
-old = '''data-form-view="raw" hidden>'''
-new = '''data-form-view="raw">'''
+old = '''data-form-view="raw" hidden>${escape(value)}</pre>'''
+new = '''data-form-view="raw">${escape(value)}</pre>'''
 
 [[mutant]]
 name = "Mutant: prompt: the task shows its raw text in place of its Markdown"
@@ -915,3 +915,118 @@ name = "Mutant: prompt: the page has no handler of the Markdown and Raw buttons"
 file = "Html.scala"
 old = "const form = ev.target.closest('button[data-form]');"
 new = "const form = ev.target.closest('button[data-none]');"
+
+# ── The parts of the instructions (5.8, law L27) ──
+
+[[mutant]]
+name = "Mutant: instructions: a line of a description is lost"
+[[mutant.edit]]
+file = "Instructions.scala"
+old = '''last.copy(description = if last.description.isEmpty then line else s"${last.description}\n$line")'''
+new = '''last.copy(description = last.description)'''
+
+[[mutant]]
+name = "Mutant: instructions: a line before the first field is skipped"
+[[mutant.edit]]
+file = "Instructions.scala"
+old = "          case _                                  => all.lastOption.map(last =>"
+new = """          case _ if all.isEmpty                   => Some(all)
+          case _                                  => all.lastOption.map(last =>"""
+
+[[mutant]]
+name = "Mutant: instructions: the objective keeps its indent"
+[[mutant.edit]]
+file = "Instructions.scala"
+old = "trim(body.map(_.drop(Indent.length)))"
+new = "trim(body.map(_.drop(Indent.length - 2)))"
+
+[[mutant]]
+name = "Mutant: instructions: the rest is lost"
+[[mutant.edit]]
+file = "Instructions.scala"
+old = "trim(after.drop(body.size)))"
+new = "trim(after.drop(after.size)))"
+
+[[mutant]]
+name = "Mutant: instructions: an output field has no note"
+[[mutant.edit]]
+file = "Instructions.scala"
+old = "${table(parts.outputs, notes)}"
+new = "${table(parts.outputs, notes.filter(_ => false))}"
+
+[[mutant]]
+name = "Mutant: instructions: a description is not escaped"
+[[mutant.edit]]
+file = "Instructions.scala"
+old = '''s"<td>${Markdown.html(f.description)}$note</td></tr>"'''
+new = '''s"<td>${f.description}$note</td></tr>"'''
+
+[[mutant]]
+name = "Mutant: instructions: the fixed fields stay in the instructions"
+[[mutant.edit]]
+file = "Instructions.scala"
+old = "val start = if done < 0 then -1 else lines.indexWhere(Prompt.isMarker, done + 1)"
+new = "val start = if done < 0 then -1 else -1"
+
+[[mutant]]
+name = "Mutant: instructions: the task of the exchange page shows its raw text"
+[[mutant.edit]]
+file = "Instructions.scala"
+old = '''      case "task"         => s"""<div class="md ptask">${Markdown.html(value)}</div>"""'''
+new = '''      case "task"         => s"""<div class="md ptask">${escape(value)}</div>"""'''
+
+[[mutant]]
+name = "Mutant: instructions: a fixed field of the exchange page is not escaped"
+[[mutant.edit]]
+file = "Instructions.scala"
+old = '''      case _              => s"""<pre class="ptext">${escape(value)}</pre>"""'''
+new = '''      case _              => s"""<pre class="ptext">$value</pre>"""'''
+
+[[mutant]]
+name = "Mutant: instructions: the exchange page shows no fixed field"
+[[mutant.edit]]
+file = "Instructions.scala"
+old = '''(if shown.isEmpty then "" else s"<h3>The fixed fields</h3>${shown.mkString}")'''
+new = '''(if shown.nonEmpty then "" else s"<h3>The fixed fields</h3>${shown.mkString}")'''
+
+[[mutant]]
+name = "Mutant: instructions: the Instructions tab shows no parts"
+[[mutant.edit]]
+file = "PromptView.scala"
+old = "    Instructions.parse(text) match"
+new = "    Instructions.parse(text).filter(_ => false) match"
+
+[[mutant]]
+name = "Mutant: instructions: the raw text of the Instructions tab shows too"
+[[mutant.edit]]
+file = "PromptView.scala"
+old = '''s"""<pre class="ptext" data-form-view="raw" hidden>${marked(text)}</pre>"""'''
+new = '''s"""<pre class="ptext" data-form-view="raw">${marked(text)}</pre>"""'''
+
+[[mutant]]
+name = "Mutant: instructions: the system message of the exchange page shows no parts"
+[[mutant.edit]]
+file = "Chat.scala"
+old = "      Instructions.systemHtml(all).fold("
+new = "      Instructions.systemHtml(all).filter(_ => false).fold("
+
+[[mutant]]
+name = "Mutant: instructions: the raw system message of the exchange page shows too"
+[[mutant.edit]]
+file = "Chat.scala"
+old = '''s"""<div class="text" data-form-view="raw" hidden>$body</div></details>"""'''
+new = '''s"""<div class="text" data-form-view="raw">$body</div></details>"""'''
+
+[[mutant]]
+name = "Mutant: instructions: the buttons of a system message switch nothing"
+[[mutant.edit]]
+file = "Html.scala"
+old = "const view = form.closest('[data-forms], .pview');"
+new = "const view = form.closest('.pview');"
+
+[[mutant]]
+name = "Mutant: instructions: the first button of a box is not on"
+[[mutant.edit]]
+file = "Html.scala"
+old = '''${if i == 0 then " class=\"on\"" else ""}'''
+new = '''${if i == 1 then " class=\"on\"" else ""}'''

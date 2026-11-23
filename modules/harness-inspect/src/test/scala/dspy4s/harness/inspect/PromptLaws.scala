@@ -249,6 +249,56 @@ class PromptLaws extends munit.FunSuite:
     assert(Html.page("FAKE-TITLE", "FAKE-NONCE", "").contains("closest('button[data-form]')"))
   }
 
+  test("Prompt L27: the Instructions tab shows the parts of a real request, and a button shows its raw text") {
+    val prompt = promptOf(bodyOf(input))
+    val parts  = Instructions.parse(prompt.instructions).getOrElse(fail(s"no parts in ${prompt.instructions}"))
+    assertEquals(parts.inputs.map(_.name), Vector("task", "apiReference", "memory", "status", "observation", "history"))
+    assertEquals(parts.inputs.last.kind, "History")
+    // With no effort of the model, the signature has a reasoning field too.
+    assertEquals(parts.outputs.map(_.name).takeRight(2), Vector("text", "code"))
+    assertEquals(parts.markers.map(_._1), (parts.inputs ++ parts.outputs).map(_.name) :+ "completed")
+    assert(parts.objective.startsWith(Harness.policyInstructions.trim.linesIterator.next().trim), parts.objective)
+    assertEquals(parts.rest, PolicyAdapter.FixedHeader)
+    val html = PromptView.html(SessionId("fake-session-1"), PromptMark(exchange("x1", 3L, ""), prompt, None, None))
+    val view = """(?s)<div class="pview" data-pview="instructions">(.*?)</div><div class="pview" """.r
+      .findFirstMatchIn(html).map(_.group(1)).getOrElse(fail(s"no instructions in ${html.take(600)}"))
+    assert(view.contains("""<button data-form="parts" class="on">Parts</button><button data-form="raw">Raw</button>"""))
+    assert(view.contains(s"""<div class="pinstr" data-form-view="parts">${Instructions.html(parts)}</div>"""), view)
+    assert(view.contains("""<pre class="ptext" data-form-view="raw" hidden>"""), view)
+    assert(view.contains("""<span class="mk">[[ ## task ## ]]</span>"""), view)
+    // Instructions with no parts show their text only.
+    val other = Prompt("FAKE-INSTRUCTIONS", Vector.empty, Vector.empty, "http://test.invalid", true)
+    val plain = PromptView.html(SessionId("fake-session-1"), PromptMark(exchange("x1", 3L, ""), other, None, None))
+    assert(plain.contains("""line.</p><pre class="ptext">FAKE-INSTRUCTIONS</pre>"""), plain)
+    assert(!plain.contains("data-form="), plain)
+  }
+
+  test("Prompt L27: the system message on the page of an exchange shows its parts and its fixed fields") {
+    val body   = bodyOf(input.copy(task = s"FAKE-TASK **$Markup**"))
+    val system = Json.parse(body).toOption.flatMap(Exchanges.field(_, "messages")).flatMap(_.elements.headOption)
+      .map(m => Chat.contentOf(m).mkString("\n")).getOrElse(fail(s"no system message in $body"))
+    val (head, fixed) = Instructions.split(system)
+    val parts         = Instructions.parse(head).getOrElse(fail(s"no parts in $head"))
+    assertEquals(fixed.map(_._1), Vector("task", "apiReference", "memory"))
+    val html = Chat.html(exchange("x1", 3L, body))
+    assert(html.contains("""<details class="msg role-system" data-forms><summary>system · """), html.take(600))
+    assert(html.contains("""<button data-form="parts" class="on">Parts</button><button data-form="raw">Raw</button>"""))
+    assert(html.contains(Instructions.html(parts)), html.take(600))
+    assert(html.contains("<h3>The fixed fields</h3>"), html.take(600))
+    fixed.foreach((name, value) => assert(html.contains(Instructions.fieldHtml(name, value)), name))
+    assert(html.contains(s"""<div class="text" data-form-view="raw" hidden>${Html.escape(system)}</div>"""), html)
+    assert(!html.contains(Markup), html)
+    // The buttons of a box with data-forms switch its views.
+    assert(Html.page("FAKE-TITLE", "FAKE-NONCE", "").contains("form.closest('[data-forms], .pview')"))
+    // A system message with no parts keeps its text.
+    val bare = """{"messages":[{"role":"system","content":"FAKE-SYSTEM"}]}"""
+    assert(
+      Chat.html(exchange("x2", 3L, bare)).contains(
+        """<details class="msg role-system"><summary>system · 1 lines</summary><div class="text">FAKE-SYSTEM</div>"""
+      )
+    )
+  }
+
   test("Prompt L26: the API tab gives the Scala source and each signature with the colors of Scala") {
     val tokens = Highlight.source(api)
     val prompt = promptOf(bodyOf(input))

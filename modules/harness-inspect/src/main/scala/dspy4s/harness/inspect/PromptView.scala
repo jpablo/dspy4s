@@ -55,7 +55,7 @@ object PromptView:
       case other          => other
 
   /** The size of a text in words: its characters and its lines. */
-  private def size(text: String): String =
+  private[inspect] def size(text: String): String =
     s"${Story.plural(text.length.toLong, "character")}, ${Story.plural(text.linesIterator.size.toLong, "line")}"
 
   /** `text` with each marker line of the chat format in a span, so the format of the fields stands out. */
@@ -64,9 +64,16 @@ object PromptView:
       if Prompt.isMarker(line) then s"""<span class="mk">${escape(line)}</span>""" else escape(line)
     ).mkString("\n")
 
+  /** The view of the instructions: their parts (L27), and a button for their text with each marker line in color.
+    * Instructions with no parts show their text only.
+    */
   private def instructions(text: String): String =
-    s"""<p class="note">The system message up to its first fixed field: ${escape(size(text))}.</p>""" +
-      s"""<pre class="ptext">${marked(text)}</pre>"""
+    val note = s"""<p class="note">The system message up to its first fixed field: ${escape(size(text))}."""
+    Instructions.parse(text) match
+      case None        => s"""$note</p><pre class="ptext">${marked(text)}</pre>"""
+      case Some(parts) => s"""$note ${Html.forms("parts" -> "Parts", "raw" -> "Raw")}</p>""" +
+          s"""<div class="pinstr" data-form-view="parts">${Instructions.html(parts)}</div>""" +
+          s"""<pre class="ptext" data-form-view="raw" hidden>${marked(text)}</pre>"""
 
   /** The view of a fixed field. The task shows its Markdown, with a button for its raw text. The API reference shows
     * its calls first, each with its signature and its comment behind a click, and then its Scala source behind a click.
@@ -77,8 +84,7 @@ object PromptView:
     val text  = s"""<pre class="ptext">$shown</pre>"""
     if name == "task" then
       // The task is Markdown, so the tab shows it as Markdown, and a button shows its raw text.
-      val forms = """<span class="forms"><button data-form="markdown" class="on">Markdown</button>""" +
-        """<button data-form="raw">Raw</button></span>"""
+      val forms = Html.forms("markdown" -> "Markdown", "raw" -> "Raw")
       s"""<p class="note">The field task: ${escape(size(value))}. $forms</p>""" +
         s"""<div class="md ptask" data-form-view="markdown">${Markdown.html(value)}</div>""" +
         s"""<pre class="ptext" data-form-view="raw" hidden>${escape(value)}</pre>"""

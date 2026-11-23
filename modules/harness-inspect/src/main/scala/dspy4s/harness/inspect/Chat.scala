@@ -102,7 +102,7 @@ object Chat:
     error + output + dl
 
   /** One message of a request: its role, and its content and tool calls. A system message is folded, because the
-    * instructions of the policy are long.
+    * instructions of the policy are long, and the instructions of a chat adapter show their parts.
     */
   private def message(json: Json): String =
     val role  = text(json, "role").getOrElse("?")
@@ -110,8 +110,16 @@ object Chat:
     val all   = lines.mkString("\n")
     val body  = escape(all)
     if role == "system" then
-      s"""<details class="msg role-system"><summary>system · ${all.linesIterator.size} lines</summary>""" +
-        s"""<div class="text">$body</div></details>"""
+      val summary = s"""<summary>system · ${all.linesIterator.size} lines</summary>"""
+      // The instructions of a chat adapter show their parts (5.8, L27), and a button shows the exact text.
+      Instructions.systemHtml(all).fold(
+        s"""<details class="msg role-system">$summary<div class="text">$body</div></details>"""
+      )(parts =>
+        s"""<details class="msg role-system" data-forms>$summary""" +
+          s"""<div class="forms-bar">${Html.forms("parts" -> "Parts", "raw" -> "Raw")}</div>""" +
+          s"""<div class="parts" data-form-view="parts">$parts</div>""" +
+          s"""<div class="text" data-form-view="raw" hidden>$body</div></details>"""
+      )
     else
       s"""<div class="msg role-${escape(role)}"><div class="role">${escape(role)}</div>""" +
         s"""<div class="text">$body</div></div>"""

@@ -98,7 +98,7 @@ object Prompt:
   def policy(x: Exchange): Boolean = x.predictor.contains("policy") && x.probe.isEmpty
 
   /** True for a marker line of the chat format. */
-  def isMarker(line: String): Boolean = marker(line).isDefined
+  def isMarker(line: String): Boolean = markerOf(line).isDefined
 
   /** The prompt of the request of `x`, or none for a body that is not JSON or that has no messages.
     *
@@ -117,12 +117,13 @@ object Prompt:
         val lines   = system.linesIterator.toVector
         val done    = lines.indexOf(Completed)
         val start   =
-          if done < 0 then -1 else lines.indexWhere(line => marker(line).exists(PolicyAdapter.Fixed.contains), done + 1)
+          if done < 0 then -1
+          else lines.indexWhere(line => markerOf(line).exists(PolicyAdapter.Fixed.contains), done + 1)
         if start >= 0 then
-          Prompt(trim(lines.take(start)), ofSession(sections(lines.drop(start))), options, x.url, inSystem = true)
+          Prompt(trim(lines.take(start)), ofSession(sectionsOf(lines.drop(start))), options, x.url, inSystem = true)
         else
           val user = content("user", messages.reverse).linesIterator.toVector
-          Prompt(trim(lines), ofSession(sections(user)), options, x.url, inSystem = false)
+          Prompt(trim(lines), ofSession(sectionsOf(user)), options, x.url, inSystem = false)
       }
     }
 
@@ -183,7 +184,8 @@ object Prompt:
       case Json.String(value) => value
       case other              => other.print
 
-  private def marker(line: String): Option[String] =
+  /** The name of the marker on `line`, or none for a line that is no marker. */
+  private[inspect] def markerOf(line: String): Option[String] =
     line match
       case Marker(name) => Some(name)
       case _            => None
@@ -191,9 +193,9 @@ object Prompt:
   /** The sections of `lines`: each marker line with its name, and the lines up to the next marker line. The lines
     * before the first marker are in no section.
     */
-  private def sections(lines: Vector[String]): Vector[(String, String)] =
-    val starts = lines.indices.filter(i => marker(lines(i)).isDefined).toVector
-    starts.zip(starts.drop(1) :+ lines.size).flatMap((a, b) => marker(lines(a)).map(_ -> trim(lines.slice(a + 1, b))))
+  private[inspect] def sectionsOf(lines: Vector[String]): Vector[(String, String)] =
+    val starts = lines.indices.filter(i => markerOf(lines(i)).isDefined).toVector
+    starts.zip(starts.drop(1) :+ lines.size).flatMap((a, b) => markerOf(lines(a)).map(_ -> trim(lines.slice(a + 1, b))))
 
   /** The first section of each fixed field of the session in `found`, in the order of `found`. */
   private def ofSession(found: Vector[(String, String)]): Vector[(String, String)] =

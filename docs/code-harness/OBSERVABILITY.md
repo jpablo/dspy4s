@@ -318,6 +318,10 @@ Four buttons select its view. A row of the tree links to the page.
 - **Chat.** The options of the request (`model`, `temperature`, `max_tokens`, `stream_options` and the others), the
   tools (folded), and the messages with their roles. A system message is folded, because the instructions of the policy
   are long. Then the reply: the text, the reasoning (folded), the tool calls, the finish reason and the usage.
+  - A system message of a chat adapter opens on its parts (2026-11-23), as the `Instructions` tab of a prompt shows
+    them (5.8). After the parts come the fixed fields, each behind a click: the task as Markdown, the API reference
+    with the colors of Scala, and each other field as its text. The `Raw` button shows the exact text. A system
+    message with no parts shows its text only.
   - `Chat.read` sends the request again through `OpenAiLanguageModel` on a transport that gives the recorded status,
     headers, and body or lines. So the view and the model read a reply on one path: the same parser of the stream, the
     same assembly of the chunks and of the tool calls, and the same usage. The view copies no parser.
@@ -528,7 +532,13 @@ the key of that item. So the first prompt comes after the note of `Activated` an
 shows the model, the effort, the size of the parts in characters, and the count of the API calls, with a link to the
 exchange. A click on the row opens a box with these tabs:
 
-- `Instructions`: the text, with each marker line in color.
+- `Instructions`: the parts of the instructions (2026-11-23), because the text of the chat adapter is long and hard
+  to read. `Instructions.parse` reads the text as `PromptText.systemMessage` writes it: the input fields, the output
+  fields, the markers of the structure, the objective after its indent, and the rest, for example
+  `PolicyAdapter.FixedHeader`. Each line of the text is in one part, and a line that fits no part gives no parts.
+  The view shows the objective as Markdown first, then a table of the input fields and of the output fields with
+  their types and descriptions, the note of an output field, the order of the markers, and the rest. The `Raw`
+  button shows the text, with each marker line in color. Instructions with no parts show their text only.
 - `Task`: the task as Markdown (2026-11-22), so its headings, lists and code blocks show as in a reply, and a Scala
   fence has the colors of Scala. A `Raw` button shows the exact text, and the `Markdown` button shows the Markdown
   again.
@@ -667,6 +677,14 @@ The inspector:
   each signature with these colors, and each call of the API reference is a definition. The code of a cell in the
   trajectory, the code of an `Acted` card, the preamble of an `Activated` card and a Scala fence of a reply have the
   colors. A fence of another language has none.
+- **L27. The parts of the instructions.** For a system message of the chat adapter with any fields, notes, objective
+  and rest, `Instructions.parse` gives back the input fields, the output fields with their types and descriptions,
+  the markers in their order with their placeholders, the objective with no indent, and the rest. A text with no
+  head line of the four, or with a line before the first field, has no parts. Any text gives parts or none with no
+  error. The HTML of the parts has each field, each note, the objective and the rest, and it escapes each text. A
+  system message splits into the instructions and the fixed fields after the marker `completed`. The Instructions tab
+  of a real policy request opens on its parts, and its `Raw` button shows the text. The system message on the page
+  of an exchange opens on its parts and its fixed fields, and its `Raw` button shows the exact text.
 - **The links to the views.** The `request` and `reply` links of a row open the page of the exchange with
   `?tab=request` and `?tab=reply`, and no row links to a raw path. `?tab=` opens the page on that view, an unknown
   tab opens the chat, and `?against=` with no tab opens the diff. The links to the exchange before and after keep

@@ -154,7 +154,7 @@ with these tabs:
 
 | Tab | What it shows |
 |---|---|
-| `Instructions` | the text of the instructions, with the marker lines such as `[[ ## task ## ]]` in color |
+| `Instructions` | the objective, a table of the input and output fields, and the order of the markers. Click `Raw` to see the text, with the marker lines such as `[[ ## task ## ]]` in color. |
 | `Task` | the field `task` as Markdown. Click `Raw` to see the exact text, and `Markdown` to go back. |
 | `API (N)` | each call of `object api`, with its first sentence. Click a call for its signature and its comment. The Scala source is folded. The signatures and the source have the colors of Scala. |
 | `Settings` | the call, the URL, each option, the place of the fixed fields, the size of each part, and the configuration of the last `Activated`, with its preamble in the colors of Scala |
@@ -185,7 +185,7 @@ exchange, the `seq` of its entry (`after #41`), the links `earlier` and `later`,
 
 | View | What it shows |
 |---|---|
-| `Chat` | the options of the request, the tools (folded), and the messages with their roles. The system message is folded. Then the reply: the reasoning (folded), the text, the tool calls, the finish reason and the tokens. |
+| `Chat` | the options of the request, the tools (folded), and the messages with their roles. The system message is folded. It opens on the same parts as the `Instructions` tab, then the fixed fields (`task`, `apiReference` and `memory`), each behind a click. Click `Raw` to see the exact text. Then the reply: the reasoning (folded), the text, the tool calls, the finish reason and the tokens. |
 | `Request` | the URL, the headers, the size of the body, and the body as numbered lines with indents |
 | `Reply` | the status, the end, the error and the headers, then the body. A stream has two views: `Response` (the reply put together from the chunks) and `Stream` (each raw line). |
 | `Diff` | the lines of this request against the request of the last earlier exchange of the same predictor. `Against:` selects another exchange. |

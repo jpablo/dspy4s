@@ -55,6 +55,14 @@ object Html:
     def links(query: String) = items.map(item => s"""<a href="$base/$item$query">${escape(item)}</a>""").mkString(" ")
     s"""<span class="group">Raw: ${links("")}</span><span class="group">Download: ${links("?download=1")}</span>"""
 
+  /** The buttons that switch the views of a box (5.8), each with its key and its label. The first one is on. The box
+    * has `data-forms` or is a tab of a prompt, and each of its views has `data-form-view` with the key of its button.
+    */
+  def forms(views: (String, String)*): String =
+    views.zipWithIndex.map { case ((key, label), i) =>
+      s"""<button data-form="${escape(key)}"${if i == 0 then " class=\"on\"" else ""}>${escape(label)}</button>"""
+    }.mkString("""<span class="forms">""", "", "</span>")
+
   /** A page with `title`, `body` and the class `bodyClass` of its body, the style and the script. The script has
     * `nonce`, so the policy of the page lets it run, and a script that a text could make does not run.
     */
@@ -260,6 +268,15 @@ details.prompt[open]>summary .sum::before{content:"▾ "}
 .forms{margin-left:6px}.forms button{font-size:11px;padding:0 6px}
 .ptask{background:var(--code);border-radius:6px;padding:8px 12px;max-height:36em;overflow:auto}
 .ptask :not(pre)>code{background:var(--card)}
+.fields{border-collapse:collapse;font-size:12.5px;margin:2px 0 8px;width:100%}
+.fields td{border-top:1px solid var(--line);padding:4px 10px 4px 0;vertical-align:top}
+.fields td:first-child{white-space:nowrap}.fields td p{margin:0}
+.fields .ty{color:var(--accent);font:12px ui-monospace,Menlo,monospace;white-space:nowrap}
+.fnote{color:var(--muted);font-size:12px}
+.rest{color:var(--muted);font-size:12.5px;margin-top:8px}
+.msg .parts h3{font-size:13px;margin:10px 0 4px}.msg .parts pre{max-height:36em;overflow:auto}
+.forms-bar{margin:6px 0 2px}
+details.fixed{border-top:1px solid var(--line);padding:3px 0}details.fixed>summary{cursor:pointer}
 .calls .call{border-bottom:1px solid var(--line);padding:3px 0}
 .calls .call>summary,.pbox details.source>summary{cursor:pointer}
 .calls .about{color:var(--muted)}
@@ -331,9 +348,9 @@ if (rows) rows.addEventListener('click', ev => {
 });
 document.querySelectorAll('input[data-hide]').forEach(c =>
   c.addEventListener('change', () => body.classList.toggle('hide-' + c.dataset.hide, !c.checked)));
-// The buttons in the items of the chat and the trajectory: the tabs of the box of a prompt and the Markdown and Raw
-// buttons of its task (5.8), the Copy button of a code block, and the button that opens a turn in the trajectory
-// (5.7). The follow adds new items, so one listener on the page serves each button.
+// The buttons in the items of the chat and the trajectory: the tabs of the box of a prompt, the buttons that switch the
+// views of a tab or of a system message (5.8), the Copy button of a code block, and the button that opens a turn in
+// the trajectory (5.7). The follow adds new items, so one listener on the page serves each button.
 document.addEventListener('click', async ev => {
   const tab = ev.target.closest('button[data-ptab]');
   if (tab) {
@@ -344,7 +361,7 @@ document.addEventListener('click', async ev => {
   }
   const form = ev.target.closest('button[data-form]');
   if (form) {
-    const view = form.closest('.pview');
+    const view = form.closest('[data-forms], .pview');
     view.querySelectorAll('[data-form-view]').forEach(v => { v.hidden = v.dataset.formView !== form.dataset.form; });
     view.querySelectorAll('button[data-form]').forEach(x => x.classList.toggle('on', x === form));
     return;
