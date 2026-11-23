@@ -226,6 +226,19 @@ class PromptLaws extends munit.FunSuite:
     assert(html.contains(Html.escape(Markup)), html)
   }
 
+  test("Prompt L26: the API tab gives the Scala source and each signature with the colors of Scala") {
+    val tokens = Highlight.source(api)
+    val prompt = promptOf(bodyOf(input))
+    prompt.calls.foreach(c => assert(tokens.contains(Token(Tint.Def, c.name)), s"${c.name} is not a definition"))
+    assert(tokens.exists(t => t.tint == Tint.Comment && t.text.startsWith("/**")), tokens.take(40).toString)
+    val html   = PromptView.html(SessionId("fake-session-1"), PromptMark(exchange("x1", 3L, ""), prompt, None, None))
+    val source = """(?s)<summary>The Scala source</summary><pre class="ptext">(.*?)</pre></details>""".r
+      .findFirstMatchIn(html).map(_.group(1)).getOrElse(fail(s"no source in ${html.take(600)}"))
+    assertEquals(source, Highlight.sourceHtml(api))
+    assert(source.contains("""<span class="t-keyword">def</span> <span class="t-def">read</span>("""), source)
+    assert(html.contains("""<pre><span class="t-keyword">def</span> <span class="t-def">read</span>("""), html)
+  }
+
   test("Prompt L24: the row of a changed prompt names the parts, opens on their diff, and links to the two calls") {
     val before = promptOf(bodyOf(input))
     val after  = promptOf(bodyOf(input.copy(task = "FAKE-TASK\nFAKE-NEW-LINE")))

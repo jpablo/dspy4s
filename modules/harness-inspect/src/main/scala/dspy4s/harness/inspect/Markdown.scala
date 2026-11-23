@@ -7,9 +7,9 @@ import Html.escape
 /** A subset of Markdown as HTML, for the messages and the replies of the chat view (docs/code-harness/OBSERVABILITY.md,
   * 5.7). The model writes its replies in Markdown, and a raw view showed each mark, for example ```` ``` ```` and `**`.
   *
-  * The blocks: a code fence with its language, a heading, a rule, a quote, a list with a nested list, a table, and a
-  * paragraph. A line end in a paragraph stays a line end, as in a chat. The inline parts: a code span, `**strong**`,
-  * `*em*`, `~~del~~`, a link, and a bare URL.
+  * The blocks: a code fence with its language (a fence of Scala has the colors of `Highlight.source`), a heading, a
+  * rule, a quote, a list with a nested list, a table, and a paragraph. A line end in a paragraph stays a line end, as
+  * in a chat. The inline parts: a code span, `**strong**`, `*em*`, `~~del~~`, a link, and a bare URL.
   *
   * The rules of safety:
   *   - Each character of the text goes through `Html.escape`, so a text makes no markup. The renderer makes only the
@@ -102,10 +102,14 @@ object Markdown:
     val trimmed = line.trim
     trimmed.nonEmpty && trimmed.forall(_ == mark.head) && trimmed.length >= mark.length
 
+  /** The languages of a fence that get the colors of Scala (L26). */
+  private val ScalaNames = Set("scala", "scala3", "sc")
+
   private def code(lang: String, body: Vector[String]): String =
+    val text  = body.mkString("\n")
+    val shown = if ScalaNames(lang.toLowerCase) then Highlight.sourceHtml(text) else escape(text)
     s"""<div class="md-code"><div class="md-code-head"><span>${escape(lang)}</span>""" +
-      """<button data-copy-code>Copy</button></div>""" +
-      s"<pre><code>${escape(body.mkString("\n"))}</code></pre></div>"
+      """<button data-copy-code>Copy</button></div>""" + s"<pre><code>$shown</code></pre></div>"
 
   private def quoted(line: String): Boolean = line.dropWhile(_ == ' ').startsWith(">")
 

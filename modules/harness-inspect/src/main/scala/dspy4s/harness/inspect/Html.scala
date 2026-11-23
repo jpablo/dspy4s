@@ -129,7 +129,8 @@ background:var(--code);border-radius:6px}
 a.button{font-size:12px;border:1px solid var(--line);background:var(--card);color:var(--fg);border-radius:5px;
 padding:1px 8px;text-decoration:none}
 .t-key{color:var(--leaf)}.t-str{color:var(--good)}.t-num{color:var(--warn)}.t-lit{color:var(--memory)}
-.t-type{color:var(--accent)}
+.t-type{color:var(--accent)}.t-keyword{color:var(--leaf)}.t-def{font-weight:600}.t-annotation{color:var(--memory)}
+.t-comment{color:var(--muted);font-style:italic}
 .hunk{margin:8px 0}.hunk-head{color:var(--muted);font:12px ui-monospace,Menlo,monospace}
 pre.diff{padding:4px 0}
 .d{display:block;padding:0 10px}

@@ -1,5 +1,5 @@
 # The mutants of the inspector. Each mutant breaks one rule of section 5 of docs/code-harness/OBSERVABILITY.md, and
-# laws L10 to L25 of its section 6 must kill it.
+# laws L10 to L26 of its section 6 must kill it.
 #
 # `python3 scripts/mutants/mutants.py modules/harness-inspect/src/test/mutants.toml` applies each mutant alone, runs the
 # tests of the module, and restores the code. At least one test must fail for each mutant.
@@ -669,8 +669,8 @@ new = 'val first   = "instructions"'
 name = "Mutant: prompt: the text of a field is not escaped"
 [[mutant.edit]]
 file = "PromptView.scala"
-old = '''val text = s"""<pre class="ptext">${escape(value)}</pre>"""'''
-new = '''val text = s"""<pre class="ptext">$value</pre>"""'''
+old = "then Highlight.sourceHtml(value) else escape(value)"
+new = "then Highlight.sourceHtml(value) else value"
 
 # ── The chat view of design A and its Markdown (5.7) ──
 
@@ -685,8 +685,8 @@ new = "              out ++= c.toString"
 name = "Mutant: chat: the code of a fence is not escaped"
 [[mutant.edit]]
 file = "Markdown.scala"
-old = '''s"<pre><code>${escape(body.mkString("\n"))}</code></pre></div>"'''
-new = '''s"<pre><code>${body.mkString("\n")}</code></pre></div>"'''
+old = "then Highlight.sourceHtml(text) else escape(text)"
+new = "then Highlight.sourceHtml(text) else text"
 
 [[mutant]]
 name = "Mutant: chat: a link to any target gets an href"
@@ -750,3 +750,124 @@ name = "Mutant: chat: a turn holds no time for the totals"
 file = "Story.scala"
 old = '''data-ms="${s.millis.getOrElse(0L)}"'''
 new = '''data-ms="${s.steps.toLong}"'''
+
+# ── The colors of Scala source (5.3 and 5.8, law L26) ──
+
+[[mutant]]
+name = "Mutant: source: a keyword is plain"
+[[mutant.edit]]
+file = "Highlight.scala"
+old = "    else if keywords.contains(word) then Tint.Keyword"
+new = "    else if keywords.contains(word) then Tint.Plain"
+
+[[mutant]]
+name = "Mutant: source: the name after def is plain"
+[[mutant.edit]]
+file = "Highlight.scala"
+old = "    else if after.exists(definers.contains) then Tint.Def"
+new = "    else if after.exists(definers.contains) then Tint.Plain"
+
+[[mutant]]
+name = "Mutant: source: an annotation is plain"
+[[mutant.edit]]
+file = "Highlight.scala"
+old = "then (Tint.Annotation, annotation(text, i + 1))"
+new = "then (Tint.Plain, annotation(text, i + 1))"
+
+[[mutant]]
+name = "Mutant: source: a block comment ends at the first end mark"
+[[mutant.edit]]
+file = "Highlight.scala"
+old = '''      else if text.startsWith("/*", j) then go(j + 2, depth + 1)'''
+new = '''      else if text.startsWith("/*", j) then go(j + 2, depth)'''
+
+[[mutant]]
+name = "Mutant: source: a string with one quote runs past its line end"
+[[mutant.edit]]
+file = "Highlight.scala"
+old = '''        if j >= text.length || text(j) == '\n' then j'''
+new = '''        if j >= text.length then j'''
+
+[[mutant]]
+name = "Mutant: source: the code of an interpolation ends its string"
+[[mutant.edit]]
+file = "Highlight.scala"
+old = '''        else if interpolated && text.startsWith("${", j) then go(braces(text, j + 1))'''
+new = '''        else if !interpolated && text.startsWith("${", j) then go(braces(text, j + 1))'''
+
+[[mutant]]
+name = "Mutant: source: a soft modifier is always a keyword"
+[[mutant.edit]]
+file = "Highlight.scala"
+old = "      case _ => modifiers.contains(word) && nextWord(text, stop).exists(w => keywords(w) || modifiers(w))"
+new = "      case _ => modifiers.contains(word) || nextWord(text, stop).exists(w => keywords(w) || modifiers(w))"
+
+[[mutant]]
+name = "Mutant: source: end is a keyword in any place"
+[[mutant.edit]]
+file = "Highlight.scala"
+old = '''        before.forall(ch => ch == ' ' || ch == '\t') && charAt(text, stop).contains(' ')'''
+new = '''        before.forall(ch => ch == ' ' || ch == '\t') || charAt(text, stop).contains(' ')'''
+
+[[mutant]]
+name = "Mutant: source: as is a keyword after a dot"
+[[mutant.edit]]
+file = "Highlight.scala"
+old = '''      case "as" | "derives" => charAt(text, start - 1).contains(' ') && charAt(text, stop).contains(' ')'''
+new = '''      case "as" | "derives" => charAt(text, start - 1).nonEmpty || charAt(text, stop).contains(' ')'''
+
+[[mutant]]
+name = "Mutant: source: extension is always a keyword"
+[[mutant.edit]]
+file = "Highlight.scala"
+old = '''      case "extension"      => next(text, stop).exists(ch => ch == '(' || ch == '[')'''
+new = '''      case "extension"      => next(text, stop).forall(ch => ch == '(' || ch == '[')'''
+
+[[mutant]]
+name = "Mutant: source: a number takes the dot of a call"
+[[mutant.edit]]
+file = "Highlight.scala"
+old = "    else if is(j, _ == '.') && is(j + 1, _.isDigit) then numeral(text, j + 2, hex)"
+new = "    else if is(j, _ == '.') then numeral(text, j + 1, hex)"
+
+[[mutant]]
+name = "Mutant: source: the API tab shows its source with no colors"
+[[mutant.edit]]
+file = "PromptView.scala"
+old = '''    val shown = if name == "apiReference" then Highlight.sourceHtml(value) else escape(value)'''
+new = '''    val shown = if name == "task" then Highlight.sourceHtml(value) else escape(value)'''
+
+[[mutant]]
+name = "Mutant: source: a signature of the API tab has no colors"
+[[mutant.edit]]
+file = "PromptView.scala"
+old = "</summary><pre>${Highlight.sourceHtml(c.signature)}</pre>"
+new = "</summary><pre>${escape(c.signature)}</pre>"
+
+[[mutant]]
+name = "Mutant: source: a Scala fence of a reply has no colors"
+[[mutant.edit]]
+file = "Markdown.scala"
+old = "if ScalaNames(lang.toLowerCase) then"
+new = "if ScalaNames(lang.toUpperCase) then"
+
+[[mutant]]
+name = "Mutant: source: each fence with a language has the colors of Scala"
+[[mutant.edit]]
+file = "Markdown.scala"
+old = "if ScalaNames(lang.toLowerCase) then"
+new = "if lang.nonEmpty || ScalaNames(lang.toLowerCase) then"
+
+[[mutant]]
+name = "Mutant: source: the code of a cell in the trajectory has no colors"
+[[mutant.edit]]
+file = "Story.scala"
+old = '''<details><summary>code</summary><pre>${Highlight.sourceHtml(code)}</pre>'''
+new = '''<details><summary>code</summary><pre>${escape(code)}</pre>'''
+
+[[mutant]]
+name = "Mutant: source: the code of the card of an Acted has no colors"
+[[mutant.edit]]
+file = "EntryViews.scala"
+old = '''code.fold("")(c => s"<pre><code>${Highlight.sourceHtml(c)}</code></pre>")'''
+new = '''code.fold("")(c => s"<pre><code>${escape(c)}</code></pre>")'''

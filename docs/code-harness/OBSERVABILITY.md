@@ -289,6 +289,15 @@ token and a prompt of 20 to 80 KB.
     that is not JSON or not Scala keeps each character, and a text of an entry cannot add markup.
   - A row that does not decode shows its error with no colors.
   - The code view of the Request and Reply views of an exchange (5.4) has the colors of JSON too.
+  - Scala source code has its own lexer, `Highlight.source` (2026-11-22). The API reference of a prompt (5.8), the
+    code of a cell in the trajectory and in the card of `Acted`, and a Scala fence of a reply (5.7) use it.
+  - This lexer adds four classes: `t-keyword` for a keyword, `t-def` for the name after `def`, `val` or `var`,
+    `t-annotation` for an annotation, and `t-comment` for a comment.
+  - A comment is one piece, and a block comment can hold another one, as in Scala. A string with one quote ends at
+    its line end, and the `${...}` of an interpolation is a part of its string.
+  - A soft keyword is a keyword only in its place: `end` at the start of a line, `as` and `derives` between spaces,
+    `extension` before `(` or `[`, and a soft modifier such as `inline` or `update` before a keyword. So the
+    `update` of `m.update(k)` stays a name.
 - **Card.** A formatted card for each case of `Entry`. It shows the reasoning folded, the text, the code of a cell,
   the output and the outcome. It also shows the time, the source, and a mark for `Taint.External`.
   - The server makes the HTML of the card with a `match` on `Entry`. With `-Werror`, a `match` that does not cover each
@@ -461,7 +470,8 @@ rule, a quote, a list with a nested list, a table, a paragraph, a code span, str
 line end in a paragraph stays a line end, as in a chat. Each character of the text goes through `Html.escape`, and the
 renderer makes only the tags of `Markdown.Tags`, each one closed. Only a link to `https:`, `http:` or `mailto:` gets an
 `href`. Another link, for example a relative path of the repository, shows its text with the target in its title. An
-underscore after a letter opens no emphasis, so `snake_case` stays as it is.
+underscore after a letter opens no emphasis, so `snake_case` stays as it is. A fence of `scala`, `scala3` or `sc` has
+the colors of Scala source (5.3).
 
 **The trajectory view.** Each turn is open, with one row for each part of each step:
 
@@ -520,7 +530,8 @@ exchange. A click on the row opens a box with these tabs:
 - `Instructions`: the text, with each marker line in color.
 - `Task`: the text of the field.
 - `API (N)`: the calls of `object api` in the API reference. Each call has its first sentence, and a click shows its
-  signature up to the `=` of its body and its whole comment. The Scala source is behind a click.
+  signature up to the `=` of its body and its whole comment. The Scala source is behind a click. The signatures and
+  the source have the colors of Scala source (5.3).
 - `Settings`: the reason, the time, the call, the URL, each option, the place of the fixed fields, and the size of
   each part. Then the card of the last `Activated` at or before the call, as the Entries view shows it.
   `SessionFile.lastOfKind` finds that row: the read goes back from the call, and it decodes only the rows whose text
@@ -644,6 +655,14 @@ The inspector:
   the note of `Activated` and before the first turn, with that `Activated` in its settings, and the follow with
   `skipped` gives the same items as a page that starts at `skipped`. `lastOfKind` gives the last row of a case up to a
   `seq`, and a text with the key of the case is no match.
+- **L26. The colors of Scala source.** For any text, the pieces of `Highlight.source`, joined, give the text, no
+  piece is empty, and the HTML shows the text with no markup from it. A line comment and a string with one quote end
+  at their line end. The keywords, the names after `def`, `val` and `var`, the types, the annotations, the numbers,
+  the comments and the strings each have their color. A block comment can hold another one, and the `${...}` of an
+  interpolation stays in its string. A soft keyword is a keyword only in its place. The API tab shows the source and
+  each signature with these colors, and each call of the API reference is a definition. The code of a cell in the
+  trajectory, the code of an `Acted` card and a Scala fence of a reply have the colors. A fence of another language
+  has none.
 - **The links to the views.** The `request` and `reply` links of a row open the page of the exchange with
   `?tab=request` and `?tab=reply`, and no row links to a raw path. `?tab=` opens the page on that view, an unknown
   tab opens the chat, and `?against=` with no tab opens the diff. The links to the exchange before and after keep

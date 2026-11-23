@@ -233,6 +233,13 @@ class StoryLaws extends ScalaCheckSuite:
     assert(sectionOf(html, 12L).contains("<b>Model</b> ") && html.contains(" · FAKE-MODEL · effort high</span>"), html)
   }
 
+  test("Story L26: the code of a cell in the trajectory has the colors of Scala") {
+    val html = Story.html(SessionId("fake-session-1"), Story.of(rowsOf(turn), calls), Start)
+    val code = Highlight.sourceHtml("""val n = api.read("notes.txt").linesIterator.size""")
+    assert(code.startsWith("""<span class="t-keyword">val</span> <span class="t-def">n</span> = """), code)
+    assert(html.contains(s"<details><summary>code</summary><pre>$code</pre>"), html)
+  }
+
   test("Story L23: the work line of a turn opens a short list of its steps, and the turn holds its numbers") {
     val html = Story.html(SessionId("fake-session-1"), Story.of(rowsOf(turn), calls), Start)
     assert(

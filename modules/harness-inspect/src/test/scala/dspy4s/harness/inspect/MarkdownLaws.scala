@@ -104,14 +104,18 @@ class MarkdownLaws extends ScalaCheckSuite:
     }
   }
 
-  test("Markdown L25: a code fence keeps each line of its code, escaped, with its language") {
+  test("Markdown L25: a code fence keeps each line of its code, escaped, with its language and its colors") {
     val html = Markdown.html("Before:\n\n```scala\nval x = 1 < 2 && **y**\n  indented\n```\nAfter")
     assertEquals(
       html,
       "<p>Before:</p>" +
         """<div class="md-code"><div class="md-code-head"><span>scala</span><button data-copy-code>Copy</button>""" +
-        "</div><pre><code>val x = 1 &lt; 2 &amp;&amp; **y**\n  indented</code></pre></div><p>After</p>"
+        """</div><pre><code><span class="t-keyword">val</span> <span class="t-def">x</span> = """ +
+        """<span class="t-num">1</span> &lt; <span class="t-num">2</span> &amp;&amp; **y**""" +
+        "\n  indented</code></pre></div><p>After</p>"
     )
+    // Only a fence of Scala gets the colors of Scala (L26).
+    assert(Markdown.html("```text\nval x = 1\n```").contains("<pre><code>val x = 1</code></pre>"))
     // A fence with no end holds the rest of the text.
     assert(Markdown.html("```\nopen\n*a*").endsWith("<pre><code>open\n*a*</code></pre></div>"))
   }

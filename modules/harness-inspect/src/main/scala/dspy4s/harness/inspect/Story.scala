@@ -483,7 +483,7 @@ object Story:
           row(
             "CELL",
             body,
-            s"""<details><summary>code</summary><pre>${escape(code)}</pre>$full</details>""",
+            s"""<details><summary>code</summary><pre>${Highlight.sourceHtml(code)}</pre>$full</details>""",
             numbers(time, None),
             outcome.exists(failedOutcome)
           )

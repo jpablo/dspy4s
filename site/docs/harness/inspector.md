@@ -111,7 +111,8 @@ first message, with a link to the journal of each probe.
 
 - Your message is a bubble on the right, with its minute. Hover over the minute to see the time to the millisecond.
 - The reply has no bubble. It shows its Markdown: code blocks with a `Copy` button, inline code, bold, lists, tables
-  and links. A line under the reply gives its minute and the time of the turn.
+  and links. A Scala code block has the colors of Scala. A line under the reply gives its minute and the time of the
+  turn.
 - Between the message and the reply, one line gives the work of the turn: a mark, the time, the steps, the cells, the
   API calls, the tokens of the model calls and the errors, for example `✓ Worked 6.2 s · 4 steps · 3 cells · 2 calls ·
   20.3k → 806 tokens · 1 error`. The mark is ✓ for a reply or a submitted value, ✗ for each other end, and `…` for a
@@ -130,7 +131,7 @@ The raw files are in the `Files` menu.
 | Row | What it shows |
 |---|---|
 | `MODEL` | a model call of the policy: the text, the reasoning (folded), and a link to the page of the exchange |
-| `CELL` | the first line of the code, the count of its lines, and the outcome; the whole code is folded |
+| `CELL` | the first line of the code, the count of its lines, and the outcome; the whole code is folded, with the colors of Scala |
 | `CALL` | an API call of the cell: the operation, the arguments and the result in short |
 | `OUTPUT` | the first line of the output of the cell; the rest is folded |
 | `MEMORY` | the summary calls of the memory, in gray, with a link to each exchange |
@@ -155,7 +156,7 @@ with these tabs:
 |---|---|
 | `Instructions` | the text of the instructions, with the marker lines such as `[[ ## task ## ]]` in color |
 | `Task` | the text of the field `task` |
-| `API (N)` | each call of `object api`, with its first sentence. Click a call for its signature and its comment. The Scala source is folded. |
+| `API (N)` | each call of `object api`, with its first sentence. Click a call for its signature and its comment. The Scala source is folded. The signatures and the source have the colors of Scala. |
 | `Settings` | the call, the URL, each option, the place of the fixed fields, the size of each part, and the configuration of the last `Activated` |
 | `Changes` | only for a prompt that changed: the line diff of each part that changed. The box opens on this tab. |
 

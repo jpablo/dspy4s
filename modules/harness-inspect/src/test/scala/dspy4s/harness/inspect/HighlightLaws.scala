@@ -10,8 +10,8 @@ import zio.blocks.schema.json.Json
 import HighlightLaws.*
 import InspectorLaws.{LoggedCodec, Markup, Start, entry, marked, text}
 
-/** The laws of the colors of the Scala view and of the JSON view, and of the layout of the JSON view
-  * (docs/code-harness/OBSERVABILITY.md, 5.3 and 6: L18 and L19).
+/** The laws of the colors of the Scala view and of the JSON view, of the layout of the JSON view, and of the colors of
+  * Scala source (docs/code-harness/OBSERVABILITY.md, 5.3 and 6: L18, L19 and L26).
   */
 class HighlightLaws extends ScalaCheckSuite:
 
@@ -139,12 +139,216 @@ class HighlightLaws extends ScalaCheckSuite:
     assert(html.contains("""<span class="c" style="--i:4"><span class="t-num">1</span></span>"""), html)
   }
 
+  // ── L26: the colors of Scala source ──
+
+  property("Inspect L26: the pieces of Scala source, joined, give the text, and the HTML shows it with no markup") {
+    forAllNoShrink(Gen.oneOf(scalaSource, syntax, marked, text)) { t =>
+      val tokens = Highlight.source(t)
+      assertEquals(tokens.map(_.text).mkString, t)
+      assert(tokens.forall(_.text.nonEmpty), tokens.toString)
+      val html = Highlight.sourceHtml(t)
+      assertEquals(plain(html), t)
+      assert(!html.contains(Markup) && !html.contains("<i data-m"), html)
+    }
+  }
+
+  property("Inspect L26: a line comment and a string with one quote end at the line end") {
+    forAllNoShrink(scalaSource) { t =>
+      Highlight.source(t).foreach { token =>
+        val line = (token.tint == Tint.Comment && token.text.startsWith("//")) ||
+          (token.tint == Tint.Str && !token.text.contains("\"\"\""))
+        assert(!line || !token.text.contains('\n'), s"$token in $t")
+      }
+    }
+  }
+
+  test("Inspect L26: the keywords, the names of the definitions, the types, the annotations and the numbers") {
+    val src = "@assumeSafe trait Files extends Cap:\n  def read(path: String)(using f: Files): String\n" +
+      "  update def write(p: String, n: Int = 1_000): Unit"
+    assertEquals(
+      colored(Highlight.source(src)),
+      Vector(
+        Token(Tint.Annotation, "@assumeSafe"),
+        Token(Tint.Keyword, "trait"),
+        Token(Tint.Type, "Files"),
+        Token(Tint.Keyword, "extends"),
+        Token(Tint.Type, "Cap"),
+        Token(Tint.Keyword, "def"),
+        Token(Tint.Def, "read"),
+        Token(Tint.Type, "String"),
+        Token(Tint.Keyword, "using"),
+        Token(Tint.Type, "Files"),
+        Token(Tint.Type, "String"),
+        Token(Tint.Keyword, "update"),
+        Token(Tint.Keyword, "def"),
+        Token(Tint.Def, "write"),
+        Token(Tint.Type, "String"),
+        Token(Tint.Type, "Int"),
+        Token(Tint.Num, "1_000"),
+        Token(Tint.Type, "Unit")
+      )
+    )
+    assertEquals(
+      colored(Highlight.source("0x1F + 1.5e-3 + 41L + 1.max(2) + x1 + true + null + `type` + a @ b")),
+      Vector(
+        Token(Tint.Num, "0x1F"),
+        Token(Tint.Num, "1.5e-3"),
+        Token(Tint.Num, "41L"),
+        Token(Tint.Num, "1"),
+        Token(Tint.Num, "2"),
+        Token(Tint.Lit, "true"),
+        Token(Tint.Lit, "null")
+      )
+    )
+  }
+
+  test("Inspect L26: a comment is one piece, and a block comment can hold another one") {
+    val src = "// a \"line\" comment\nval x = 1 /* a /* nested */ block */ + 2\n/** doc\n  * `code`\n  */\ndef y = 'c'"
+    assertEquals(
+      colored(Highlight.source(src)),
+      Vector(
+        Token(Tint.Comment, "// a \"line\" comment"),
+        Token(Tint.Keyword, "val"),
+        Token(Tint.Def, "x"),
+        Token(Tint.Num, "1"),
+        Token(Tint.Comment, "/* a /* nested */ block */"),
+        Token(Tint.Num, "2"),
+        Token(Tint.Comment, "/** doc\n  * `code`\n  */"),
+        Token(Tint.Keyword, "def"),
+        Token(Tint.Def, "y"),
+        Token(Tint.Str, "'c'")
+      )
+    )
+  }
+
+  test("Inspect L26: the strings, with an interpolation, a string with no end, a character and a block") {
+    val src =
+      "val a = s\"x ${f(\"y\")} \\\" z\" + \"open\nval b = '\\n' + '{ q }\n\"\"\"multi\n\"line\"\"\"\" + raw\"w\""
+    assertEquals(
+      colored(Highlight.source(src)),
+      Vector(
+        Token(Tint.Keyword, "val"),
+        Token(Tint.Def, "a"),
+        Token(Tint.Str, "s\"x ${f(\"y\")} \\\" z\""),
+        Token(Tint.Str, "\"open"),
+        Token(Tint.Keyword, "val"),
+        Token(Tint.Def, "b"),
+        Token(Tint.Str, "'\\n'"),
+        Token(Tint.Str, "\"\"\"multi\n\"line\"\"\"\""),
+        Token(Tint.Str, "raw\"w\"")
+      )
+    )
+  }
+
+  test("Inspect L26: a soft keyword is a keyword only in its place") {
+    val src = "inline def f = m.update(k)\nval end = open\nend match\nopaque type T = Int\nx.open()\n" +
+      "extension (s: String) def n = s.as[Int]\nimport a.{b as c}\nenum E derives CanEqual\nval k = s.end min f.extension"
+    assertEquals(
+      colored(Highlight.source(src)),
+      Vector(
+        Token(Tint.Keyword, "inline"),
+        Token(Tint.Keyword, "def"),
+        Token(Tint.Def, "f"),
+        Token(Tint.Keyword, "val"),
+        Token(Tint.Def, "end"),
+        Token(Tint.Keyword, "end"),
+        Token(Tint.Keyword, "match"),
+        Token(Tint.Keyword, "opaque"),
+        Token(Tint.Keyword, "type"),
+        Token(Tint.Type, "T"),
+        Token(Tint.Type, "Int"),
+        Token(Tint.Keyword, "extension"),
+        Token(Tint.Type, "String"),
+        Token(Tint.Keyword, "def"),
+        Token(Tint.Def, "n"),
+        Token(Tint.Type, "Int"),
+        Token(Tint.Keyword, "import"),
+        Token(Tint.Keyword, "as"),
+        Token(Tint.Keyword, "enum"),
+        Token(Tint.Type, "E"),
+        Token(Tint.Keyword, "derives"),
+        Token(Tint.Type, "CanEqual"),
+        Token(Tint.Keyword, "val"),
+        Token(Tint.Def, "k")
+      )
+    )
+  }
+
+  test("Inspect L26: the HTML of Scala source has a class for each color") {
+    assertEquals(
+      Highlight.sourceHtml("@a def f = \"<b>\" // c"),
+      """<span class="t-annotation">@a</span> <span class="t-keyword">def</span> <span class="t-def">f</span> = """ +
+        """<span class="t-str">&quot;&lt;b&gt;&quot;</span> <span class="t-comment">// c</span>"""
+    )
+    val card = EntryViews.card(logged(Entry.Acted("FAKE-REASONING", "FAKE-TEXT", Some("val n = 1"))))
+    assert(
+      card.contains(
+        """<pre><code><span class="t-keyword">val</span> <span class="t-def">n</span> = <span class="t-num">1</span>""" +
+          "</code></pre>"
+      ),
+      card
+    )
+  }
+
 object HighlightLaws:
 
   /** The rows of a code view: the number, the indent and the HTML of the rest of each line. */
   def codeRows(html: String): Vector[(Int, Int, String)] =
     """<div class="ln"><span class="n">(\d+)</span><span class="c" style="--i:(\d+)">(.*?)</span></div>""".r
       .findAllMatchIn(html).map(m => (m.group(1).toInt, m.group(2).toInt, m.group(3))).toVector
+
+  /** A Scala text with the marks of the lexer of Scala source: comments, quotes, escapes, names and numbers. */
+  val scalaSource: Gen[String] = Gen.listOf(Gen.frequency(
+    4 -> Gen.oneOf(
+      "//",
+      "/*",
+      "*/",
+      "/**",
+      "*",
+      "/",
+      "\"",
+      "\"\"\"",
+      "'",
+      "\\",
+      "`",
+      "@",
+      "$",
+      "${",
+      "{",
+      "}",
+      "(",
+      ")",
+      ".",
+      ":",
+      "=",
+      " ",
+      "\n",
+      "\t"
+    ),
+    3 -> Gen.oneOf(
+      "s",
+      "x",
+      "Foo",
+      "def",
+      "val",
+      "update",
+      "end",
+      "inline",
+      "opaque",
+      "type",
+      "match",
+      "as",
+      "true",
+      "1",
+      "0x1F",
+      "1.5e-3",
+      "41L",
+      "1_000",
+      "é",
+      "日",
+      "\u0001"
+    )
+  )).map(_.mkString)
 
   /** A text with many of the marks that a lexer reads: quotes, escapes, brackets, numbers, words and line ends. */
   val syntax: Gen[String] = Gen.listOf(Gen.frequency(

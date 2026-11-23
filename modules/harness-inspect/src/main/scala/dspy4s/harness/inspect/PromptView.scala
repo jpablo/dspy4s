@@ -69,16 +69,19 @@ object PromptView:
       s"""<pre class="ptext">${marked(text)}</pre>"""
 
   /** The view of a fixed field. The API reference shows its calls first, each with its signature and its comment behind
-    * a click, and then its Scala source behind a click.
+    * a click, and then its Scala source behind a click. The source and the signatures have the colors of Scala (L26).
     */
   private def field(name: String, value: String, calls: Vector[ApiCall]): String =
-    val text = s"""<pre class="ptext">${escape(value)}</pre>"""
+    val shown = if name == "apiReference" then Highlight.sourceHtml(value) else escape(value)
+    val text  = s"""<pre class="ptext">$shown</pre>"""
     if name != "apiReference" || calls.isEmpty then
       s"""<p class="note">The field ${escape(name)}: ${escape(size(value))}.</p>$text"""
     else
       val list = calls.map { c =>
         s"""<details class="call"><summary><code>${escape(c.name)}</code> <span class="about">""" +
-          s"""${escape(c.about)}</span></summary><pre>${escape(c.signature)}</pre><p>${escape(c.doc)}</p></details>"""
+          s"""${escape(c.about)}</span></summary><pre>${Highlight.sourceHtml(c.signature)}</pre><p>${escape(
+              c.doc
+            )}</p></details>"""
       }.mkString("""<div class="calls">""", "", "</div>")
       s"""<p class="note">${escape(Story.plural(calls.size, "call"))} of <code>object api</code>. """ +
         s"""The field apiReference: ${escape(size(value))}.</p>$list""" +

@@ -80,7 +80,7 @@ object EntryViews:
       case Entry.StepStarted(step)            => s"<h2>Step $step</h2>"
       case Entry.Acted(reasoning, text, code) =>
         (if reasoning.trim.isEmpty then "" else folded("Reasoning", reasoning)) + paragraph(text) +
-          code.fold("")(c => s"<pre><code>${escape(c)}</code></pre>")
+          code.fold("")(c => s"<pre><code>${Highlight.sourceHtml(c)}</code></pre>")
       case Entry.EffectStarted(id, op, args) =>
         s"<p><code>${escape(op)}</code> <code>${escape(args.print)}</code></p>" + note(s"call ${id.cell}.${id.n}")
       case Entry.EffectDone(id, result) =>
