@@ -445,6 +445,52 @@ A row has the time, the tokens in and out, the cached part of the prompt, and th
 `seq` of its last item. It puts the items of the reply in place of its items from that `seq`. The views show the same
 last 2000 entries as the Entries view.
 
+### 5.8 The prompt of a session
+
+The user asked for this on 2026-11-22, as the first step of work on the prompt of the harness. The page of each
+exchange showed the prompt, but only one request at a time. The trajectory view of Genesis has an entry at the top of a
+session with the system prompt, the tools and the settings. The user asked for the same thing in the chat and the
+trajectory views.
+
+**What the prompt is.** `Prompt.of` reads the prompt from the exact body of a policy request, so the view shows what the
+model got. The prompt has the parts that stay the same in the steps of a turn:
+
+- **The instructions:** the system message up to its first fixed field. It has the fields of the signature, their
+  format, the objective, and the line `PolicyAdapter.FixedHeader`. The format part also names each field with a
+  marker, so only a marker after the marker `[[ ## completed ## ]]` starts a fixed field.
+- **The fixed fields of the session:** `task` and `apiReference` (`Prompt.SessionFields`). The memory is a fixed field
+  of the policy too, but it changes at each turn, so it is not a part.
+- **The URL and the options:** each member of the body but `messages`, for example `model` and `reasoning_effort`.
+
+When the system message has no fixed field after `completed`, the fixed fields come from the last user message. Then
+the endpoint cannot reuse the start of the request from its cache. A live session of 2026-11-16 (`8b418720`) had such
+a request, and the settings of the prompt say so.
+
+**When a prompt is new.** The first policy call of the page has a new prompt. After it, a policy call has a new prompt
+when a part differs from the part of the policy call before it (`Prompt.starts`). A call of a probe does not count. In
+the sessions of 2026-11-22, the task changed between turns: for example, a child session got another rule for its
+report.
+
+**The item.** Each new prompt is an item of its own (`Item.NewPrompt`) right before the item that holds its call, with
+the key of that item. So the first prompt comes after the note of `Activated` and before the first turn. A `SYSTEM` row
+shows the model, the effort, the size of the parts in characters, and the count of the API calls, with a link to the
+exchange. A click on the row opens a box with these tabs:
+
+- `Instructions`: the text, with each marker line in color.
+- `Task`: the text of the field.
+- `API (N)`: the calls of `object api` in the API reference. Each call has its first sentence, and a click shows its
+  signature up to the `=` of its body and its whole comment. The Scala source is behind a click.
+- `Settings`: the reason, the time, the call, the URL, each option, the place of the fixed fields, and the size of
+  each part. Then the card of the last `Activated` at or before the call, as the Entries view shows it.
+  `SessionFile.lastOfKind` finds that row: the read goes back from the call, and it decodes only the rows whose text
+  has the key `Activated`.
+- `Changes`, only for a prompt that changed: a line diff of each part that changed, and a link to the diff of the two
+  requests. The box of a changed prompt opens on this tab.
+
+**The follow.** The page sends `skipped`, the first entry that it shows, with `from`. So the server compares a call with
+the policy call before it on the page, as on the first load. The prompt of a call never changes, so the follow keeps an
+item of a prompt that the page already shows, and its box stays as the person left it.
+
 ## 6. The laws
 
 As in the other parts of the harness, each law is a property or a test, and each law must fail first.
@@ -540,6 +586,16 @@ The inspector:
   its `Acted`, its API calls with their ends, and its `Observed`. The numbers of a turn are the counts and the sums of
   its parts. An end that is not a reply has its words, and each text of the views is escaped. The page of a session
   opens on the chat view, and it still holds the entries. `/story?from=` gives the items from that `seq`.
+- **L24. The prompt of a session.** A real policy request of the harness, as the OpenAI client sends it, gives the
+  instructions, `task` and `apiReference`, and no memory. Another memory, status or observation makes no change, and
+  another task or option does. Fixed fields in the last user message come from it. The calls of the API reference of
+  a mode each have a signature that ends at the `=` of its body, and a comment. A call has a new prompt when it is the
+  first, or when its prompt differs from the prompt of the call before it. For any journal and any exchanges, a new
+  prompt comes right before the item that holds its call, with its key, and L23 still holds. The box opens on the
+  instructions, or on the changes of a changed prompt, and it escapes each text. The page puts the first prompt after
+  the note of `Activated` and before the first turn, with that `Activated` in its settings, and the follow with
+  `skipped` gives the same items as a page that starts at `skipped`. `lastOfKind` gives the last row of a case up to a
+  `seq`, and a text with the key of the case is no match.
 - **The links to the views.** The `request` and `reply` links of a row open the page of the exchange with
   `?tab=request` and `?tab=reply`, and no row links to a raw path. `?tab=` opens the page on that view, an unknown
   tab opens the chat, and `?against=` with no tab opens the diff. The links to the exchange before and after keep

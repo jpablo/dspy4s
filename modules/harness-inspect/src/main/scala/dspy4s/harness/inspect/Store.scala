@@ -68,6 +68,12 @@ final class Store(val root: Path):
         }
     }
 
+  /** The last `Activated` of the journal of `session` with a `seq` up to `upTo`, or none (5.8). The read does not
+    * decode the rows between them (`SessionFile.lastOfKind`).
+    */
+  def activation(session: SessionId, upTo: Long): Option[SessionFile.Row] =
+    opened(SessionFile.pathOf(root, session), session)(_.lastOfKind("Activated", upTo)).toOption.flatten
+
   /** The exchanges of `session` and the size of its exchange file. */
   def exchanges(session: SessionId): (Vector[Exchange], Long) = Exchanges.read(ExchangeFile.pathOf(root, session))
 

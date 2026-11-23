@@ -67,10 +67,11 @@ object Pages:
           s"""<span class="cut">The page shows the last <span id="count-shown">${rows.size}</span> of """ +
             s"""<span id="count-all">$whole</span> entries. <a href="$base/journal.jsonl">journal.jsonl</a> has all """ +
             "of them.</span>"
-      val raw   = Html.rawLinks(base, Vector("journal.jsonl", "http.jsonl"))
-      val bar   = header(title, facts, modes + controls(withPredictors = true) + note + raw)
-      val story = Story.html(session, Story.of(rows, exchanges), System.currentTimeMillis())
-      val cols  = """<div class="r cols"><span>Kind</span><span>Summary</span><span class="n">Time</span>""" +
+      val raw     = Html.rawLinks(base, Vector("journal.jsonl", "http.jsonl"))
+      val bar     = header(title, facts, modes + controls(withPredictors = true) + note + raw)
+      val prompts = promptsOf(store, session, exchanges, Long.MinValue)
+      val story   = Story.html(session, Story.of(rows, exchanges, prompts), System.currentTimeMillis())
+      val cols    = """<div class="r cols"><span>Kind</span><span>Summary</span><span class="n">Time</span>""" +
         """<span class="n">In → out</span><span class="n">Cached</span><span class="n">Speed</span></div>"""
       val main = s"""<main id="story" data-session="${session.value}">$cols$story</main>""" +
         s"""<main id="rows" data-session="${session.value}" data-last="${lastOf(rows)}" data-size="$size" """ +
@@ -80,12 +81,26 @@ object Pages:
 
   /** The items of the chat and the trajectory from the entry `from` (5.7): the rows from `from`, and the exchanges
     * whose `after` is not below `from`. The follow of the page puts them in place of its items from that `seq`.
+    * `skipped` is the first entry of the page, so a new prompt is new on the page as on its first load (5.8).
     */
-  def story(store: Store, session: SessionId, from: Long): Either[String, String] =
+  def story(store: Store, session: SessionId, from: Long, skipped: Long): Either[String, String] =
     store.rows(session, from).map { rows =>
       val (all, _) = store.exchanges(session)
-      Story.html(session, Story.of(rows, all.filter(_.after >= from)), System.currentTimeMillis())
+      val shown    = if skipped <= 0L then all else all.filter(_.after >= skipped)
+      val prompts  = promptsOf(store, session, shown, from)
+      Story.html(session, Story.of(rows, all.filter(_.after >= from), prompts), System.currentTimeMillis())
     }
+
+  /** The policy calls of `shown` with an `after` from `from` on that have a new prompt (5.8), by their ids. The
+    * comparison starts at the first policy call of `shown`, so the first call of the page has a new prompt. Each one
+    * has the last `Activated` at or before it.
+    */
+  private def promptsOf(store: Store, session: SessionId, shown: Vector[Exchange], from: Long)
+      : Map[String, PromptMark] =
+    val (earlier, later) = shown.filter(Prompt.policy).sortBy(_.after).partition(_.after < from)
+    Prompt.starts(later, earlier.lastOption).map { (x, prompt, before) =>
+      x.id -> PromptMark(x, prompt, before, store.activation(session, x.after))
+    }.toMap
 
   /** The page of a probe: its journal, with no exchanges. The exchanges of a probe are in the file of its caller. */
   def probe(store: Store, name: String, nonce: String): Either[String, String] =

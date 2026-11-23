@@ -130,7 +130,8 @@ object ExchangePage:
         if hunks.isEmpty then select + summary + """<p class="note">The two requests have the same text.</p>"""
         else select + summary + hunks.map(hunk).mkString
 
-  private def hunk(h: Hunk): String =
+  /** A part of a diff, with its head and its lines. */
+  private[inspect] def hunk(h: Hunk): String =
     val lines = h.edits.map {
       case Edit.Keep(line)   => s"""<span class="d ctx">  ${escape(line)}</span>"""
       case Edit.Remove(line) => s"""<span class="d del">- ${escape(line)}</span>"""

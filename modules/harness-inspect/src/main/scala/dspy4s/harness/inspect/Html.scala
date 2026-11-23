@@ -186,6 +186,23 @@ text-align:center;background:var(--code)}
 .k-memory{color:var(--muted)}.k-memory .kind{color:var(--memory)}.k-llm .kind{color:var(--leaf)}
 .k-note .kind{color:var(--muted)}.r.bad .kind{color:var(--bad)}
 body.mode-trajectory .say{max-width:none;margin-left:0;border-radius:6px}
+details.prompt>summary{list-style:none;cursor:pointer}
+details.prompt>summary::-webkit-details-marker{display:none}
+details.prompt>summary .sum::before{content:"▸ ";color:var(--muted)}
+details.prompt[open]>summary .sum::before{content:"▾ "}
+.k-system .kind{color:var(--accent)}
+.pbox{border:1px solid var(--line);border-radius:6px;background:var(--card);padding:8px 10px;margin:2px 0 10px}
+.ptabs{display:flex;flex-wrap:wrap;gap:4px;margin-bottom:6px}
+.pbox .note{color:var(--muted);font-size:12px;margin:4px 0}
+.pbox pre{max-height:36em;overflow:auto}
+.pbox h3{font-size:13px;margin:10px 0 4px}
+.pbox>.pview>dl{display:grid;grid-template-columns:max-content 1fr;gap:2px 12px;font-size:12.5px;margin:4px 0}
+.pbox>.pview>dl dt{color:var(--muted)}.pbox>.pview>dl dd{margin:0;overflow-wrap:anywhere}
+.ptext .mk{color:var(--accent);font-weight:600}
+.calls .call{border-bottom:1px solid var(--line);padding:3px 0}
+.calls .call>summary,.pbox details.source>summary{cursor:pointer}
+.calls .about{color:var(--muted)}
+.calls .call p{margin:4px 0 6px}
 @media (max-width:640px){.r{grid-template-columns:56px minmax(0,1fr)}.r .n{display:none}}
 """ + hides
 
@@ -253,6 +270,14 @@ if (rows) rows.addEventListener('click', ev => {
 });
 document.querySelectorAll('input[data-hide]').forEach(c =>
   c.addEventListener('change', () => body.classList.toggle('hide-' + c.dataset.hide, !c.checked)));
+// The tabs of the box of a prompt (5.8). The follow adds new boxes, so one listener on the page serves each box.
+document.addEventListener('click', ev => {
+  const b = ev.target.closest('button[data-ptab]');
+  if (!b) return;
+  const box = b.closest('.pbox');
+  box.querySelectorAll('[data-pview]').forEach(v => { v.hidden = v.dataset.pview !== b.dataset.ptab; });
+  box.querySelectorAll('button[data-ptab]').forEach(x => x.classList.toggle('on', x === b));
+});
 if (!rows || !rows.dataset.session) return;
 const follow = document.getElementById('follow');
 let last = Number(rows.dataset.last), size = Number(rows.dataset.size), busy = false;
@@ -268,19 +293,23 @@ const place = x => {
   at.after(x);
 };
 // The items of the chat from the key of the last item, in place of the items from that key (5.7). A turn that the
-// person opened stays open.
+// person opened stays open. The item of a prompt never changes, so the old item stays, with its box as it was (5.8).
 const refreshStory = async () => {
   const items = [...story.querySelectorAll('.item')];
   const from = items.length ? Number(items[items.length - 1].dataset.key) : 0;
-  const r = await fetch('/s/' + story.dataset.session + '/story?from=' + from, {cache: 'no-store'});
+  const r = await fetch('/s/' + story.dataset.session + '/story?from=' + from + '&skipped=' + skipped,
+    {cache: 'no-store'});
   if (!r.ok) return;
   const t = document.createElement('template');
   t.innerHTML = await r.text();
   const gone = items.filter(e => Number(e.dataset.key) >= from);
   const open = new Set(gone.filter(e => e.querySelector('details.work[open]')).map(e => e.dataset.key));
+  const kept = new Map(gone.filter(e => e.dataset.prompt).map(e => [e.dataset.prompt, e]));
   gone.forEach(e => e.remove());
   const all = body.classList.contains('mode-trajectory');
   for (const e of [...t.content.children]) {
+    const old = e.dataset.prompt && kept.get(e.dataset.prompt);
+    if (old) { story.appendChild(old); continue; }
     if (all || open.has(e.dataset.key)) e.querySelectorAll('details.work').forEach(d => { d.open = true; });
     story.appendChild(e);
   }

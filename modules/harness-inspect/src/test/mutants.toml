@@ -1,5 +1,5 @@
 # The mutants of the inspector. Each mutant breaks one rule of section 5 of docs/code-harness/OBSERVABILITY.md, and
-# laws L10 to L23 of its section 6 must kill it.
+# laws L10 to L24 of its section 6 must kill it.
 #
 # `python3 scripts/mutants/mutants.py modules/harness-inspect/src/test/mutants.toml` applies each mutant alone, runs the
 # tests of the module, and restores the code. At least one test must fail for each mutant.
@@ -576,3 +576,98 @@ name = "Mutant: a message of the chat is not escaped"
 file = "Story.scala"
 old = '''s"""<div class="say $kind"><div class="who">${escape(by)}</div><div class="text">${escape(text)}</div></div>"""'''
 new = '''s"""<div class="say $kind"><div class="who">${escape(by)}</div><div class="text">$text</div></div>"""'''
+
+# ── The prompt of a session (5.8) ──
+
+[[mutant]]
+name = "Mutant: prompt: the fixed fields start at the first marker of the system message"
+[[mutant.edit]]
+file = "Prompt.scala"
+old = "lines.indexWhere(line => marker(line).exists(PolicyAdapter.Fixed.contains), done + 1)"
+new = "lines.indexWhere(line => marker(line).exists(PolicyAdapter.Fixed.contains), 0)"
+
+[[mutant]]
+name = "Mutant: prompt: the memory is a part of the prompt"
+[[mutant.edit]]
+file = "Prompt.scala"
+old = 'val SessionFields: Vector[String] = PolicyAdapter.Fixed.filterNot(_ == "memory")'
+new = "val SessionFields: Vector[String] = PolicyAdapter.Fixed"
+
+[[mutant]]
+name = "Mutant: prompt: an option is not a part"
+[[mutant.edit]]
+file = "Prompt.scala"
+old = 'def parts: Vector[String] = ("instructions" +: fields.map(_._1)) ++ ("url" +: options.map(_._1))'
+new = 'def parts: Vector[String] = ("instructions" +: fields.map(_._1)) ++ Vector("url")'
+
+[[mutant]]
+name = "Mutant: prompt: each policy call has a new prompt"
+[[mutant.edit]]
+file = "Prompt.scala"
+old = "val fresh = last.forall((_, earlier) => prompt.changes(earlier).nonEmpty)"
+new = "val fresh = true"
+
+[[mutant]]
+name = "Mutant: prompt: a call is compared with the first call, not with the call before it"
+[[mutant.edit]]
+file = "Prompt.scala"
+old = "(Some(x -> prompt), if fresh then out :+ ((x, prompt, last)) else out)"
+new = "(last.orElse(Some(x -> prompt)), if fresh then out :+ ((x, prompt, last)) else out)"
+
+[[mutant]]
+name = "Mutant: prompt: a signature ends at an = in a bracket"
+[[mutant.edit]]
+file = "Prompt.scala"
+old = "case (i, 0)"
+new = "case (i, _)"
+
+[[mutant]]
+name = "Mutant: prompt: a declaration ends at a line of the member indent in an open bracket"
+[[mutant.edit]]
+file = "Prompt.scala"
+old = "if !line.isBlank && (indent(line) > inner || outside(text)._2 > 0) =>"
+new = "if !line.isBlank && indent(line) > inner =>"
+
+[[mutant]]
+name = "Mutant: prompt: the item of a new prompt comes after the item of its call"
+[[mutant.edit]]
+file = "Story.scala"
+old = """      item.exchangeIds.flatMap(prompts.get).foreach(mark => out += Item.NewPrompt(mark, item.key))
+      out += item: Unit"""
+new = """      out += item
+      item.exchangeIds.flatMap(prompts.get).foreach(mark => out += Item.NewPrompt(mark, item.key))"""
+
+[[mutant]]
+name = "Mutant: prompt: the follow compares the first call of its part with no call"
+[[mutant.edit]]
+file = "Pages.scala"
+old = "Prompt.starts(later, earlier.lastOption)"
+new = "Prompt.starts(later, earlier.headOption.filter(_ => false))"
+
+[[mutant]]
+name = "Mutant: prompt: the follow of a page that starts later compares with a call before the page"
+[[mutant.edit]]
+file = "Pages.scala"
+old = "val shown    = if skipped <= 0L then all else all.filter(_.after >= skipped)"
+new = "val shown    = if skipped <= Long.MaxValue then all else all.filter(_.after >= skipped)"
+
+[[mutant]]
+name = "Mutant: prompt: the activation of a call can come after the call"
+[[mutant.edit]]
+file = "Store.scala"
+old = '_.lastOfKind("Activated", upTo)'
+new = '_.lastOfKind("Activated", upTo.max(Long.MaxValue))'
+
+[[mutant]]
+name = "Mutant: prompt: the box of a changed prompt opens on the instructions"
+[[mutant.edit]]
+file = "PromptView.scala"
+old = 'val first   = if changed then "changes" else "instructions"'
+new = 'val first   = "instructions"'
+
+[[mutant]]
+name = "Mutant: prompt: the text of a field is not escaped"
+[[mutant.edit]]
+file = "PromptView.scala"
+old = '''val text = s"""<pre class="ptext">${escape(value)}</pre>"""'''
+new = '''val text = s"""<pre class="ptext">$value</pre>"""'''

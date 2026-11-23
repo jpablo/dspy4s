@@ -126,6 +126,25 @@ the model calls and the errors, for example `Worked 6.2 s · 4 steps · 3 cells 
 A row has four columns of numbers: the time, the tokens in and out, the part of the prompt from the cache of the
 endpoint, and the tokens per second of the reply. A row with an error has a red kind.
 
+**The prompt.** A `SYSTEM` row shows the prompt of the policy. The `Chat` and `Trajectory` views both show it. The
+first `SYSTEM` row comes before the first turn. Another `SYSTEM` row comes before each turn whose prompt changed, for
+example `The prompt changed: task`. The prompt has these parts:
+
+- the instructions: the system message up to the field `task`;
+- the fields `task` and `apiReference`;
+- the URL and the options of the request, for example `model` and `reasoning_effort`.
+
+The memory changes at each turn, so it is not a part. The page of each exchange shows it. Click the row to open a box
+with these tabs:
+
+| Tab | What it shows |
+|---|---|
+| `Instructions` | the text of the instructions, with the marker lines such as `[[ ## task ## ]]` in color |
+| `Task` | the text of the field `task` |
+| `API (N)` | each call of `object api`, with its first sentence. Click a call for its signature and its comment. The Scala source is folded. |
+| `Settings` | the call, the URL, each option, the place of the fixed fields, the size of each part, and the configuration of the last `Activated` |
+| `Changes` | only for a prompt that changed: the line diff of each part that changed. The box opens on this tab. |
+
 **The `Entries` view** shows the entries of the journal in the order of their `seq`. A step has an indent, and the
 parts of a step (`Acted`, the calls, `Observed`) have two indents.
 
@@ -212,5 +231,9 @@ An example of `exchanges.py --width 60`, with values for this page:
 4. Click `later` until the title says `policy` again, and click `Diff`. You must see the lines that the second step
    added, for example the output of the cell. Then run `exchanges.py` on the exchange file of the session. You must see
    one line for each exchange of the page.
+
+5. Go back to the page of the session, and click `Trajectory`. Above the first turn, click the `SYSTEM` row. Click
+   `API` and then the call `read`. You must see `def read(path: String)(using f: Files): String`. Click `Settings`.
+   You must see the model of the session and the card of `Activated`.
 
 Next: [Code harness](index.md).

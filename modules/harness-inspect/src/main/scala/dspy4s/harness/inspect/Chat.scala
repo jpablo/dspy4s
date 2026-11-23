@@ -120,7 +120,8 @@ object Chat:
     val role = text(json, "role").getOrElse("?")
     Vector(s"── $role ──") ++ contentOf(json).flatMap(_.linesIterator) ++ toolCallsOf(json).map(c => s"→ $c")
 
-  private def contentOf(json: Json): Vector[String] =
+  /** The texts of the content of a message: its text, or the text of each part. */
+  private[inspect] def contentOf(json: Json): Vector[String] =
     field(json, "content") match
       case Some(Json.String(value)) => Vector(value)
       case Some(parts: Json.Array)  =>

@@ -204,8 +204,10 @@ private[inspect] final class Routes(store: Store, port: Int):
               .fold(missing)(html => page(Right(html)))
           }
         case "s" :: id :: "story" :: Nil => withSession(id) { s =>
-            query(uri).get("from").flatMap(_.toLongOption).fold(missing) { from =>
-              Pages.story(store, s, from).fold(failed, html => Reply(200, "text/html", Body.Text(html)))
+            val asked   = query(uri)
+            val skipped = asked.get("skipped").flatMap(_.toLongOption).getOrElse(0L)
+            asked.get("from").flatMap(_.toLongOption).fold(missing) { from =>
+              Pages.story(store, s, from, skipped).fold(failed, html => Reply(200, "text/html", Body.Text(html)))
             }
           }
         case "s" :: id :: "after" :: seq :: Nil => withSession(id) { s =>

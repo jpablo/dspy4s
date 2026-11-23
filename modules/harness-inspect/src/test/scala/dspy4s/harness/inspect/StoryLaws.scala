@@ -98,6 +98,29 @@ class StoryLaws extends ScalaCheckSuite:
     }
   }
 
+  property("Story L24: a new prompt comes right before the item that holds its call, with the key of that item") {
+    val journal   = Gen.frequency(3 -> Gen.listOf(entry(text)).map(_.toVector), 1 -> Gen.const(turn))
+    val predictor = Gen.oneOf("policy", "compress", "subQuery", "none")
+    val call      = Gen.zip(Gen.choose(-1L, 40L), predictor, Gen.prob(0.5))
+    val prompt    = Prompt("FAKE-INSTRUCTIONS", Vector.empty, Vector.empty, "", inSystem = true)
+    forAllNoShrink(journal, Gen.listOf(call)) { (entries, raw) =>
+      val rows      = rowsOf(entries)
+      val exchanges = raw.toVector.zipWithIndex.map { case ((after, p, _), i) => exchange(s"x$i", after, p) }
+      val marked    = raw.toVector.zip(exchanges).collect { case ((_, _, true), x) => x }
+      val items     = Story.of(rows, exchanges, marked.map(x => x.id -> PromptMark(x, prompt, None, None)).toMap)
+      // The new prompts hold no entry and no exchange, and the keys still go up.
+      assertEquals(items.flatMap(_.seqs), seqs(rows))
+      assertEquals(items.flatMap(_.exchangeIds).sorted, exchanges.map(_.id).sorted)
+      assertEquals(items.map(_.key), items.map(_.key).sorted)
+      val news = items.zipWithIndex.collect { case (Item.NewPrompt(mark, at), i) => (i, mark, at) }
+      assertEquals(news.map(_._2.call.id).sorted, marked.map(_.id).sorted)
+      news.foreach { (i, mark, at) =>
+        val holder = items.drop(i + 1).find { case Item.NewPrompt(_, _) => false; case _ => true }
+        assert(holder.exists(h => h.key == at && h.exchangeIds.contains(mark.call.id)), items.toString)
+      }
+    }
+  }
+
   test("Story L23: a turn holds its message, and a step its policy calls, its Acted, its calls, its output") {
     val items = Story.of(rowsOf(turn), calls)
     assertEquals(items.size, 2, items.toString)

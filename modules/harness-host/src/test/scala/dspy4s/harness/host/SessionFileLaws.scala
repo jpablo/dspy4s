@@ -170,6 +170,33 @@ class SessionFileLaws extends munit.FunSuite:
     }
   }
 
+  test("File: lastOfKind gives the last row of a case up to a seq, and a text with the key of the case is no match") {
+    // The key of `Activated` in a text: the codec puts a backslash before each quote, so the row is not an `Activated`.
+    val fake = """FAKE "entry":{"Activated": FAKE"""
+    val log  = Support.logOf(
+      1000L,
+      Entry.Activated(Versions("FAKE-1", "1"), Support.config()),
+      Entry.Input(RequestId("r1"), fake, Map.empty),
+      Entry.TurnStarted,
+      Entry.Activated(Versions("FAKE-2", "1"), Support.config()),
+      Entry.Input(RequestId("r2"), fake, Map.empty)
+    )
+    withRoot { root =>
+      val file = open(SessionFile.pathOf(root, id(1)))
+      try
+        assertEquals(file.append(log, flush = true), Right(()))
+        def last(kind: String, upTo: Long) = file.lastOfKind(kind, upTo).fold(e => fail(e), _.map(_.seq))
+        assertEquals(last("Activated", 2L), Some(0L))
+        assertEquals(last("Activated", 3L), Some(3L))
+        assertEquals(last("Activated", 100L), Some(3L))
+        assertEquals(last("Activated", -1L), None)
+        assertEquals(last("Input", 3L), Some(1L))
+        assertEquals(last("Ended", 100L), None)
+        assertEquals(file.lastOfKind("Activated", 2L).map(_.flatMap(_.logged.toOption)), Right(log.headOption))
+      finally file.close()
+    }
+  }
+
   test("File: a commit with a seq that the file has fails and adds none of its rows, so a stale writer adds nothing") {
     withRoot { root =>
       val log  = inputs(4)

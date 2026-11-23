@@ -113,6 +113,33 @@ final class SessionFile private (private val connection: Connection, val path: P
       }
     }.toEither.left.map(e => s"the read of the journal $path failed: ${e.getMessage}")
 
+  /** The last row with a `seq` up to `upTo` whose entry is the case `kind` of `Entry`, or none
+    * (docs/code-harness/OBSERVABILITY.md, 5.8). The read goes back from `upTo`. It reads only the rows whose text has
+    * `kind` as the key of its `entry` object, and it stops at the first row that decodes to that case. So a reader
+    * finds the last `Activated` before an entry, and it does not decode each row between them.
+    */
+  def lastOfKind(kind: String, upTo: Long): Either[String, Option[SessionFile.Row]] =
+    Try {
+      Using.resource(connection.prepareStatement(SessionFile.LastOfKind)) { select =>
+        select.setString(1, session.value)
+        select.setLong(2, upTo)
+        // The codec writes `"entry":{"<case>":` with no spaces. A quote in a text value has a backslash before it, so
+        // a text cannot make this key.
+        select.setString(3, s""""entry":{"$kind":""")
+        Using.resource(select.executeQuery()) { rows =>
+          Iterator.continually(rows.next()).takeWhile(identity).map { _ =>
+            val text = rows.getString(3)
+            SessionFile.Row(
+              rows.getLong(1),
+              rows.getBoolean(2),
+              text,
+              SessionFile.codec.decode(text).left.map(_.toString)
+            )
+          }.find(_.logged.exists(_.entry.productPrefix == kind))
+        }
+      }
+    }.toEither.left.map(e => s"the read of the journal $path failed: ${e.getMessage}")
+
   /** The largest `seq` of the session in the file, also of a row that does not decode, or -1 for no row. The writer
     * gives the next entry the `seq` after it.
     */
@@ -151,6 +178,9 @@ object SessionFile:
   private val Insert = "insert into journal (session, seq, required, entry) values (?, ?, ?, ?)"
   private val Select = "select seq, required, entry from journal where session = ? and seq >= ? order by seq"
   private val Last   = "select max(seq) from journal where session = ?"
+
+  private val LastOfKind =
+    "select seq, required, entry from journal where session = ? and seq <= ? and instr(entry, ?) > 0 order by seq desc"
 
   private val Table =
     "create table if not exists journal (session text not null, seq integer not null, required integer not null, " +

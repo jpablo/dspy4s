@@ -81,24 +81,30 @@ enum Item:
   /** Another model call outside a turn, after the entry `at`. */
   case Llm(call: Exchange, at: Long)
 
+  /** The new prompt of a policy call (5.8). It comes right before the item that holds the call, and `at` is the key of
+    * that item. The call stays in that item, so this item holds no entry and no exchange.
+    */
+  case NewPrompt(mark: PromptMark, at: Long)
+
   /** The place of the item in the journal: the `seq` of its first entry, or of the entry that its calls come after. The
     * keys of the items of a journal never go down, so the follow replaces the items from a `seq` (5.7).
     */
   def key: Long =
     this match
-      case OfTurn(turn)  => turn.message.getOrElse(turn.start).seq
-      case Message(row)  => row.seq
-      case Note(row)     => row.seq
-      case Memory(_, at) => at
-      case Llm(_, at)    => at
+      case OfTurn(turn)     => turn.message.getOrElse(turn.start).seq
+      case Message(row)     => row.seq
+      case Note(row)        => row.seq
+      case Memory(_, at)    => at
+      case Llm(_, at)       => at
+      case NewPrompt(_, at) => at
 
   /** The `seq` of each entry of the item, once each, in order. */
   def seqs: Vector[Long] =
     val rows = this match
-      case OfTurn(turn)             => turn.rows
-      case Message(row)             => Vector(row)
-      case Note(row)                => Vector(row)
-      case Memory(_, _) | Llm(_, _) => Vector.empty
+      case OfTurn(turn)                               => turn.rows
+      case Message(row)                               => Vector(row)
+      case Note(row)                                  => Vector(row)
+      case Memory(_, _) | Llm(_, _) | NewPrompt(_, _) => Vector.empty
     rows.map(_.seq).distinct.sorted
 
   /** The id of each exchange of the item. */
@@ -129,9 +135,10 @@ object Story:
 
   /** The items of `rows` and `exchanges`. Each exchange comes after the last entry whose `seq` is not above its
     * `after`, as in the tree of the entries (5.2). The exchanges go in the order of their `after`, and two exchanges
-    * with the same `after` keep the order of the file. Each entry and each exchange is in exactly one item.
+    * with the same `after` keep the order of the file. Each entry and each exchange is in exactly one item. An item
+    * with a call of `prompts` comes after a `NewPrompt` item of that call (5.8).
     */
-  def of(rows: Vector[Row], exchanges: Vector[Exchange]): Vector[Item] =
+  def of(rows: Vector[Row], exchanges: Vector[Exchange], prompts: Map[String, PromptMark] = Map.empty): Vector[Item] =
     val seqs                                          = rows.map(_.seq)
     def anchor(x: Exchange): Option[Int]              = Option(seqs.lastIndexWhere(_ <= x.after)).filter(_ >= 0)
     val sorted                                        = exchanges.sortBy(_.after)
@@ -141,10 +148,10 @@ object Story:
       i =>
         Left(rows(i)) +: after.getOrElse(i, Vector.empty).map(x => Right((x, rows(i).seq)))
     }
-    Walk(events).items
+    Walk(events, prompts).items
 
   /** The walk of the events of `of`: the entries and the exchanges in their order. */
-  private final class Walk(events: Vector[Either[Row, (Exchange, Long)]]):
+  private final class Walk(events: Vector[Either[Row, (Exchange, Long)]], prompts: Map[String, PromptMark]):
     private val out                         = Vector.newBuilder[Item]
     private var turn: Option[OpenTurn]      = None
     private var pending: Option[Row]        = None
@@ -161,8 +168,13 @@ object Story:
     def items: Vector[Item] =
       events.indices.foreach(i => events(i).fold(entry(i, _), (x, at) => exchange(x, at)))
       flushMemory()
-      turn.foreach(t => out += Item.OfTurn(t.close(None)))
+      turn.foreach(t => emit(Item.OfTurn(t.close(None))))
       out.result()
+
+    /** Adds `item`, after a `NewPrompt` item for each of its calls that `prompts` has (5.8). */
+    private def emit(item: Item): Unit =
+      item.exchangeIds.flatMap(prompts.get).foreach(mark => out += Item.NewPrompt(mark, item.key))
+      out += item: Unit
 
     private def entryOf(row: Row): Option[Entry] = row.logged.toOption.map(_.entry)
 
@@ -171,14 +183,14 @@ object Story:
       events.iterator.drop(i + 1).collectFirst { case Left(row) => row }.flatMap(entryOf).contains(Entry.TurnStarted)
 
     private def flushMemory(): Unit =
-      memory.foreach(m => out += m)
+      memory.foreach(emit)
       memory = None
 
     private def entry(i: Int, row: Row): Unit =
       flushMemory()
       (turn, entryOf(row)) match
         case (_, Some(Entry.TurnStarted)) =>
-          turn.foreach(t => out += Item.OfTurn(t.close(None)))
+          turn.foreach(t => emit(Item.OfTurn(t.close(None))))
           val opened = OpenTurn(pending, row)
           opened.lead ++= pendingCalls.map(callPart): Unit
           pendingCalls.clear()
@@ -188,7 +200,7 @@ object Story:
         case (None, Some(Entry.Input(_, _, _)))                  => out += Item.Message(row): Unit
         case (None, _)                                           => out += Item.Note(row): Unit
         case (Some(t), Some(Entry.TurnEnded(_)))                 =>
-          out += Item.OfTurn(t.close(Some(row))): Unit
+          emit(Item.OfTurn(t.close(Some(row))))
           turn = None
         case (Some(t), Some(Entry.StepStarted(_)))                        => t.steps += ((row, ArrayBuffer[Part]())): Unit
         case (Some(t), Some(Entry.Acted(_, _, code))) if t.steps.nonEmpty =>
@@ -235,7 +247,7 @@ object Story:
             memory = Some(memory.fold(new Item.Memory(Vector(x), at))(m => m.copy(calls = m.calls :+ x)))
           else
             flushMemory()
-            out += Item.Llm(x, at): Unit
+            emit(Item.Llm(x, at))
 
   // ── The numbers ──
 
@@ -292,7 +304,7 @@ object Story:
 
   // ── The HTML ──
 
-  private def thousands(n: Long): String = String.format(Locale.ROOT, "%,d", java.lang.Long.valueOf(n))
+  private[inspect] def thousands(n: Long): String = String.format(Locale.ROOT, "%,d", java.lang.Long.valueOf(n))
 
   /** A time in words: milliseconds under a second, then seconds with one decimal, then minutes and seconds. */
   private def duration(millis: Long): String =
@@ -300,7 +312,7 @@ object Story:
     else if millis < 60_000L then String.format(Locale.ROOT, "%.1f s", java.lang.Double.valueOf(millis / 1000.0))
     else s"${millis / 60_000L} min ${millis % 60_000L / 1000L} s"
 
-  private def plural(n: Long, word: String): String = s"${thousands(n)} $word${if n == 1L then "" else "s"}"
+  private[inspect] def plural(n: Long, word: String): String = s"${thousands(n)} $word${if n == 1L then "" else "s"}"
 
   /** The cells of the numbers of a row: the time, the tokens in and out, the cached part, and the tokens per second. */
   private def numbers(time: Option[Long], x: Option[Exchange]): String =
@@ -476,16 +488,19 @@ object Story:
   def html(session: SessionId, items: Vector[Item], now: Long): String =
     items.map { item =>
       val body = item match
-        case Item.OfTurn(turn)     => turnHtml(session, turn, now)
-        case Item.Message(row)     => say("other", s"${who(row)} · ${clock(row)}", messageText(row))
-        case Item.Note(row)        => noteRow(row)
-        case Item.Memory(calls, _) => memoryRow(session, calls)
-        case Item.Llm(x, _)        => row("LLM", link(session, x), "", numbers(timeOf(x), Some(x)), failedExchange(x))
-      val kind = item match
-        case Item.OfTurn(_)  => "turn"
-        case Item.Message(_) => "message"
-        case _               => "other"
-      if body.isEmpty then "" else s"""<section class="item $kind" data-key="${item.key}">$body</section>"""
+        case Item.OfTurn(turn)       => turnHtml(session, turn, now)
+        case Item.Message(row)       => say("other", s"${who(row)} · ${clock(row)}", messageText(row))
+        case Item.Note(row)          => noteRow(row)
+        case Item.Memory(calls, _)   => memoryRow(session, calls)
+        case Item.Llm(x, _)          => row("LLM", link(session, x), "", numbers(timeOf(x), Some(x)), failedExchange(x))
+        case Item.NewPrompt(mark, _) => PromptView.html(session, mark)
+      // The follow keeps the item of a prompt that it already shows, so its box stays as the person left it (5.8).
+      val (kind, attrs) = item match
+        case Item.OfTurn(_)          => ("turn", "")
+        case Item.Message(_)         => ("message", "")
+        case Item.NewPrompt(mark, _) => ("prompt", s""" data-prompt="${escape(mark.call.id)}"""")
+        case _                       => ("other", "")
+      if body.isEmpty then "" else s"""<section class="item $kind" data-key="${item.key}"$attrs>$body</section>"""
     }.mkString
 
   private def messageText(row: Row): String =
