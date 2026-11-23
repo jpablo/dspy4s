@@ -463,8 +463,10 @@ model got. The prompt has the parts that stay the same in the steps of a turn:
 - **The URL and the options:** each member of the body but `messages`, for example `model` and `reasoning_effort`.
 
 When the system message has no fixed field after `completed`, the fixed fields come from the last user message. Then
-the endpoint cannot reuse the start of the request from its cache. A live session of 2026-11-16 (`8b418720`) had such
-a request, and the settings of the prompt say so.
+the endpoint cannot reuse the start of the request from its cache, and the settings of the prompt say so. This view
+found 17 such requests in the live sessions of 2026-11-15 and 2026-11-16 (`8b418720` and the controller). Each one had
+a memory with white space at its end, which `PolicyAdapter.moved` did not accept (CODE_HARNESS_DESIGN.md, 10.6). The
+fix came on 2026-11-22.
 
 **When a prompt is new.** The first policy call of the page has a new prompt. After it, a policy call has a new prompt
 when a part differs from the part of the policy call before it (`Prompt.starts`). A call of a probe does not count. In

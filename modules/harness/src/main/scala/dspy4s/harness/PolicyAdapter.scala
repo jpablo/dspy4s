@@ -1,7 +1,7 @@
 package dspy4s.harness
 
 import dspy4s.adapters.contracts.{Adapter, AdapterInvocation, DelegatingAdapter, FormattedPrompt, ParsedOutput}
-import dspy4s.core.contracts.{DspyError, DynamicValues, ParseError, RuntimeContext, SignatureLayout}
+import dspy4s.core.contracts.{DspyError, DynamicValues, ParseError, PythonText, RuntimeContext, SignatureLayout}
 import dspy4s.lm.contracts.{LmOutput, MessageRole}
 import dspy4s.programs.runtime.SettingsProgramRuntime
 import zio.blocks.schema.DynamicValue
@@ -58,10 +58,22 @@ private[harness] object PolicyAdapter:
 
   /** `prompt` with the fixed fields at the end of its system message (CODE_HARNESS_DESIGN.md, 10.6). `prefix` is the
     * marker form of the fixed fields of the request, and `shown` the marker form of the fixed fields that are not
-    * empty. When the last user message starts with `prefix` and a blank line, that start goes away, and `shown` goes at
-    * the end of the system message after `FixedHeader`. So the system message and the steps of the turn are the same
-    * start of each request of a turn, and the endpoint can reuse them from its cache. The history of the turn stays
-    * between them and the last message. Each other prompt stays as it is.
+    * empty. The rule applies when the last user message starts with `prefix` and white space that ends with a blank
+    * line. Then that start and that white space go away, and `shown` goes at the end of the system message after
+    * `FixedHeader`. So the system message and the steps of the turn are the same start of each request of a turn, and
+    * the endpoint can reuse them from its cache. The history of the turn stays between them and the last message. Each
+    * other prompt stays as it is.
+    *
+    * The adapter strips the whole user text (`PythonText.strip`, as `strip()` in upstream DSPy). `memory` is the last
+    * field of `prefix`, so the strip removes the white space at the end of the memory. For an empty memory, it removes
+    * the line end after the marker of `memory`. In the last message, the next field comes after the memory, so that
+    * white space stays. Thus the white space after `prefix` can be longer than a blank line, and the rule removes all
+    * of it.
+    *
+    * An earlier rule accepted only an exact blank line after `prefix`. In the live sessions of 2026-11-15 and
+    * 2026-11-16, 17 requests of the policy kept the fixed fields in the last message, after the history. Each one had a
+    * memory with white space at its end, so the endpoint reused no start of these requests from its cache. For an empty
+    * memory, the earlier rule left a line end at the start of the last message.
     *
     * A measured request (2026-11-12) had the fixed fields in the last user message, after the history. So each later
     * step reused only 256 of about 3,200 tokens from the cache.
@@ -73,13 +85,15 @@ private[harness] object PolicyAdapter:
     val changed  =
       for
         _      <- Option.when(prefix.nonEmpty && first >= 0 && first < last)(())
-        text   <- messages(last).text.filter(_.startsWith(prefix + "\n\n"))
+        text   <- messages(last).text.filter(_.startsWith(prefix))
+        gap     = text.drop(prefix.length).takeWhile(PythonText.isSpace)
+        rest   <- Option.when(gap.endsWith("\n\n"))(text.drop(prefix.length + gap.length))
         system <- messages(first).text
       yield
         val head = if shown.isEmpty then system else s"$system\n\n$FixedHeader\n\n$shown"
         messages
           .updated(first, messages(first).copy(text = Some(head)))
-          .updated(last, messages(last).copy(text = Some(text.drop(prefix.length + 2))))
+          .updated(last, messages(last).copy(text = Some(rest)))
     changed.fold(prompt)(updated => prompt.copy(messages = updated))
 
   /** `context` with its adapter in a `PolicyAdapter`. The adapter is the adapter of `context`, else a chat adapter, as

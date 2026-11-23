@@ -2857,6 +2857,13 @@ These points are proposals for the review:
     come after it. So each request of a turn starts with the same messages, and the endpoint can reuse them from its
     cache. An empty field does not move, and a request that does not match stays as it is. The chat adapter of DSPy
     does not change.
+  - The chat adapter strips the white space at the two ends of the whole user text, as `strip()` in DSPy. `memory` is
+    the last fixed field, so the text of the fixed fields alone loses the white space at the end of the memory. The
+    last message keeps it, because the status comes after it. So the rule accepts white space after the fixed fields
+    up to a blank line, and it removes all of it. In the live sessions of 2026-11-15 and 2026-11-16, 17 policy
+    requests had a memory line that was cut after a space. The first rule wanted an exact blank line, so each step of
+    those turns kept the fixed fields after the history, with no reuse from the cache. With an empty memory, the first
+    rule also left a line end at the start of the last message. Fixed on 2026-11-22.
   - A live run with two turns after these changes: the endpoint reused 3,072 of 3,418 prompt tokens at the second step
     of a turn, and 3,072 of 3,443 at the first step of the next turn. Each instruction text came one time.
 - The job table belongs to the open session in the host, not to the activation, so a new activation keeps the jobs.

@@ -89,6 +89,24 @@ class PolicyPromptLaws extends munit.FunSuite:
     assert(!request.messages.last.text.exists(_.contains("[[ ## memory ## ]]")), request.messages.last.toString)
   }
 
+  test("Prompt: a memory with white space at its end still goes to the system message") {
+    // Live sessions of 2026-11-15 and 2026-11-16 (8b418720 and the controller): a memory line that was cut after a
+    // space kept each fixed field of the turn in the last message, so the endpoint reused no start from its cache.
+    Vector("FAKE-MEMORY ", "FAKE-MEMORY   ", "FAKE-MEMORY\n", "FAKE-MEMORY \t\n ").foreach { memory =>
+      val request = requestOf(input.copy(memory = memory))
+      assert(system(request).endsWith(fixed), s"${memory.length}: ${system(request).takeRight(200)}")
+      val last = request.messages.last.text.getOrElse("")
+      assert(last.startsWith("[[ ## status ## ]]\nFAKE-STATUS"), s"${memory.length}: ${last.take(200)}")
+      assert(!last.contains("FAKE-MEMORY"), s"${memory.length}: ${last.take(200)}")
+    }
+  }
+
+  test("Prompt: with an empty memory, the last message starts with the status, with no blank line before it") {
+    // The first request of each session of 2026-11-22 started its last message with a line end.
+    val last = requestOf(input.copy(memory = "")).messages.last.text.getOrElse("")
+    assert(last.startsWith("[[ ## status ## ]]\nFAKE-STATUS"), last.take(200))
+  }
+
   test("Prompt: a request whose last message does not start with the fixed fields stays as it is") {
     import dspy4s.adapters.contracts.FormattedPrompt
     import dspy4s.lm.contracts.Message
